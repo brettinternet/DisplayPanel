@@ -271,14 +271,8 @@ final class CLIParserTests: XCTestCase {
              "--panelctl-other-rule-display", sibling] + ["--watch", "--idle-after", "10"]
         ]
         for arguments in invalid {
-            XCTAssertThrowsError(try CLIParser.parse(["blackout"] + arguments)) { error in
-                if arguments.contains("--all") {
-                    XCTAssertEqual(error as? CLIParseError, .invalidOtherRuleDisplay)
-                } else if arguments.contains("--panelctl-hidden-display") {
-                    XCTAssertEqual(error as? CLIParseError, .invalidOtherRuleDisplay)
-                } else {
-                    XCTAssertEqual(error as? CLIParseError, .invalidOtherRuleDisplay)
-                }
+            XCTAssertThrowsError(try CLIParser.parse(["blackout"] + arguments)) {
+                XCTAssertEqual($0 as? CLIParseError, .invalidOtherRuleDisplay)
             }
         }
         XCTAssertThrowsError(try CLIParser.parse([
