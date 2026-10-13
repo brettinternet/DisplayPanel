@@ -306,11 +306,12 @@ public enum DisplayHandoff {
 
     /// Reads the shared default journal under the same operation/journal locks
     /// as CLI writers. Exact observed restoration may resolve a mirror journal;
-    /// this path never writes display topology or monitor input.
-    public static func inspect() -> DisplayHandoffStatus {
+    /// preservingMirrorIntent leaves journal state untouched during automatic
+    /// re-link settlement. Neither path writes display topology or monitor input.
+    public static func inspect(preservingMirrorIntent: Bool = false) -> DisplayHandoffStatus {
         let status: DisplayHideStatus
         do {
-            status = try DisplayHideController().inspect()
+            status = try DisplayHideController().inspect(preservingMirrorIntent: preservingMirrorIntent)
         } catch {
             let path = defaultJournalPath
             let message = error.localizedDescription

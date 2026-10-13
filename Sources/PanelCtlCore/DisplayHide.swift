@@ -182,7 +182,9 @@ public struct DisplayHideController {
         self.operationLock = operationLock
     }
 
-    public func inspect() throws -> DisplayHideStatus {
+    /// Automatic re-link settlement must observe without retiring hidden intent
+    /// or erasing interrupted-operation evidence, even at the exact baseline.
+    public func inspect(preservingMirrorIntent: Bool = false) throws -> DisplayHideStatus {
         let operation = operationLock()
         try operation.lock()
         defer { operation.unlock() }
@@ -197,11 +199,11 @@ public struct DisplayHideController {
 
         var journal = try store.load()
         if journal.publicMirrorSession != nil {
-            mirror.reconcileSession(&journal, current: current, store: store)
+            if !preservingMirrorIntent { mirror.reconcileSession(&journal, current: current, store: store) }
             return statusForMirrorSession(journal, records: records, current: current)
         }
         let isMirror = journal.mirrorTargetID != nil && journal.mirrorSourceID != nil
-        if !journal.state.resolved, isMirror, (try? journal.snapshot.verify(current)) != nil {
+        if !preservingMirrorIntent, !journal.state.resolved, isMirror, (try? journal.snapshot.verify(current)) != nil {
             // Accept a macOS/system restoration only after exact public snapshot
             // verification. This retires journal intent without topology writes.
             journal.state = .verified

@@ -102,6 +102,52 @@ Hide is session-only: after logout or reboot, macOS loads its own layout. If
 macOS brings back a mirror itself, PanelCtl shows that display as **Mirrored**;
 turn off mirroring in System Settings → Displays.
 
+## Monitor input return while hidden
+
+While the app stays running, a hidden monitor returning to the Mac's input can
+cause macOS to drop mirrors or shift the visible desktop without a Mac sleep.
+PanelCtl preserves the last verified hidden set before inspecting that change.
+Repair is on by default: after quiet notifications and two matching topology
+samples, within a fixed 15-second window, it reapplies the hidden set and saved
+visible origins/main together in at most one session transaction. Intact mirrors
+with a shifted layout are repaired too; an already-correct layout is a no-op.
+There are no DDC/input writes, automatic Shows or permanent configuration writes.
+
+Attribution is conservative. A CoreGraphics **add (16)** or **remove (32)** flag
+must name a captured hidden target or its source. Begin, mirror/unmirror, mode,
+move, main, enabled/disabled and desktop-shape flags alone are not link evidence:
+enable/disable can accompany manual unmirroring. Without add/remove evidence,
+normal inspection still accepts an exact system restoration, including turning
+off mirroring in **System Settings → Displays**. macOS cannot identify whether a
+person or the system caused a re-link; a simultaneous manual change with link
+evidence may therefore be repaired. No hidden session means no repair.
+
+Callbacks received during app Hide/Show and the following one-second guard,
+or queued across an operation boundary, cannot authorize repair. Sleep/wake owns
+its lifecycle. Explicit Hide/Show cancels pending repair. Changed/ambiguous IDs,
+a changed journal or baseline, unrelated mirrors, changed visible modes,
+unrepresentable origins, interrupted operations, missing displays and unsettled
+topology cause no write. A failed or unverified transaction stops without retry.
+The journal is retained, and the display's result directs you to correct the
+layout in System Settings and inspect recovery. A late return does not revive
+expired intent; use explicit recovery. Settlement and the background automation
+observer inspect without reconciling away journal intent or interruption evidence.
+
+Per-display numeric flags, attribution/suppression and repair outcomes are in the
+`display-reconfiguration` unified-log category. Observing this log is read-only:
+
+```sh
+log stream --level info --style compact --predicate 'subsystem == "com.brettinternet.panelctl" AND category == "display-reconfiguration"'
+```
+
+Fake-backed tests cover baseline restoration, lost/intact mirror drift, manual
+unmirror, own notifications, timeout, changed identities/journals and failed
+verification without feedback loops. **Hardware limit:** the reported monitor's
+actual input-return flags and driver timing remain unverified. A return that emits
+only mode/mirror/move flags is intentionally not repaired. Passive logging needs
+no display writes; a live repair trial still requires separate scoped approval.
+No live trial was performed for TASK-78.
+
 ## Snapshot
 
 | Saved | Not saved or restored |

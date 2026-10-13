@@ -932,6 +932,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func installScreenObservers() {
+        model.displayReconfigurationEvents.start { [weak self] display, flags, ownOperation in
+            guard let self, !self.terminationPending else { return }
+            self.model.displayReconfigured(display: display, flags: flags, ownOperation: ownOperation)
+        }
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(screenConfigurationChanged),

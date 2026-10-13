@@ -123,6 +123,16 @@ Show: restore layout → verify → switch input back (optional)
   same displays return safely. Wake can repair lost mirrors and shifted layout
   without switching monitor inputs; identity changes or failed verification
   remain in recovery. See [wake recovery](display-recovery.md#sleep-wake-and-reboot).
+- Outside sleep, a hidden monitor re-linking to the Mac also triggers guarded
+  repair by default when CoreGraphics reports add/remove evidence for it or its
+  mirror source. Within 15 seconds of settled topology, PanelCtl restores the
+  hidden set and saved visible layout/main in one session transaction, without
+  switching inputs or showing a display. Manual unmirror without link evidence
+  keeps its existing behavior. Changed identities/modes/journals, missing displays,
+  interrupted operations or failed verification stop repair and retain recovery;
+  no retry is queued. The actual flags from monitor input return remain an
+  unverified hardware limit. See [input-return recovery](display-recovery.md#monitor-input-return-while-hidden)
+  for attribution limits and passive logging.
 - With **Don't switch**, Hide and Show send no DDC commands. Use the monitor's
   input button if needed.
 

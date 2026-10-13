@@ -531,7 +531,7 @@ public final class BlackoutController {
             playbackAssertionActive: playbackAssertionIsActive,
             cameraCaptureActive: cameraCaptureIsActive,
             statusHandler: nil,
-            mirrorHandoffStatus: DisplayHandoff.inspect
+            mirrorHandoffStatus: { DisplayHandoff.inspect(preservingMirrorIntent: true) }
         )
     }
 
@@ -544,7 +544,7 @@ public final class BlackoutController {
             playbackAssertionActive: playbackAssertionIsActive,
             cameraCaptureActive: cameraCaptureIsActive,
             statusHandler: statusHandler,
-            mirrorHandoffStatus: DisplayHandoff.inspect
+            mirrorHandoffStatus: { DisplayHandoff.inspect(preservingMirrorIntent: true) }
         )
     }
 
@@ -555,7 +555,9 @@ public final class BlackoutController {
         cameraCaptureActive: @escaping () -> Bool = cameraCaptureIsActive,
         occupancySource: DisplayOccupancySource = CoreGraphicsDisplayOccupancySource(),
         statusHandler: ((BlackoutRuntimeStatus) -> Void)? = nil,
-        mirrorHandoffStatus: @escaping () -> DisplayHandoffStatus = DisplayHandoff.inspect
+        // A background observer must not retire intent while the app is
+        // attributing a re-link or erase an interrupted operation's evidence.
+        mirrorHandoffStatus: @escaping () -> DisplayHandoffStatus = { DisplayHandoff.inspect(preservingMirrorIntent: true) }
     ) {
         self.idleSource = idleSource
         self.uptime = uptime

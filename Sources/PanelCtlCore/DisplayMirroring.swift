@@ -557,6 +557,14 @@ struct MirrorController {
             }
         }
         try validateAwake()
+        // A repeated/own-write notification is not another write. Mirror-only
+        // verification is insufficient here: visible origins/main must match too.
+        if journal.state == .mirrored,
+           MirrorSessionTopology.matches(baseline: session.baseline, removals: session.removals, current: before),
+           before.displays.first(where: \.main)?.uuid == mainUUID,
+           origins.allSatisfy({ id, x, y in before.displays.contains { $0.id == id && $0.x == x && $0.y == y } }) {
+            return journal
+        }
         // Keep the original journal/baseline/removal IDs. Intent is durable
         // before staging, and a failed/consumed transaction is never retried.
         for index in session.removals.indices where ids.contains(session.removals[index].id.uuidString.lowercased()) {

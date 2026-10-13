@@ -1079,7 +1079,11 @@ final class DisplayHideAppTests: XCTestCase {
     func testHideAndShowReportDesktopAndInputResultsInline() async throws {
         let defaults = try makeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
-        let hidden = handoffStatus(.hidden, target: displays[1], source: displays[0], journalID: "input-journal", canShow: true)
+        let hidden = handoffStatus(.hidden, target: displays[1], source: displays[0], journalID: "input-journal", canShow: true,
+                                   baselineIdentity: "input-baseline")
+        var ownReconfiguration: () -> Void = {}
+        var rehideCalls = 0
+        var suppressedEvents = 0
         let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
         var awayInputs: [UInt8?] = []
         var returnInputs: [UInt8?] = []
@@ -1089,13 +1093,16 @@ final class DisplayHideAppTests: XCTestCase {
             status: { box.value },
             hideDisplay: { _, _, input in
                 awayInputs.append(input)
+                ownReconfiguration()
                 box.value = hidden
                 return DisplayInputOutcome(
                     state: .verified, requestedInput: input, observedInput: input,
                     recoveryCommand: "panelctl ddc-input --display '\(Self.targetUUID)' --set 0x0F"
                 )
             },
+            sleepResumeHideDisplay: { _, _, _ in rehideCalls += 1; return .notRequested },
             showDisplay: { journalID, input in
+                ownReconfiguration()
                 XCTAssertEqual(journalID, "input-journal")
                 returnInputs.append(input)
                 box.value = self.handoffStatus(.none, target: nil, source: nil)
@@ -1112,6 +1119,14 @@ final class DisplayHideAppTests: XCTestCase {
         model.setHideEnabled(true, for: displays[1])
         model.setHideSwitchInput(0x11, for: Self.targetUUID)
         model.detectMacInput(for: Self.targetUUID)
+        model.displayReconfigurationEvents.start { [weak model] display, flags, own in
+            if own { suppressedEvents += 1 }
+            model?.displayReconfigured(display: display, flags: flags, ownOperation: own)
+        }
+        defer { model.displayReconfigurationEvents.stop() }
+        ownReconfiguration = { [weak model] in
+            model?.displayReconfigurationEvents.receive(display: 202, flags: .addFlag)
+        }
 
         let hiddenResult = try await hideAndWait(model)
         XCTAssertEqual(awayInputs, [0x11])
@@ -1170,6 +1185,9 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertFalse(model.canDismissInputWarning(for: Self.targetUUID))
         XCTAssertEqual(awayInputs, [0x11])
         XCTAssertEqual(returnInputs, [0x0F], "dismissal never invokes a display operation")
+        try await waitUntil { suppressedEvents >= 2 }
+        XCTAssertEqual(rehideCalls, 0, "callbacks queued inside Hide/Show remain suppressed after the writer returns")
+        XCTAssertFalse(model.displayLifecycleTransitioning)
     }
 
     func testHideInspectionFailurePreservesReturnedInputOutcome() async throws {
@@ -1901,7 +1919,97 @@ final class DisplayHideAppTests: XCTestCase {
         try await exerciseWakeCore(layoutDrift: true)
     }
 
-    private func exerciseWakeCore(layoutDrift: Bool) async throws {
+    func testInputReturnRepairsBaselineLostMirrorsAndIntactMirrorDriftOnce() async throws {
+        for scenario in ["baseline", "lost", "intact"] {
+            try await exerciseWakeCore(layoutDrift: scenario == "lost", inputReturn: scenario)
+        }
+    }
+
+    func testInputReturnDoesNotOverrideManualUnmirrorOrOwnNotifications() async throws {
+        for scenario in ["manual", "manual-sleep", "unrelated", "own", "delayed-own"] {
+            try await exerciseWakeCore(layoutDrift: false, inputReturn: scenario)
+        }
+    }
+
+    func testInputReturnFailedVerificationNeverLoops() async throws {
+        for scenario in ["failed-verification", "commit-failure"] {
+            try await exerciseWakeCore(layoutDrift: false, inputReturn: scenario)
+        }
+    }
+
+    func testInputReturnDoesNotReconcileAwayAnInterruptedShow() async throws {
+        try await exerciseWakeCore(layoutDrift: false, inputReturn: "interrupted-show")
+    }
+
+    func testInputReturnRefusesUnrepresentableOriginsWithoutWriting() async throws {
+        try await exerciseWakeCore(layoutDrift: false, inputReturn: "unrepresentable")
+    }
+
+    func testInputReturnRefusesMissingUnsettledChangedOrInterruptedState() async throws {
+        for scenario in ["missing", "unsettled", "identity", "duplicate", "journal", "show", "sleep", "unlock"] {
+            let defaults = try makeDefaults()
+            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
+            let removal = sleepRemoval(id: "entry", target: displays[1], source: displays[0], resolved: false)
+            var status = multiHandoffStatus([removal], observations: [], journalID: "journal",
+                                           state: .hidden, baselineIdentity: "baseline")
+            var connected = displays
+            var clock = Date()
+            var writes = 0
+            var inspections = 0
+            var changing = false
+            let model = AppModel(
+                defaults: defaults, displayProvider: { connected }, now: { clock },
+                inspectHandoff: {
+                    if changing {
+                        inspections += 1
+                        if inspections == 4 { clock.addTimeInterval(16) }
+                        return self.multiHandoffStatus([removal], observations: [], journalID: "journal",
+                            state: .hidden, baselineIdentity: "baseline", observedTopologyIdentity: "topology-\(inspections)")
+                    }
+                    return status
+                },
+                sleepResumeHideDisplay: { _, _, _ in writes += 1; return .notRequested },
+                showDisplay: { _, _ in .notRequested },
+                quiesceProtection: { $0(true, nil) }, displayWakeSettleDelay: 0.01
+            )
+            try await waitUntil { !model.protectionQuiescencePending }
+            model.displayReconfigured(display: 202, flags: .removeFlag)
+            switch scenario {
+            case "missing":
+                connected.remove(at: 1)
+                try await Task.sleep(nanoseconds: 40_000_000)
+                XCTAssertTrue(model.displayLifecycleTransitioning)
+                clock.addTimeInterval(16)
+                model.displayReconfigured(display: 202, flags: .removeFlag)
+            case "unsettled": changing = true
+            case "identity": connected[1] = Self.display(index: 2, id: 999, uuid: Self.targetUUID, name: "Target", main: false)
+            case "duplicate": connected.append(connected[1])
+            case "journal": status = multiHandoffStatus([removal], observations: [], journalID: "replacement",
+                                                        state: .hidden, baselineIdentity: "baseline")
+            case "show": model.show(targetUUID: Self.targetUUID)
+            case "unlock": model.displayConfigurationChanged(restartWatcher: true)
+            case "sleep":
+                model.beginDisplaySleepTransition()
+                model.displayReconfigured(display: 202, flags: .addFlag)
+                try await Task.sleep(nanoseconds: 40_000_000)
+                XCTAssertEqual(writes, 0)
+                model.displayWakeObserved(screensAwake: true)
+            default: XCTFail("unknown scenario")
+            }
+            try await waitUntil { !model.displayLifecycleTransitioning }
+            XCTAssertEqual(writes, 0, scenario)
+            if !["show", "sleep"].contains(scenario) {
+                XCTAssertTrue(model.displayResults[Self.targetKey]?.message.contains("inspect recovery") == true, scenario)
+                connected = displays
+                changing = false
+                model.displayReconfigured(display: 202, flags: .addFlag)
+                try await Task.sleep(nanoseconds: 30_000_000)
+                XCTAssertEqual(writes, 0, "a late return or repeated event must not revive refused intent")
+            }
+        }
+    }
+
+    private func exerciseWakeCore(layoutDrift: Bool, inputReturn: String? = nil) async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("panelctl-app-wake-core-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
@@ -1910,9 +2018,20 @@ final class DisplayHideAppTests: XCTestCase {
         let journalStore = RecoveryStore(url: directory.appendingPathComponent("current.json"))
         let operationStore = RecoveryStore(url: directory.appendingPathComponent("operation"))
         let savedAt = Date(timeIntervalSince1970: 1_700_000_000)
-        let baseline = try appRecoverySnapshot(capturedAt: savedAt)
+        let baseline = try appRecoverySnapshot(capturedAt: savedAt) { records in
+            if inputReturn == "unrepresentable" {
+                records[0]["main"] = false
+                records[1]["main"] = true
+                records[1]["x"] = 0
+                records[0]["x"] = Int32.min
+                records[3]["x"] = Int32.max
+            }
+        }
         let firstHidden = try appRecoverySnapshot(capturedAt: savedAt.addingTimeInterval(1), mirroredIDs: [202])
-        var fakeTopology = try appRecoverySnapshot(capturedAt: savedAt.addingTimeInterval(2), mirroredIDs: [202, 303])
+        var fakeTopology = try appRecoverySnapshot(capturedAt: savedAt.addingTimeInterval(2), mirroredIDs: [202, 303]) {
+            // A valid ordinary Hide can leave visible origins off baseline.
+            if inputReturn == "delayed-own" { $0[3]["x"] = 900 }
+        }
         let removals = [
             PublicMirrorRemoval(target: baseline.displays[1], source: baseline.displays[0],
                                 beforeOperation: baseline, state: .mirrored),
@@ -1943,11 +2062,14 @@ final class DisplayHideAppTests: XCTestCase {
                 guard pendingTarget != nil else {
                     throw RecoveryError.unsafe("fake mirror transaction had no staged target")
                 }
+                commits += 1
+                if inputReturn == "commit-failure" { throw RecoveryError.unsafe("synthetic commit failure") }
                 fakeTopology = try self.appRecoverySnapshot(
                     capturedAt: Date(), mirroredIDs: Set(stagedTargets)
-                )
+                ) { records in
+                    if inputReturn == "failed-verification" { records[3]["x"] = 700 }
+                }
                 pendingTarget = nil
-                commits += 1
             },
             cancel: { _ in },
             stageOrigin: { _, id, x, y in origins[id] = [x, y] }
@@ -1984,6 +2106,13 @@ final class DisplayHideAppTests: XCTestCase {
                 }
                 return DisplayHandoff.handoffStatus(from: status)
             },
+            inspectHandoffPreservingIntent: {
+                guard let status = try? core.inspect(preservingMirrorIntent: true) else {
+                    return DisplayHandoffStatus(state: .recovery, journalPath: journalStore.url.path,
+                                                inspectionFailure: "synthetic core inspection failed")
+                }
+                return DisplayHandoff.handoffStatus(from: status)
+            },
             hideDisplay: { _, _, _ in
                 throw RecoveryError.unsafe("automatic resume must use the guarded core expectation path")
             },
@@ -1996,15 +2125,46 @@ final class DisplayHideAppTests: XCTestCase {
         model.refreshHandoffStatus()
         try await waitUntil { !model.protectionQuiescencePending }
         XCTAssertEqual(model.handoffStatus?.state, DisplayHandoffStatus.State.hidden)
-        model.beginDisplaySleepTransition()
+        if inputReturn == nil { model.beginDisplaySleepTransition() }
 
         // The recorded failure first leaves the off-input target inactive,
         // then returns it as main with a reduced mode and shifted desktops.
         savedTargetModeUnavailable = layoutDrift
-        fakeTopology = try appRecoverySnapshot(capturedAt: Date(timeIntervalSince1970: 1_800_000_000)) {
+        fakeTopology = try appRecoverySnapshot(capturedAt: Date(timeIntervalSince1970: 1_800_000_000),
+                                               mirroredIDs: ["intact", "delayed-own"].contains(inputReturn ?? "") ? [202, 303] : []) {
             if layoutDrift { $0[1]["active"] = false }
+            if ["intact", "delayed-own"].contains(inputReturn ?? "") { $0[3]["x"] = 900 }
         }
-        model.displayWakeObserved(screensAwake: true)
+        if inputReturn == "interrupted-show" {
+            var interrupted = try journalStore.load()
+            interrupted.publicMirrorSession?.removals[0].state = .restoring
+            interrupted.publicMirrorSession?.removals[0].restoreFrom = baseline
+            try journalStore.lock()
+            try journalStore.save(interrupted)
+            journalStore.unlock()
+        }
+        if let inputReturn {
+            // AppKit can arrive first. Its deferred inspection must not erase
+            // the intent before the flag-bearing callback is delivered.
+            model.displayParametersChanged()
+            switch inputReturn {
+            case "manual", "manual-sleep":
+                model.displayReconfigured(display: 202, flags: [.unMirrorFlag, .enabledFlag, .movedFlag])
+                if inputReturn == "manual-sleep" {
+                    model.beginDisplaySleepTransition()
+                    model.displayWakeObserved(screensAwake: true)
+                }
+            case "unrelated":
+                model.displayReconfigured(display: 404, flags: .addFlag)
+            case "own":
+                model.displayReconfigured(display: 202, flags: .addFlag, ownOperation: true)
+            default:
+                model.displayReconfigured(display: 101, flags: .beginConfigurationFlag)
+                model.displayReconfigured(display: 202, flags: .addFlag)
+            }
+        } else {
+            model.displayWakeObserved(screensAwake: true)
+        }
         if layoutDrift {
             try await Task.sleep(nanoseconds: 50_000_000)
             XCTAssertTrue(model.displayLifecycleTransitioning, "do not consume intent during temporary inactivity")
@@ -2025,13 +2185,62 @@ final class DisplayHideAppTests: XCTestCase {
         }
         try await waitUntil { !model.displayLifecycleTransitioning }
 
-        let final = try core.inspect()
+        let final = try core.inspect(preservingMirrorIntent: inputReturn != nil)
+        if inputReturn == "interrupted-show" {
+            XCTAssertEqual(commits, 0)
+            XCTAssertEqual(try journalStore.load().publicMirrorSession?.removals[0].state, .restoring)
+            XCTAssertNotNil(try journalStore.load().publicMirrorSession?.removals[0].restoreFrom)
+            XCTAssertTrue(model.displayResults[Self.targetKey]?.message.contains("inspect recovery") == true)
+            return
+        }
+        if inputReturn == "delayed-own" {
+            XCTAssertEqual(commits, 0, "unchanged post-Hide topology must not be corrected by delayed own events")
+            XCTAssertEqual(ddcCalls, 0)
+            XCTAssertEqual(fakeTopology.displays.first { $0.id == 404 }?.x, 900)
+            XCTAssertTrue(final.journal?.mirrorTopologyVerified == true)
+            return
+        }
+        if ["manual", "manual-sleep", "unrelated", "own"].contains(inputReturn ?? "") {
+            XCTAssertEqual(commits, 0)
+            XCTAssertEqual(ddcCalls, 0)
+            XCTAssertEqual(final.removals.filter(\.isUnresolved).count, 0,
+                           "without link evidence the exact system restoration remains accepted")
+            return
+        }
+        if inputReturn == "unrepresentable" {
+            XCTAssertEqual(commits, 0)
+            XCTAssertEqual(ddcCalls, 0)
+            XCTAssertTrue(model.displayResults[Self.targetKey]?.message.contains("unrepresentable") == true)
+            XCTAssertEqual(try journalStore.load().id, journal.id)
+            return
+        }
+        if ["failed-verification", "commit-failure"].contains(inputReturn ?? "") {
+            XCTAssertEqual(commits, 1)
+            XCTAssertEqual(final.journal?.state, "needsAttention")
+            XCTAssertTrue(model.displayResults[Self.targetKey]?.message.contains("monitor re-link") == true)
+            model.displayReconfigured(display: 202, flags: .addFlag)
+            model.displayParametersChanged()
+            try await Task.sleep(nanoseconds: 50_000_000)
+            XCTAssertEqual(commits, 1, "failed verification cannot be retried by feedback")
+            XCTAssertEqual(try journalStore.load().id, journal.id)
+            return
+        }
         XCTAssertEqual(final.journal?.state, RecoveryState.mirrored.rawValue)
         XCTAssertEqual(final.removals.filter { $0.isUnresolved }.count, 2)
         XCTAssertEqual(stagedTargets, [202, 303])
-        XCTAssertEqual(commits, layoutDrift ? 1 : 2)
+        XCTAssertEqual(commits, layoutDrift || inputReturn != nil ? 1 : 2)
         XCTAssertEqual(ddcCalls, 0)
         XCTAssertEqual(final.journal?.baselineIdentity, baseline.stableTopologyIdentity())
+        if inputReturn != nil {
+            XCTAssertEqual(origins, [101: [0, 0], 404: [-1920, 0]])
+            XCTAssertEqual(try journalStore.load().id, journal.id)
+            // Repeated or late own-write notifications can at most inspect a
+            // core no-op; they cannot generate a second transaction.
+            model.displayReconfigured(display: 202, flags: .addFlag)
+            model.displayParametersChanged()
+            try await waitUntil { !model.displayLifecycleTransitioning }
+            XCTAssertEqual(commits, 1)
+        }
         if layoutDrift {
             XCTAssertEqual(origins, [101: [0, 0], 404: [-1920, 0]])
             XCTAssertEqual(try journalStore.load().id, journal.id)

@@ -1,6 +1,9 @@
 import AppKit
 import Foundation
 import PanelCtlCore
+import OSLog
+
+private let inputReturnLogger = Logger(subsystem: "com.brettinternet.panelctl", category: "display-reconfiguration")
 
 struct AppNotice: Identifiable, Equatable {
     let id = UUID()
@@ -13,6 +16,8 @@ typealias ProtectionQuiesce = (@escaping (Bool, String?) -> Void) -> Void
 
 private struct SleepHideResumeIntent {
     let journalID: String
+    let journalIdentity: String?
+    let observedTopologyIdentity: String?
     let baselineIdentity: String
     let journalRemovals: [DisplayHandoffRemoval]
     let removals: [DisplayHandoffRemoval]
@@ -117,7 +122,13 @@ final class AppModel: ObservableObject {
     /// Last Hide or Show outcome per display, keyed by lowercased target UUID.
     /// Input outcomes are session evidence, not a claim about the monitor's current input.
     @Published private(set) var displayResults: [String: DisplayOperationResult] = [:]
-    @Published private(set) var hideOperation: DisplayHideOperation = .idle
+    @Published private(set) var hideOperation: DisplayHideOperation = .idle {
+        didSet {
+            displayReconfigurationEvents.operationChanged(busy: hideOperation.isBusy)
+            if hideOperation.isBusy { cancelInputReturnSettlement() }
+        }
+    }
+    let displayReconfigurationEvents = DisplayReconfigurationEvents()
     /// Displays Hide blacked out, keyed by lowercased UUID. They stay hidden
     /// through display changes until Show; quitting shows them.
     @Published private(set) var blackoutHiddenDisplays: [String: DisplayIdentitySnapshot] = [:] {
@@ -213,6 +224,7 @@ final class AppModel: ObservableObject {
     private let sleepDisplays: () throws -> Void
     private let isDisplayMirrored: (UInt32) -> Bool
     private let inspectHandoff: () -> DisplayHandoffStatus
+    private let inspectHandoffPreservingIntent: () -> DisplayHandoffStatus
     private let hideDisplay: (DisplayHideIdentity, DisplayHideIdentity, UInt8?) throws -> DisplayInputOutcome
     private let sleepResumeHideDisplay: (DisplayHideIdentity, DisplayHideIdentity, DisplayHideWakeExpectation) throws -> DisplayInputOutcome
     private let showDisplay: (String, UInt8?) throws -> DisplayInputOutcome
@@ -230,6 +242,12 @@ final class AppModel: ObservableObject {
     private var sleepWakeSettlement: Task<Void, Never>?
     private let displayWakeSettleDelay: TimeInterval
     private var sleepWakeDeadline: Date?
+    private var inputReturnIntent: SleepHideResumeIntent?
+    private var inputReturnSettlement: Task<Void, Never>?
+    private var inputReturnDeadline: Date?
+    private var inputReturnAttributed = false
+    private var inputReturnSample: String?
+    private var inputReturnRepairFailed = false
     private static let preferencesKey = "blackoutPreferences"
     private static let automationPreferencesKey = "automationRules"
     private static let hidePreferencesKey = "displayHidePreferences"
@@ -257,7 +275,8 @@ final class AppModel: ObservableObject {
         },
         sleepDisplays: @escaping () throws -> Void = DisplaySleepController.sleep,
         isDisplayMirrored: @escaping (UInt32) -> Bool = { CGDisplayIsInMirrorSet($0) != 0 },
-        inspectHandoff: @escaping () -> DisplayHandoffStatus = DisplayHandoff.inspect,
+        inspectHandoff: (() -> DisplayHandoffStatus)? = nil,
+        inspectHandoffPreservingIntent: (() -> DisplayHandoffStatus)? = nil,
         hideDisplay: @escaping (DisplayHideIdentity, DisplayHideIdentity, UInt8?) throws -> DisplayInputOutcome = {
             try DisplayHideController().hide(target: $0, source: $1, awayInput: $2)
         },
@@ -313,7 +332,10 @@ final class AppModel: ObservableObject {
         self.idleSecondsProvider = idleSecondsProvider
         self.sleepDisplays = sleepDisplays
         self.isDisplayMirrored = isDisplayMirrored
-        self.inspectHandoff = inspectHandoff
+        self.inspectHandoff = inspectHandoff ?? { DisplayHandoff.inspect() }
+        self.inspectHandoffPreservingIntent = inspectHandoffPreservingIntent ?? inspectHandoff ?? {
+            DisplayHandoff.inspect(preservingMirrorIntent: true)
+        }
         self.hideDisplay = hideDisplay
         self.sleepResumeHideDisplay = sleepResumeHideDisplay
         self.showDisplay = showDisplay
@@ -4054,13 +4076,20 @@ final class AppModel: ObservableObject {
     }
 
     func beginDisplaySleepTransition() {
+        let pendingInputIntent = inputReturnAttributed ? inputReturnIntent : nil
+        let inspectUnattributedChange = inputReturnIntent != nil && !inputReturnAttributed
+        cancelInputReturnSettlement(endLifecycle: false)
         sleepWakeSettlement?.cancel()
         sleepWakeSettlement = nil
         screensAwakeAfterSleep = false
         sleepWakeDeadline = nil
         if !sleepLifecycleActive {
             sleepLifecycleActive = true
-            sleepHideResumeIntent = runningDisplayAction == nil ? captureSleepHideResumeIntent() : nil
+            // Do not carry stale hidden intent across an unattributed manual
+            // unmirror merely because sleep arrived before event settlement.
+            if inspectUnattributedChange { refreshHandoffStatus() }
+            sleepHideResumeIntent = runningDisplayAction == nil && !hideOperation.isBusy
+                ? (pendingInputIntent ?? captureSleepHideResumeIntent()) : nil
         }
         setDisplayLifecycleTransitioning(true)
     }
@@ -4094,10 +4123,25 @@ final class AppModel: ObservableObject {
         // If it matches our latest verified inventory, nothing new changed.
         // Real inventory changes outside the writer still interrupt the run.
         if runningDisplayAction != nil, displayProvider() == displays { return }
+        if !sleepLifecycleActive, !hideOperation.isBusy, runningDisplayAction == nil,
+           beginInputReturnSettlement() {
+            inputReturnSample = nil
+            scheduleInputReturnSettlement()
+            return
+        }
         displayConfigurationChanged(restartWatcher: true)
     }
 
     func displayConfigurationChanged(restartWatcher: Bool) {
+        if !sleepLifecycleActive, let intent = inputReturnIntent {
+            let attributed = inputReturnAttributed
+            cancelInputReturnSettlement()
+            if attributed {
+                inputReturnRepairFailed = true
+                recordSleepResumeFailure(intent.removals.first, reason: "Another display lifecycle transition interrupted input-return repair. No write was attempted.", context: "after a monitor re-link")
+                inputReturnLogger.error("repair=interrupted; inspect recovery")
+            }
+        }
         setDisplayLifecycleTransitioning(true)
         refreshDisplays(restartWatcher: restartWatcher)
         if sleepLifecycleActive {
@@ -4111,6 +4155,8 @@ final class AppModel: ObservableObject {
         // Keep wake settlement alive so lifecycle gates clear, but discard the
         // intent before any scheduled re-hide can run.
         sleepHideResumeIntent = nil
+        cancelInputReturnSettlement()
+        inputReturnRepairFailed = false
     }
 
     func setDisplayLifecycleTransitioning(_ transitioning: Bool) {
@@ -4152,7 +4198,8 @@ final class AppModel: ObservableObject {
         let wasUnresolved = previous?.hasUnresolvedJournal == true || previousFailure != nil
         let actionRunActive = runningDisplayAction != nil || preflightingDisplayAction
         handoffInspectionFailure = nil
-        handoffStatus = inspectHandoff()
+        handoffStatus = inputReturnIntent != nil || inputReturnRepairFailed
+            ? inspectHandoffPreservingIntent() : inspectHandoff()
         handoffInspectionFailure = handoffStatus?.inspectionFailure
         let isUnresolved = handoffStatus?.hasUnresolvedJournal == true || handoffInspectionFailure != nil
         if preflightingDisplayAction, isUnresolved != wasUnresolved {
@@ -4182,6 +4229,124 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Begin and AppKit notifications collect intent before inspection can
+    /// retire removals. Only add/remove is link evidence: enabled/disabled can
+    /// also accompany a user's manual unmirror in System Settings.
+    func displayReconfigured(display: UInt32, flags: CGDisplayChangeSummaryFlags,
+                             ownOperation: Bool = false) {
+        guard !ownOperation, !isShuttingDown, !sleepLifecycleActive,
+              !hideOperation.isBusy, runningDisplayAction == nil,
+              !disconnectAutomationPaused else {
+            inputReturnLogger.info("display=\(display) flags=\(flags.rawValue) attribution=suppressed-operation-or-sleep")
+            return
+        }
+        guard beginInputReturnSettlement(), let intent = inputReturnIntent else {
+            inputReturnLogger.info("display=\(display) flags=\(flags.rawValue) attribution=no-verified-intent")
+            return
+        }
+        let related = intent.removals.contains { $0.target.id == display || $0.source.id == display }
+        let linked = !flags.intersection([.addFlag, .removeFlag]).isEmpty && !flags.contains(.beginConfigurationFlag)
+        inputReturnAttributed = inputReturnAttributed || (related && linked)
+        inputReturnLogger.info("display=\(display) flags=\(flags.rawValue) related=\(related) relink=\(linked) attributed=\(self.inputReturnAttributed)")
+        inputReturnSample = nil
+        scheduleInputReturnSettlement()
+    }
+
+    private func beginInputReturnSettlement() -> Bool {
+        if inputReturnIntent != nil { return true }
+        guard !inputReturnRepairFailed, !isShuttingDown, !disconnectAutomationPaused,
+              !protectionQuiescencePending, protectionQuiescenceFailure == nil,
+              let intent = captureSleepHideResumeIntent() else { return false }
+        inputReturnIntent = intent
+        inputReturnDeadline = now().addingTimeInterval(15)
+        inputReturnAttributed = false
+        inputReturnSample = nil
+        setDisplayLifecycleTransitioning(true)
+        return true
+    }
+
+    private func cancelInputReturnSettlement(endLifecycle: Bool = true) {
+        let wasPending = inputReturnIntent != nil
+        inputReturnSettlement?.cancel()
+        inputReturnSettlement = nil
+        inputReturnIntent = nil
+        inputReturnDeadline = nil
+        inputReturnSample = nil
+        inputReturnAttributed = false
+        if wasPending, endLifecycle, !sleepLifecycleActive { setDisplayLifecycleTransitioning(false) }
+    }
+
+    private func scheduleInputReturnSettlement() {
+        inputReturnSettlement?.cancel()
+        inputReturnSettlement = Task { [weak self] in
+            guard let self else { return }
+            let remaining = max(0, self.inputReturnDeadline?.timeIntervalSince(self.now()) ?? 0)
+            let delay = min(max(0.01, self.displayWakeSettleDelay), remaining)
+            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+            guard !Task.isCancelled else { return }
+            self.finishInputReturnSettlement()
+        }
+    }
+
+    private func finishInputReturnSettlement() {
+        guard let intent = inputReturnIntent, !sleepLifecycleActive else { return }
+        displays = displayProvider()
+        refreshHandoffStatus()
+        let topology = handoffStatus?.observedTopologyIdentity
+        let stable = topology != nil && inputReturnSample == topology
+        inputReturnSample = topology
+        let ready = intent.removals.allSatisfy {
+            matchesPresentDisplay($0.target) && matchesAwakeDisplay($0.source) &&
+                (matchesAwakeDisplay($0.target) || handoffStatus?.removal(for: $0.target.uuid)?.topologyVerified == true)
+        }
+        let identityChanged = intent.removals.flatMap { [$0.target, $0.source] }.contains { identity in
+            let found = displays.filter { $0.uuid?.caseInsensitiveCompare(identity.uuid) == .orderedSame }
+            return !found.isEmpty && (found.count != 1 || found[0].id != identity.id ||
+                found[0].vendor != identity.vendor || found[0].model != identity.model || found[0].serial != identity.serial)
+        }
+        let attributed = inputReturnAttributed
+        let expired = now() >= (inputReturnDeadline ?? now())
+        if !identityChanged, !expired, (!stable || (attributed && !ready)) {
+            scheduleInputReturnSettlement()
+            return
+        }
+        // Consume before entering the synchronous writer; callbacks cannot
+        // extend this deadline or give the transaction a second attempt.
+        cancelInputReturnSettlement(endLifecycle: false)
+        defer { setDisplayLifecycleTransitioning(false) }
+        guard attributed else {
+            refreshHandoffStatus()
+            inputReturnLogger.info("repair=not-attributed; ordinary inspection retained")
+            return
+        }
+        guard stable, ready, !identityChanged, !expired,
+              !hideOperation.isBusy, runningDisplayAction == nil,
+              !protectionQuiescencePending, protectionQuiescenceFailure == nil,
+              handoffInspectionFailure == nil, let status = handoffStatus,
+              status.journalID == intent.journalID, status.baselineIdentity == intent.baselineIdentity,
+              status.journalIdentity != nil, status.journalIdentity == intent.journalIdentity,
+              status.observedTopologyIdentity != nil,
+              sameSleepRemovalIdentities(intent.journalRemovals, in: status) else {
+            inputReturnRepairFailed = true
+            recordSleepResumeFailure(intent.removals.first, reason: "Input-return repair refused: the topology did not settle within 15 seconds, or the captured journal, identities or operation state changed.", context: "after a monitor re-link")
+            inputReturnLogger.error("repair=refused; inspect recovery")
+            return
+        }
+        // Ordinary Hide may leave visible origins different from baseline.
+        // A delayed own callback for that unchanged, verified layout must not
+        // turn into a new layout correction after the quiet guard expires.
+        if status.observedTopologyIdentity == intent.observedTopologyIdentity {
+            inputReturnLogger.info("repair=unchanged-verified-topology")
+            return
+        }
+        // Unlike wake's legacy per-target path, input return always uses the
+        // single session transaction, even with intact mirrors or a restored baseline.
+        inputReturnRepairFailed = true // Keep inspection non-reconciling through verification/failure.
+        let succeeded = resumeDriftedSleepHideIntent(intent, status: status, context: "after a monitor re-link")
+        inputReturnRepairFailed = !succeeded
+        inputReturnLogger.info("repair=\(succeeded ? "verified-or-no-op" : "failed-no-retry", privacy: .public)")
+    }
+
     private func captureSleepHideResumeIntent() -> SleepHideResumeIntent? {
         guard handoffInspectionFailure == nil, let status = handoffStatus,
               status.mirrorTopologyVerified,
@@ -4195,7 +4360,9 @@ final class AppModel: ObservableObject {
         if journalRemovals.isEmpty { journalRemovals = removals }
         guard !removals.isEmpty,
               removals.allSatisfy({ $0.state == "mirrored" && $0.topologyVerified }) else { return nil }
-        return SleepHideResumeIntent(journalID: journalID, baselineIdentity: baselineIdentity,
+        return SleepHideResumeIntent(journalID: journalID, journalIdentity: status.journalIdentity,
+                                     observedTopologyIdentity: status.observedTopologyIdentity,
+                                     baselineIdentity: baselineIdentity,
                                      journalRemovals: journalRemovals, removals: removals)
     }
 
@@ -4322,10 +4489,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func resumeDriftedSleepHideIntent(_ intent: SleepHideResumeIntent, status: DisplayHandoffStatus) {
+    @discardableResult
+    private func resumeDriftedSleepHideIntent(_ intent: SleepHideResumeIntent, status: DisplayHandoffStatus,
+                                            context: String = "after waking") -> Bool {
         guard let removal = intent.removals.first,
               let journalIdentity = status.journalIdentity,
-              let topologyIdentity = status.observedTopologyIdentity else { return }
+              let topologyIdentity = status.observedTopologyIdentity else { return false }
         hideOperation = .hiding(removal.target.uuid)
         onStatusChange?()
         defer { hideOperation = .idle; onStatusChange?() }
@@ -4343,10 +4512,12 @@ final class AppModel: ObservableObject {
             guard resumedRemovalsMatch(intent.removals, baselineIdentity: intent.baselineIdentity) else {
                 throw RecoveryError.unsafe("The resumed mirrors did not verify. The original layout journal is retained.")
             }
+            return true
         } catch {
             displays = displayProvider()
             refreshHandoffStatus()
-            recordSleepResumeFailure(removal, reason: error.localizedDescription)
+            recordSleepResumeFailure(removal, reason: error.localizedDescription, context: context)
+            return false
         }
     }
 
@@ -4413,12 +4584,13 @@ final class AppModel: ObservableObject {
             lhs.vendor == rhs.vendor && lhs.model == rhs.model && lhs.serial == rhs.serial
     }
 
-    private func recordSleepResumeFailure(_ removal: DisplayHandoffRemoval?, reason: String) {
+    private func recordSleepResumeFailure(_ removal: DisplayHandoffRemoval?, reason: String,
+                                          context: String = "after waking") {
         guard let removal else { return }
         let key = removal.target.uuid.lowercased()
         displayResults[key] = DisplayOperationResult(
             action: .hide, succeeded: false,
-            message: "PanelCtl didn’t re-hide this display after waking. \(reason) Open System Settings → Displays to correct the layout, then inspect recovery.",
+            message: "PanelCtl didn’t re-hide this display \(context). \(reason) Open System Settings → Displays to correct the layout, then inspect recovery.",
             inputMessage: nil, inputOutcome: nil, inputNeedsAttention: true
         )
         onStatusChange?()
@@ -4760,6 +4932,8 @@ final class AppModel: ObservableObject {
 
     func shutdown(completion: @escaping () -> Void) {
         isShuttingDown = true
+        cancelInputReturnSettlement()
+        displayReconfigurationEvents.stop()
         windowMovePermissionWatch?.cancel()
         stopKeepWindowsOff()
         snoozeTimer?.invalidate()
