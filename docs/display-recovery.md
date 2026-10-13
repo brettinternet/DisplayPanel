@@ -148,6 +148,66 @@ only mode/mirror/move flags is intentionally not repaired. Passive logging needs
 no display writes; a live repair trial still requires separate scoped approval.
 No live trial was performed for TASK-78.
 
+## Remembered arrangements
+
+**Displays → Arrangement protection** is separate from recovery. It is off by
+default, as is **Apply on launch**. **Remember current** saves origins and the
+main display for the exact visible display set. Save each set you use separately,
+for example three monitors and the two that remain when one is away. Remembering
+requires at least two visible displays, no mirrors and no unresolved journal.
+Only Remember updates a saved set. Forget removes it; turning protection off
+keeps saved sets and the preferred main choice.
+
+A **Preferred main** is independent of saved sets. When a set has no saved
+arrangement and that display is visible, PanelCtl makes it main by translating
+all origins equally. Relative placement stays unchanged. A saved arrangement
+always takes precedence, even if its geometry no longer matches. An absent or
+hidden preferred main causes no change. PanelCtl never invents positions for an
+unsaved set.
+
+Protection waits for two matching samples after a CoreGraphics add/remove
+notification (including a re-link) or a completed wake, within 15 seconds. Apply
+on launch optionally starts the same settlement. Each transition allows one
+attempt, followed by up to six verification reads. Failures are reported without
+retry. Ordinary move, mode and main-display notifications do not start correction,
+so a layout edit in System Settings is left alone. macOS cannot distinguish a
+manual edit made during the same reconnect window from system drift.
+
+**Restore arrangement** runs the same checks explicitly, even with protection
+off. It is also a global Action step and a CLI command through the running app.
+It does not launch the app or retry a lost response.
+
+```sh
+panelctl app restore-arrangement --json
+panelctl app status --json
+```
+
+Status reports `remembered`, `preferred-main`, `unprotected` or `suspended`, the
+reason, whether the saved layout differs, and the last result. When it differs,
+Remember current replaces that set with the new layout. Put Restore before Action
+steps that change the visible set. Actions preflight every step and freeze the
+arrangement plan; a later topology change stops the run rather than rebinding it.
+
+Saved identities require exactly one matching UUID and identical vendor, model
+and serial. A new numeric display ID is allowed between operations, never during
+one. Changed logical size or rotation blocks a saved arrangement. Duplicate or
+ambiguous identities are refused. If macOS swaps UUIDs between identical monitors
+with no serial, PanelCtl cannot detect that swap and will not guess using ports,
+names or positions. Show a blacked-out main display before remembering/restoring
+an arrangement; it must belong to the visible set.
+
+Unresolved journals, pending display operations, wake resume and hidden-input
+repair suspend protection. The writer takes the shared operation and journal
+locks, rechecks topology and identities immediately before completion, writes
+only public CoreGraphics origins with session scope, and verifies the result.
+It does not write modes, mirroring, private setters, DDC, permanent preferences,
+windows or Spaces. Recovery journals are never overwritten by Remember.
+
+**Hardware status:** TASK-79 has fake-backed writer, lifecycle, CLI and Action
+coverage only. Real reconnect/wake timing, input-return flags and CoreGraphics
+layout acceptance remain unverified. No live arrangement trial was performed;
+hardware writes still require separate scoped approval.
+
 ## Snapshot
 
 | Saved | Not saved or restored |

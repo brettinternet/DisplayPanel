@@ -165,6 +165,9 @@ struct PanelCtlMain {
                     if let detail = response.detail, !detail.isEmpty {
                         line += " detail=\(quoted(detail))"
                     }
+                    if let arrangement = response.arrangement {
+                        line += " arrangement=\(arrangement.state) arrangementReason=\(quoted(arrangement.reason))"
+                    }
                     if let nextAction = response.nextAction {
                         line += " nextAction=\(quoted(nextAction))"
                     }

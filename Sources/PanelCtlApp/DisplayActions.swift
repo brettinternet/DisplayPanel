@@ -7,6 +7,7 @@ enum DisplayActionEffect: String, Codable, CaseIterable, Identifiable {
     case removeFromDesktop
     case show
     case moveWindows
+    case restoreArrangement
 
     var id: Self { self }
 
@@ -16,6 +17,7 @@ enum DisplayActionEffect: String, Codable, CaseIterable, Identifiable {
         case .removeFromDesktop: return "Hide (remove from desktop)"
         case .show: return "Show"
         case .moveWindows: return "Move windows"
+        case .restoreArrangement: return "Restore arrangement"
         }
     }
 }
@@ -434,6 +436,8 @@ enum DisplayActionPresentation {
     static func stepParts(for step: DisplayActionStep, displays: [DisplayRecord]) -> (title: String, detail: String?) {
         let targetName = step.target.map { displayName(for: $0, displays: displays) } ?? "Choose a display"
         switch step.effect {
+        case .restoreArrangement:
+            return ("Restore arrangement", "Current exact visible set or preferred main")
         case .blackOut:
             return ("Hide \(targetName)", "Black out")
         case .show:
@@ -469,7 +473,7 @@ enum DisplayActionPresentation {
         for (offset, pair) in zip(action.steps, results).enumerated() {
             let (step, result) = pair
             guard result.index == offset + 1, result.effect == step.effect.rawValue,
-                  let uuid = step.target?.uuid,
+                  let uuid = step.effect == .restoreArrangement ? "" : step.target?.uuid,
                   uuid.caseInsensitiveCompare(result.targetUUID) == .orderedSame else { return nil }
         }
         return results

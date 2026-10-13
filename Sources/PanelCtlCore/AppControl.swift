@@ -8,6 +8,7 @@ public enum AppControlCommand: String, Codable, Equatable, Sendable {
     case show
     case toggleHide = "toggle-hide"
     case runAction = "run-action"
+    case restoreArrangement = "restore-arrangement"
     case runRule = "run-rule"
     case enable
     case disable
@@ -30,7 +31,7 @@ public enum AppControlCommand: String, Codable, Equatable, Sendable {
 
     /// Manually invoked display operations and one-shot rules never launch or resend the app request.
     public var isManualDisplayCommand: Bool {
-        isDisplayCommand || self == .runAction || self == .runRule
+        isDisplayCommand || self == .runAction || self == .runRule || self == .restoreArrangement
     }
 
     /// A shell command line that runs this display command with the CLI at
@@ -171,6 +172,7 @@ public struct AppControlResponse: Codable, Equatable, Sendable {
     public let actions: [AppControlActionStatus]?
     public let runningAction: AppControlRunningAction?
     public let runningRule: AppControlRunningRule?
+    public let arrangement: AppControlArrangementStatus?
     /// Present only on a status stream; scoped to that connection.
     public var sequence: UInt64?
 
@@ -198,7 +200,8 @@ public struct AppControlResponse: Codable, Equatable, Sendable {
         steps: [AppControlActionStepResult]? = nil,
         actions: [AppControlActionStatus]? = nil,
         runningAction: AppControlRunningAction? = nil,
-        runningRule: AppControlRunningRule? = nil
+        runningRule: AppControlRunningRule? = nil,
+        arrangement: AppControlArrangementStatus? = nil
     ) {
         self.protocolVersion = protocolVersion
         self.ok = ok
@@ -218,6 +221,7 @@ public struct AppControlResponse: Codable, Equatable, Sendable {
         self.actions = actions
         self.runningAction = runningAction
         self.runningRule = runningRule
+        self.arrangement = arrangement
     }
 
     public static func unavailable(_ message: String = "PanelCtl.app is not running") -> Self {
@@ -234,7 +238,7 @@ public struct AppControlResponse: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
         case ok, running, enabled, state, summary, detail, error, sequence
-        case nextAction, secondsRemaining, snoozedUntil, outcome, displays, rules, steps, actions, runningAction, runningRule
+        case nextAction, secondsRemaining, snoozedUntil, outcome, displays, rules, steps, actions, runningAction, runningRule, arrangement
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -258,6 +262,26 @@ public struct AppControlResponse: Codable, Equatable, Sendable {
         try container.encodeIfPresent(runningAction, forKey: .runningAction)
         try container.encodeIfPresent(runningRule, forKey: .runningRule)
         try container.encodeIfPresent(sequence, forKey: .sequence)
+        try container.encodeIfPresent(arrangement, forKey: .arrangement)
+    }
+}
+
+public struct AppControlArrangementStatus: Codable, Equatable, Sendable {
+    public let state: String
+    public let reason: String
+    public let differs: Bool
+    public let canRemember: Bool
+    public let canRestore: Bool
+    public let lastResult: String?
+
+    public init(state: String, reason: String, differs: Bool = false, canRemember: Bool = false,
+                canRestore: Bool = false, lastResult: String? = nil) {
+        self.state = state
+        self.reason = reason
+        self.differs = differs
+        self.canRemember = canRemember
+        self.canRestore = canRestore
+        self.lastResult = lastResult
     }
 }
 

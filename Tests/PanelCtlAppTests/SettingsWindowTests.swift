@@ -440,6 +440,65 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertEqual(model.windowMovePermissionState, .missing, "The editor does not request Accessibility")
     }
 
+    func testArrangementSettingsRememberAndOptInDoNotWriteDisplays() throws {
+        try requireInteractiveUI()
+        let app = NSApplication.shared
+        let originalPolicy = app.activationPolicy()
+        app.setActivationPolicy(.accessory)
+        app.activate(ignoringOtherApps: true)
+        defer { app.setActivationPolicy(originalPolicy) }
+        let (model, defaults) = try makeModel()
+        defer { model.shutdown {}; defaults.removePersistentDomain(forName: Self.suiteName) }
+        let controller = SettingsWindowController(model: model)
+        controller.selectDisplay(uuid: Self.sideUUID)
+        controller.present()
+        let window = try XCTUnwrap(controller.window)
+        defer { window.close() }
+        window.setContentSize(NSSize(width: 680, height: 1000))
+        let content = try XCTUnwrap(window.contentView)
+        window.makeKeyAndOrderFront(nil)
+        spin { content.layoutSubtreeIfNeeded(); return window.isKeyWindow }
+        XCTAssertTrue(window.isKeyWindow)
+        // These SwiftUI buttons are rendered, but are not NSButtons in the
+        // synthetic view tree. Use native mouse events at screenshot-verified
+        // positions in this fixed-size fixture, then assert their actual effect.
+        func click(x: CGFloat, top: CGFloat) throws {
+            let frame = try XCTUnwrap(content.superview)
+            let point = frame.convert(NSPoint(x: x, y: frame.isFlipped ? top : frame.bounds.height - top), to: nil)
+            let down = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            let up = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseUp, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime + 0.01, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 1, clickCount: 1, pressure: 0))
+            NSApp.postEvent(up, atStart: true)
+            window.sendEvent(down)
+        }
+        try click(x: 340, top: 240) // Arrangement protection disclosure.
+        spin { content.layoutSubtreeIfNeeded(); return nativeViews(in: content).compactMap { $0 as? NSSwitch }.count == 3 }
+        // Controls exist before the 150 ms disclosure animation reaches its final geometry.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        try click(x: 100, top: 369) // Remember current.
+        spin { model.arrangementPreferences.remembered.count == 1 }
+        XCTAssertEqual(model.arrangementPreferences.remembered.count, 1)
+        XCTAssertFalse(model.arrangementPreferences.enabled)
+        XCTAssertFalse(model.arrangementPreferences.applyOnLaunch)
+        let saved = model.arrangementPreferences.remembered
+        // Menu-style SwiftUI pickers do not expose an NSPopUpButton. As with
+        // the existing destination fixture, exercise the binding through the model.
+        try model.setArrangementPreferredMain(uuid: Self.sideUUID)
+        model.setArrangementProtectionEnabled(true)
+        model.setArrangementApplyOnLaunch(true)
+        XCTAssertEqual(model.arrangementStatus.state, "remembered")
+        if let output = ProcessInfo.processInfo.environment["PANELCTL_SETTINGS_FIXTURE_OUTPUT"] {
+            try writeSnapshot(of: window, to: output, name: "remembered-arrangement")
+        }
+        model.setArrangementProtectionEnabled(false)
+        XCTAssertEqual(model.arrangementPreferences.remembered, saved)
+        XCTAssertTrue(model.arrangementStatus.canRestore)
+        XCTAssertFalse(model.arrangementStatus.differs)
+    }
+
     func testKeepWindowsOffSettingsToggleDestinationAndStatusWithoutMoving() throws {
         try requireInteractiveUI()
         let (model, defaults) = try makeModel(windowMovePermission: SettingsGrantedWindowMovePermission())
@@ -1945,7 +2004,20 @@ final class SettingsWindowTests: XCTestCase {
             coverDisplays: { _ in [] },
             quiesceProtection: { $0(true, nil) },
             protectionCoordinator: protectionCoordinator,
-            windowMovePermission: windowMovePermission
+            windowMovePermission: windowMovePermission,
+            captureArrangement: { excluded in
+                let members = displays.filter { !excluded.contains($0.uuid?.lowercased() ?? "") }.map { display in
+                    DisplayArrangementMember(uuid: display.uuid!, id: display.id, name: display.name,
+                        vendor: display.vendor, model: display.model, serial: display.serial,
+                        x: Int32(display.bounds.x), y: Int32(display.bounds.y), width: display.bounds.width,
+                        height: display.bounds.height, rotation: 0, main: display.main)
+                }
+                return PanelCtlCore.DisplayArrangement(members: members)
+            },
+            writeArrangement: { _, _, _, _ in
+                XCTFail("Settings editing must never write display arrangements")
+                return false
+            }
         )
         return (model, defaults)
     }

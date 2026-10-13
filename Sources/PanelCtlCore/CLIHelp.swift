@@ -206,6 +206,7 @@ public enum CLIHelp {
               enable, disable, toggle, status
               status --watch --json
               restore
+              restore-arrangement
               sleep-now
               snooze --for <duration>
               resume
@@ -230,8 +231,12 @@ public enum CLIHelp {
             A display already in the requested state is a no-op.
             \(AppControlCommand.blackoutNowMigrationGuidance)
             `restore` ends Automation blackouts only; Show ends a manual Hide.
+            restore-arrangement restores the remembered exact visible set or preferred
+            main display, then verifies. It requires the running app, never launches or
+            retries it, and refuses unsafe identities, geometry or unresolved recovery.
+            status includes arrangement protection state and its reason.
             run-action --action <UUID> invokes one saved Action with 1–8 ordered
-            Hide (black out), Hide (remove from desktop), Show or Move windows steps,
+            Hide (black out), Hide (remove from desktop), Show, Move windows or Restore arrangement steps,
             only in the running app. Accessibility is checked without prompting; use
             the in-app Allow Accessibility button before Move windows. It never launches,
             queues or retries a request.

@@ -761,6 +761,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch request.command {
         case .hide, .show, .toggleHide, .runAction:
             return await model.handleDisplayControlRequest(request, receivedAt: receivedAt)
+        case .restoreArrangement:
+            return model.handleArrangementControlRequest(request)
         case .runRule:
             return await model.handleProtectionRuleControlRequest(request, receivedAt: receivedAt)
         case .enable:
@@ -864,7 +866,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             rules: rules,
             actions: actions,
             runningAction: runningAction,
-            runningRule: runningRule ?? model.controlRunningRule
+            runningRule: runningRule ?? model.controlRunningRule,
+            arrangement: model.arrangementStatus
         )
     }
 

@@ -18,6 +18,7 @@ struct DisplaySettingsView: View {
                 attentionIDs: Set(model.displayResults.filter(\.value.needsAttention).keys)
             ) { navigation.selectedDisplayID = $0 }
             Form {
+                ArrangementProtectionSettings(model: model)
                 if let failure = model.protectionQuiescenceFailure {
                     Section {
                         HStack(alignment: .firstTextBaseline) {

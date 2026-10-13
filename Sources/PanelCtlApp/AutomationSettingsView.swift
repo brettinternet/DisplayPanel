@@ -236,6 +236,7 @@ struct AutomationSettingsView: View {
         case .show: return "eye"
         case .blackOut, .removeFromDesktop: return "eye.slash"
         case .moveWindows: return "arrow.left.arrow.right"
+        case .restoreArrangement: return "rectangle.3.group"
         }
     }
 
@@ -599,6 +600,7 @@ struct DisplayActionEditor: View {
         Text("Step \(number)")
             .font(.headline)
             .accessibilityAddTraits(.isHeader)
+        if step.effect != .restoreArrangement {
         Picker("Display", selection: Binding(
             get: { step.target?.uuid ?? "" },
             set: { selectDisplay($0, at: index) }
@@ -614,12 +616,14 @@ struct DisplayActionEditor: View {
             }
         }
         .accessibilityLabel("Step \(number) display")
+        }
 
         Picker("Effect", selection: Binding(
             get: { step.effect },
             set: { effect in
                 updateStep(at: index) { current in
                     current.effect = effect
+                    if effect == .restoreArrangement { current.target = nil }
                     if effect != .removeFromDesktop { current.reviewedRemoval = nil }
                     else if step.effect != .removeFromDesktop { current.reviewedRemoval = nil }
                     if effect == .moveWindows {
@@ -635,7 +639,10 @@ struct DisplayActionEditor: View {
         }
         .accessibilityLabel("Step \(number) effect")
 
-        if step.effect == .removeFromDesktop {
+        if step.effect == .restoreArrangement {
+            Text("Restores the remembered arrangement for the current visible set, or the preferred main display. Recovery and identity checks still apply.")
+                .font(.caption).foregroundStyle(.secondary)
+        } else if step.effect == .removeFromDesktop {
             removalDetails(step, index: index)
         } else if step.effect == .moveWindows {
             moveDestinationPicker(step, index: index, configuration: \.moveWindows)

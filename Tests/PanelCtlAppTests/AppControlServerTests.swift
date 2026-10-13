@@ -141,7 +141,7 @@ final class AppControlServerTests: XCTestCase {
 
     @MainActor
     func testHideShowAndActionLostResponseNeverLaunchOrRetry() async throws {
-        for command in [AppControlCommand.hide, .show, .toggleHide, .runAction, .runRule] {
+        for command in [AppControlCommand.hide, .show, .toggleHide, .runAction, .runRule, .restoreArrangement] {
             let path = "\(try AppControlSocket.userTemporaryDirectory())/panelctl-test-\(UUID().uuidString.prefix(8)).sock"
             let listener = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
             XCTAssertGreaterThanOrEqual(listener, 0)

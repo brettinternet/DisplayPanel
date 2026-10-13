@@ -209,6 +209,13 @@ final class AppControlTests: XCTestCase {
             )
             XCTAssertEqual(try client.execute(command, targetUUID: uuid).exitCode, 3)
         }
+        XCTAssertEqual(try CLIParser.parse(["app", "restore-arrangement", "--json"]),
+                       .app(command: .restoreArrangement, durationSeconds: nil, json: true))
+        XCTAssertThrowsError(try CLIParser.parse(["app", "restore-arrangement", "--display", uuid]))
+        let arrangementClient = try AppControlClient(
+            socketPath: "/private/tmp/panelctl-absent-\(UUID().uuidString)",
+            launch: { XCTFail("Restore arrangement must never launch the app") }, isAppRunning: { false })
+        XCTAssertEqual(try arrangementClient.execute(.restoreArrangement).exitCode, 3)
         XCTAssertFalse(AppControlCommand.toggle.isDisplayCommand)
         XCTAssertTrue(AppControlCommand.runAction.isManualDisplayCommand)
         XCTAssertTrue(AppControlCommand.runRule.isManualDisplayCommand)

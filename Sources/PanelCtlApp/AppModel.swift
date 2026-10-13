@@ -107,7 +107,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var displayActionResults: [UUID: AppControlResponse] = [:]
     private var lastDisplayActionResultID: UUID?
     @Published private(set) var runningDisplayActionIDs: Set<UUID> = []
-    @Published private(set) var runningDisplayAction: AppControlRunningAction?
+    @Published private(set) var runningDisplayAction: AppControlRunningAction? {
+        didSet { if runningDisplayAction != nil { cancelArrangementSettlement() } }
+    }
     private var runningActionInterrupted = false
     private var actionTopologyWriteInProgress = false
     private var preflightingDisplayAction = false
@@ -125,7 +127,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var hideOperation: DisplayHideOperation = .idle {
         didSet {
             displayReconfigurationEvents.operationChanged(busy: hideOperation.isBusy)
-            if hideOperation.isBusy { cancelInputReturnSettlement() }
+            if hideOperation.isBusy {
+                cancelInputReturnSettlement()
+                cancelArrangementSettlement()
+            }
         }
     }
     let displayReconfigurationEvents = DisplayReconfigurationEvents()
@@ -207,6 +212,17 @@ final class AppModel: ObservableObject {
     @Published private(set) var countdownDate = Date()
 
     var onStatusChange: (() -> Void)?
+
+    static let arrangementPreferencesKey = "displayArrangements.v1"
+    @Published private(set) var arrangementPreferences = ArrangementPreferences()
+    @Published private(set) var arrangementStorageFailure: String?
+    @Published private(set) var arrangementLastResult: String?
+    private let captureArrangement: (Set<String>) throws -> PanelCtlCore.DisplayArrangement
+    private let writeArrangement: (PanelCtlCore.DisplayArrangement, PanelCtlCore.DisplayArrangement, Set<String>, () throws -> Void) throws -> Bool
+    private var arrangementWriting = false
+    private var arrangementSettlement: Task<Void, Never>?
+    private var arrangementDeadline: Date?
+    private var arrangementSample: PanelCtlCore.DisplayArrangement?
 
     private let defaults: UserDefaults
     private let windowMovePermission: WindowMovePermissionProviding
@@ -303,6 +319,12 @@ final class AppModel: ObservableObject {
         disconnectController: DisplayDisconnectController = DisplayDisconnectController(),
         disconnectExecutable: @escaping @MainActor () throws -> URL = ProtectionService.helperExecutableURL,
         displayWakeSettleDelay: TimeInterval = 1,
+        captureArrangement: @escaping (Set<String>) throws -> PanelCtlCore.DisplayArrangement = {
+            try DisplayArrangementController().capture(excluding: $0)
+        },
+        writeArrangement: @escaping (PanelCtlCore.DisplayArrangement, PanelCtlCore.DisplayArrangement, Set<String>, () throws -> Void) throws -> Bool = {
+            try DisplayArrangementController().restore($0, expected: $1, excluding: $2, revalidate: $3)
+        },
         windowMoveUptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         keepWindowsOffScheduler: KeepWindowsOffScheduling? = nil,
         mouseButtonPressed: @escaping () -> Bool = {
@@ -312,6 +334,17 @@ final class AppModel: ObservableObject {
         }
     ) {
         self.defaults = defaults
+        self.captureArrangement = captureArrangement
+        self.writeArrangement = writeArrangement
+        if let data = defaults.data(forKey: Self.arrangementPreferencesKey) {
+            do {
+                let saved = try JSONDecoder().decode(ArrangementPreferences.self, from: data)
+                try saved.validate()
+                arrangementPreferences = saved
+            } catch {
+                arrangementStorageFailure = "Saved arrangements could not be read and were preserved. \(error.localizedDescription)"
+            }
+        }
         let permissionProvider = windowMovePermission ?? NoWindowMovePermission()
         self.windowMovePermission = permissionProvider
         self.windowMoveExecutor = windowMoveExecutor ?? AccessibilityWindowMover(permission: permissionProvider)
@@ -455,6 +488,258 @@ final class AppModel: ObservableObject {
         reconcileProtection()
         startCountdownTimer()
         reconcileKeepWindowsOff(startPass: true)
+        if arrangementPreferences.applyOnLaunch { beginArrangementTransition() }
+    }
+
+    // MARK: Remembered arrangements
+
+    private var arrangementExcludedUUIDs: Set<String> {
+        Set(blackoutHiddenDisplays.keys).union(displays.filter {
+            blackedOutDisplayIDs.contains($0.id)
+        }.compactMap { $0.uuid?.lowercased() })
+    }
+
+    private func arrangementSuspensionReason(actionLeaseID: UUID? = nil) -> String? {
+        if let arrangementStorageFailure { return arrangementStorageFailure }
+        if isShuttingDown { return "PanelCtl is shutting down." }
+        if sleepLifecycleActive || inputReturnIntent != nil || displayLifecycleTransitioning {
+            return "Waiting for wake or display recovery to finish."
+        }
+        if handoffStatus?.hasUnresolvedJournal == true || handoffInspectionFailure != nil {
+            return "An unresolved display journal needs recovery first."
+        }
+        return displayActionEnvironmentBlocker(prefix: "", actionLeaseID: actionLeaseID)
+    }
+
+    var arrangementStatus: AppControlArrangementStatus {
+        func status(_ state: String, _ reason: String, differs: Bool = false,
+                    remember: Bool = false, restore: Bool = false) -> AppControlArrangementStatus {
+            AppControlArrangementStatus(state: state, reason: Self.bounded(reason), differs: differs,
+                canRemember: remember, canRestore: restore, lastResult: arrangementLastResult.map(Self.bounded))
+        }
+        if arrangementWriting { return status("suspended", "Restoring arrangement.") }
+        if let reason = arrangementSuspensionReason() { return status("suspended", reason) }
+        do {
+            let current = try captureArrangement(arrangementExcludedUUIDs)
+            try current.validate()
+            let canRemember = current.members.count >= 2
+            if let saved = arrangementPreferences.remembered.first(where: { $0.setKey == current.setKey }) {
+                let differs = !current.samePlacement(as: saved)
+                do {
+                    _ = try current.restoring(saved)
+                } catch {
+                    return status("suspended", error.localizedDescription, differs: differs, remember: canRemember)
+                }
+                return status(arrangementPreferences.enabled ? "remembered" : "unprotected",
+                    arrangementPreferences.enabled ? "This exact visible set has a remembered arrangement." : "Protection is off; remembered arrangements are kept.",
+                    differs: differs, remember: canRemember, restore: true)
+            }
+            if let preferred = arrangementPreferences.preferredMain,
+               try current.preferringMain(preferred) != nil {
+                return status(arrangementPreferences.enabled ? "preferred-main" : "unprotected",
+                    arrangementPreferences.enabled ? "Only the preferred main display is protected; positions are not remembered." : "Protection is off; the preferred main display is kept.",
+                    remember: canRemember, restore: true)
+            }
+            return status("unprotected", "No remembered arrangement or visible preferred main display for this set.", remember: canRemember)
+        } catch {
+            return status("suspended", error.localizedDescription)
+        }
+    }
+
+    private func saveArrangementPreferences(_ value: ArrangementPreferences) throws {
+        if let arrangementStorageFailure { throw ArrangementProtectionError(arrangementStorageFailure) }
+        try value.validate()
+        defaults.set(try JSONEncoder().encode(value), forKey: Self.arrangementPreferencesKey)
+        arrangementPreferences = value
+        cancelArrangementSettlement()
+        onStatusChange?()
+    }
+
+    func setArrangementProtectionEnabled(_ enabled: Bool) {
+        var updated = arrangementPreferences
+        updated.enabled = enabled
+        do { try saveArrangementPreferences(updated) }
+        catch { arrangementLastResult = error.localizedDescription }
+    }
+
+    func setArrangementApplyOnLaunch(_ enabled: Bool) {
+        var updated = arrangementPreferences
+        updated.applyOnLaunch = enabled
+        do { try saveArrangementPreferences(updated) }
+        catch { arrangementLastResult = error.localizedDescription }
+    }
+
+    func rememberCurrentArrangement() throws {
+        refreshHandoffStatus()
+        if let reason = arrangementSuspensionReason() { throw ArrangementProtectionError(reason) }
+        let current = try captureArrangement(arrangementExcludedUUIDs)
+        try current.validate()
+        guard current.members.count >= 2 else { throw ArrangementProtectionError("Connect at least two visible displays to remember an arrangement.") }
+        var updated = arrangementPreferences
+        updated.remembered.removeAll { $0.setKey == current.setKey }
+        updated.remembered.append(current)
+        try saveArrangementPreferences(updated)
+        arrangementLastResult = "Remembered the current arrangement."
+    }
+
+    func forgetArrangement(setKey: String) throws {
+        var updated = arrangementPreferences
+        updated.remembered.removeAll { $0.setKey == setKey }
+        try saveArrangementPreferences(updated)
+        arrangementLastResult = "Forgot the remembered arrangement."
+    }
+
+    func setArrangementPreferredMain(uuid: String?) throws {
+        var updated = arrangementPreferences
+        if let uuid {
+            refreshHandoffStatus()
+            if let reason = arrangementSuspensionReason() { throw ArrangementProtectionError(reason) }
+            let current = try captureArrangement(arrangementExcludedUUIDs)
+            try current.validate()
+            guard let member = current.members.first(where: { $0.uuid.caseInsensitiveCompare(uuid) == .orderedSame }) else {
+                throw ArrangementProtectionError("The preferred main display must be visible and unambiguous.")
+            }
+            updated.preferredMain = member
+        } else {
+            updated.preferredMain = nil
+        }
+        try saveArrangementPreferences(updated)
+    }
+
+    private func prepareArrangementRestore(actionLeaseID: UUID? = nil) throws -> ArrangementRestorePlan {
+        if let reason = arrangementSuspensionReason(actionLeaseID: actionLeaseID) { throw ArrangementProtectionError(reason) }
+        let excluded = arrangementExcludedUUIDs
+        let current = try captureArrangement(excluded)
+        try current.validate()
+        let desired: PanelCtlCore.DisplayArrangement
+        if let saved = arrangementPreferences.remembered.first(where: { $0.setKey == current.setKey }) {
+            desired = try current.restoring(saved)
+        } else if let preferred = arrangementPreferences.preferredMain,
+                  let translated = try current.preferringMain(preferred) {
+            desired = translated
+        } else {
+            throw ArrangementProtectionError("No remembered arrangement or visible preferred main display for this set.")
+        }
+        return ArrangementRestorePlan(current: current, desired: desired, excluded: excluded, preferences: arrangementPreferences)
+    }
+
+    @discardableResult
+    func restoreArrangement(actionLeaseID: UUID? = nil, prepared: ArrangementRestorePlan? = nil) -> AppControlResponse {
+        cancelArrangementSettlement()
+        var attemptedWrite = false
+        let outcome: AppControlOutcome
+        let message: String
+        do {
+            guard !arrangementWriting else { throw ArrangementProtectionError("An arrangement operation is running.") }
+            refreshHandoffStatus()
+            let plan = try prepared ?? prepareArrangementRestore(actionLeaseID: actionLeaseID)
+            func revalidate() throws {
+                if let reason = arrangementSuspensionReason(actionLeaseID: actionLeaseID) { throw ArrangementProtectionError(reason) }
+                guard plan.preferences == arrangementPreferences, plan.excluded == arrangementExcludedUUIDs,
+                      !runningActionInterrupted else {
+                    throw ArrangementProtectionError("Arrangement settings or the visible set changed during the operation.")
+                }
+            }
+            try revalidate()
+            arrangementWriting = true
+            actionTopologyWriteInProgress = true
+            displayReconfigurationEvents.operationChanged(busy: true)
+            defer {
+                arrangementWriting = false
+                actionTopologyWriteInProgress = false
+                displayReconfigurationEvents.operationChanged(busy: false)
+            }
+            attemptedWrite = !plan.current.samePlacement(as: plan.desired)
+            let changed = try writeArrangement(plan.desired, plan.current, plan.excluded, revalidate)
+            outcome = changed ? .done : .noOp
+            message = changed ? "Restored and verified the arrangement." : "The arrangement already matches."
+        } catch {
+            outcome = attemptedWrite ? .failed : .refused
+            message = error.localizedDescription
+        }
+        arrangementLastResult = message
+        displays = displayProvider()
+        onStatusChange?()
+        return AppControlResponse(ok: outcome == .done || outcome == .noOp, running: true,
+            enabled: preferences.isEnabled, state: runtimeState.controlIdentifier,
+            summary: Self.bounded(message), error: outcome == .done || outcome == .noOp ? nil : Self.bounded(message),
+            outcome: outcome, arrangement: arrangementStatus)
+    }
+
+    func handleArrangementControlRequest(_ request: AppControlRequest) -> AppControlResponse {
+        guard request.hasSupportedProtocol, request.command == .restoreArrangement,
+              request.targetUUID == nil, request.actionID == nil, request.ruleID == nil,
+              request.durationSeconds == nil, request.hideStyle == nil, request.watch == nil else {
+            return AppControlResponse(ok: false, running: true, enabled: preferences.isEnabled,
+                state: runtimeState.controlIdentifier, summary: "Restore arrangement takes no display or Action arguments.", outcome: .refused)
+        }
+        return restoreArrangement()
+    }
+
+    private func cancelArrangementSettlement() {
+        arrangementSettlement?.cancel()
+        arrangementSettlement = nil
+        arrangementDeadline = nil
+        arrangementSample = nil
+    }
+
+    private func beginArrangementTransition() {
+        guard arrangementPreferences.enabled, !arrangementWriting, !isShuttingDown,
+              !hideOperation.isBusy, runningDisplayAction == nil else { return }
+        if arrangementDeadline == nil { arrangementDeadline = now().addingTimeInterval(15) }
+        arrangementSample = nil
+        scheduleArrangementSettlement()
+    }
+
+    private func scheduleArrangementSettlement() {
+        arrangementSettlement?.cancel()
+        guard let deadline = arrangementDeadline else { return }
+        let remaining = max(0, deadline.timeIntervalSince(now()))
+        let delay = min(max(0.01, displayWakeSettleDelay), remaining)
+        arrangementSettlement = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.finishArrangementSettlement()
+        }
+    }
+
+    private func finishArrangementSettlement() {
+        guard let deadline = arrangementDeadline else { return }
+        guard now() < deadline else {
+            cancelArrangementSettlement()
+            arrangementLastResult = "Arrangement protection stopped: displays did not settle within 15 seconds."
+            onStatusChange?()
+            return
+        }
+        refreshHandoffStatus()
+        if arrangementSuspensionReason() != nil {
+            arrangementSample = nil
+            scheduleArrangementSettlement()
+            return
+        }
+        do {
+            let current = try captureArrangement(arrangementExcludedUUIDs)
+            try current.validate()
+            guard arrangementSample == current else {
+                arrangementSample = current
+                scheduleArrangementSettlement()
+                return
+            }
+            // Consume the transition before writing. Notifications from our own
+            // operation cannot replenish it, and a failed write is never retried.
+            cancelArrangementSettlement()
+            if arrangementPreferences.remembered.contains(where: { $0.setKey == current.setKey }) ||
+                arrangementPreferences.preferredMain.map({ preferred in current.members.contains { $0.uuid.caseInsensitiveCompare(preferred.uuid) == .orderedSame } }) == true {
+                _ = restoreArrangement()
+            }
+        } catch {
+            // A partially reconnected inventory can be temporarily unreadable.
+            // Wait within the original deadline, never extend it or write early.
+            arrangementSample = nil
+            arrangementLastResult = error.localizedDescription
+            scheduleArrangementSettlement()
+            onStatusChange?()
+        }
     }
 
     var activeDisplays: [DisplayRecord] {
@@ -798,6 +1083,13 @@ final class AppModel: ObservableObject {
         var seen = Set<String>()
         for (offset, step) in draft.steps.enumerated() {
             let number = offset + 1
+            if step.effect == .restoreArrangement {
+                guard step.target == nil, step.reviewedRemoval == nil, step.moveWindows == nil, step.keepWindowsOff == nil else {
+                    return .staticConflict(number, "Restore arrangement applies to the whole visible set, not one display.")
+                }
+                guard seen.insert("arrangement").inserted else { return .duplicateDisplay("Restore arrangement") }
+                continue
+            }
             guard let target = step.target else { return .missingTarget(number) }
             guard UUID(uuidString: target.uuid) != nil else { return .invalidTarget(number) }
             let effectClass = step.effect == .moveWindows ? "windows" : "display"
@@ -855,7 +1147,7 @@ final class AppModel: ObservableObject {
             case .show:
                 hidden.remove(targetKey)
                 removalSources.removeValue(forKey: targetKey)
-            case .moveWindows:
+            case .moveWindows, .restoreArrangement:
                 break
             }
         }
@@ -916,6 +1208,7 @@ final class AppModel: ObservableObject {
         for offset in indices {
             guard action.steps.indices.contains(offset) else { return "This action changed before it could run." }
             let step = action.steps[offset]
+            if step.effect == .restoreArrangement { continue }
             guard let target = step.target else { return "Step \(offset + 1): Choose a display." }
             if let expectedTarget {
                 guard matches(target, expectedTarget), matchingDisplay(expectedTarget) != nil else {
@@ -1014,6 +1307,7 @@ final class AppModel: ObservableObject {
                 projectedRemovals: hiddenRemovals,
                 projectedSources: sources
             ) else {
+                if step.effect == .restoreArrangement { continue }
                 guard let key = step.target?.uuid.lowercased() else { return "Step \(index + 1): Choose a display." }
                 switch step.effect {
                 case .blackOut: hiddenBlackouts.insert(key)
@@ -1024,7 +1318,7 @@ final class AppModel: ObservableObject {
                     hiddenBlackouts.remove(key)
                     hiddenRemovals.remove(key)
                     sources.removeValue(forKey: key)
-                case .moveWindows:
+                case .moveWindows, .restoreArrangement:
                     break
                 }
                 continue
@@ -1207,6 +1501,16 @@ final class AppModel: ObservableObject {
         expectedTarget: DisplayIdentitySnapshot? = nil
     ) -> String? {
         let prefix = "Step \(index + 1): "
+        if step.effect == .restoreArrangement {
+            if let projectedRemovals, !projectedRemovals.isEmpty {
+                return prefix + "An earlier Remove step leaves an unresolved journal."
+            }
+            if let projectedBlackouts, projectedBlackouts != Set(blackoutHiddenDisplays.keys) {
+                return prefix + "An earlier step changes the visible set. Restore arrangement before Hide or Show."
+            }
+            do { _ = try prepareArrangementRestore(actionLeaseID: actionLeaseID); return nil }
+            catch { return prefix + error.localizedDescription }
+        }
         guard let target = step.target else { return prefix + "Choose a display." }
         guard UUID(uuidString: target.uuid) != nil else { return prefix + "This action has no stable display UUID." }
         let display: DisplayRecord
@@ -1236,6 +1540,8 @@ final class AppModel: ObservableObject {
         let hiddenBlackout = projectedBlackouts ?? Set(blackoutHiddenDisplays.keys)
         let hiddenRemoved = projectedRemovals ?? Set(unresolvedHandoffRemovals.map { $0.target.uuid.lowercased() })
         switch step.effect {
+        case .restoreArrangement:
+            return nil // Global step was checked before resolving a per-display target.
         case .moveWindows:
             if handoffInspectionFailure != nil || displayRecoveryProblem != nil || handoffStatus?.hasUnresolvedJournal == true {
                 return prefix + "Display recovery needs attention. Review it in Displays before moving windows."
@@ -3310,7 +3616,7 @@ final class AppModel: ObservableObject {
             let targetUUIDs = action?.steps.compactMap { $0.target?.uuid } ?? []
             let isMultiStepAction = (action?.steps.count ?? 1) > 1
             let stepResults = action?.steps.enumerated().compactMap { offset, step -> AppControlActionStepResult? in
-                guard let uuid = step.target?.uuid else { return nil }
+                guard let uuid = step.effect == .restoreArrangement ? "" : step.target?.uuid else { return nil }
                 return AppControlActionStepResult(
                     index: offset + 1, targetUUID: uuid, effect: step.effect.rawValue,
                     outcome: offset == requestedStep ? outcome : .notRun,
@@ -3390,7 +3696,24 @@ final class AppModel: ObservableObject {
         var noOpSteps = Set<Int>()
         var frozenTargets: [Int: DisplayIdentitySnapshot] = [:]
         var preparedHideRequests: [Int: DisplayHideRequest] = [:]
+        var preparedArrangements: [Int: ArrangementRestorePlan] = [:]
         for (offset, step) in action.steps.enumerated() {
+            if step.effect == .restoreArrangement {
+                if let blocker = displayActionStepRunBlocker(action: action, step: step, index: offset,
+                    projectedBlackouts: projectedBlackouts, projectedRemovals: projectedRemovals, actionLeaseID: id) {
+                    refuse(.refused, blocker, for: action, atStep: offset)
+                    return
+                }
+                do {
+                    let plan = try prepareArrangementRestore(actionLeaseID: id)
+                    preparedArrangements[offset] = plan
+                    if plan.current.samePlacement(as: plan.desired) { noOpSteps.insert(offset) }
+                } catch {
+                    refuse(.refused, error.localizedDescription, for: action, atStep: offset)
+                    return
+                }
+                continue
+            }
             if let reason = displayActionStepSkipReason(
                 action: action, step: step, index: offset,
                 projectedBlackouts: projectedBlackouts, projectedRemovals: projectedRemovals,
@@ -3431,7 +3754,7 @@ final class AppModel: ObservableObject {
             case .blackOut: isNoOp = projectedBlackouts.contains(key)
             case .removeFromDesktop: isNoOp = projectedRemovals.contains(key) && isVerifiedRemovedDisplay(uuid)
             case .show: isNoOp = !projectedBlackouts.contains(key) && !projectedRemovals.contains(key)
-            case .moveWindows: isNoOp = false
+            case .moveWindows, .restoreArrangement: isNoOp = false
             }
             if isNoOp {
                 noOpSteps.insert(offset)
@@ -3458,7 +3781,7 @@ final class AppModel: ObservableObject {
                 projectedBlackouts.remove(key)
                 projectedRemovals.remove(key)
                 projectedSources.removeValue(forKey: key)
-            case .moveWindows:
+            case .moveWindows, .restoreArrangement:
                 break
             }
         }
@@ -3541,7 +3864,7 @@ final class AppModel: ObservableObject {
 
         func appendNotRun(from index: Int) {
             for offset in index..<action.steps.count {
-                guard let uuid = action.steps[offset].target?.uuid else { continue }
+                guard let uuid = action.steps[offset].effect == .restoreArrangement ? "" : action.steps[offset].target?.uuid else { continue }
                 stepResults.append(AppControlActionStepResult(
                     index: offset + 1, targetUUID: uuid, effect: action.steps[offset].effect.rawValue,
                     outcome: .notRun, desktopSummary: "Not run."
@@ -3575,6 +3898,29 @@ final class AppModel: ObservableObject {
             self.displays = self.displayProvider()
             self.refreshHandoffStatus()
             let step = action.steps[offset]
+            if step.effect == .restoreArrangement {
+                guard let plan = preparedArrangements[offset] else {
+                    stoppingOutcome = .refused
+                    stoppingAtIndex = offset + 1
+                    appendNotRun(from: offset)
+                    finishRun()
+                    return
+                }
+                let result = self.restoreArrangement(actionLeaseID: id, prepared: plan)
+                let outcome = result.outcome ?? .failed
+                stepResults.append(AppControlActionStepResult(index: offset + 1, targetUUID: "",
+                    effect: step.effect.rawValue, outcome: outcome, desktopSummary: result.summary))
+                changedAnyDisplay = changedAnyDisplay || outcome == .done
+                if result.ok {
+                    runStep(offset + 1)
+                } else {
+                    stoppingOutcome = outcome
+                    stoppingAtIndex = offset + 1
+                    appendNotRun(from: offset + 1)
+                    finishRun()
+                }
+                return
+            }
             guard let uuid = step.target?.uuid else {
                 stoppingOutcome = .refused
                 stoppingAtIndex = offset + 1
@@ -3642,7 +3988,7 @@ final class AppModel: ObservableObject {
             case .blackOut: alreadyAtDesiredState = self.isBlackoutHidden(uuid)
             case .removeFromDesktop: alreadyAtDesiredState = self.isVerifiedRemovedDisplay(uuid)
             case .show: alreadyAtDesiredState = !self.isBlackoutHidden(uuid) && !self.isRemovedDisplay(uuid)
-            case .moveWindows: alreadyAtDesiredState = false
+            case .moveWindows, .restoreArrangement: alreadyAtDesiredState = false
             }
             if alreadyAtDesiredState {
                 let name = step.target.map { DisplayActionPresentation.displayName(for: $0, displays: self.displays) } ?? uuid
@@ -3652,6 +3998,7 @@ final class AppModel: ObservableObject {
                 case .removeFromDesktop: summary = "\(name) is already removed from the desktop."
                 case .show: summary = "\(name) isn’t hidden."
                 case .moveWindows: summary = "Windows are already off the source display."
+                case .restoreArrangement: summary = "The arrangement already matches."
                 }
                 stepResults.append(AppControlActionStepResult(index: offset + 1, targetUUID: uuid,
                     effect: step.effect.rawValue, outcome: .noOp,
@@ -3712,6 +4059,8 @@ final class AppModel: ObservableObject {
                 }
             }
             switch step.effect {
+            case .restoreArrangement:
+                break // Handled above, without a per-display target.
             case .blackOut:
                 self.hide(targetUUID: uuid, style: .blackOut, manualAction: action,
                           manualActionStepIndex: offset, actionLeaseID: id,
@@ -4076,6 +4425,7 @@ final class AppModel: ObservableObject {
     }
 
     func beginDisplaySleepTransition() {
+        cancelArrangementSettlement()
         let pendingInputIntent = inputReturnAttributed ? inputReturnIntent : nil
         let inspectUnattributedChange = inputReturnIntent != nil && !inputReturnAttributed
         cancelInputReturnSettlement(endLifecycle: false)
@@ -4118,7 +4468,7 @@ final class AppModel: ObservableObject {
         // inspect an intermediate journal here: the writer verifies its result,
         // and the next step refreshes and revalidates before doing any work.
         // Sleep/wake/unlock still take the lifecycle path and latch interruption.
-        guard !actionTopologyWriteInProgress else { return }
+        guard !actionTopologyWriteInProgress, !arrangementWriting else { return }
         // AppKit may deliver the notification after the writer has returned.
         // If it matches our latest verified inventory, nothing new changed.
         // Real inventory changes outside the writer still interrupt the run.
@@ -4234,6 +4584,14 @@ final class AppModel: ObservableObject {
     /// also accompany a user's manual unmirror in System Settings.
     func displayReconfigured(display: UInt32, flags: CGDisplayChangeSummaryFlags,
                              ownOperation: Bool = false) {
+        if !ownOperation, !arrangementWriting, !sleepLifecycleActive {
+            if !flags.contains(.beginConfigurationFlag), !flags.intersection([.addFlag, .removeFlag]).isEmpty {
+                beginArrangementTransition()
+            } else if arrangementDeadline != nil {
+                arrangementSample = nil
+                scheduleArrangementSettlement()
+            }
+        }
         guard !ownOperation, !isShuttingDown, !sleepLifecycleActive,
               !hideOperation.isBusy, runningDisplayAction == nil,
               !disconnectAutomationPaused else {
@@ -4407,6 +4765,7 @@ final class AppModel: ObservableObject {
         sleepLifecycleActive = false
         screensAwakeAfterSleep = false
         setDisplayLifecycleTransitioning(false)
+        beginArrangementTransition()
     }
 
     private func resumeSleepHideIntent(_ intent: SleepHideResumeIntent) {
@@ -4932,6 +5291,7 @@ final class AppModel: ObservableObject {
 
     func shutdown(completion: @escaping () -> Void) {
         isShuttingDown = true
+        cancelArrangementSettlement()
         cancelInputReturnSettlement()
         displayReconfigurationEvents.stop()
         windowMovePermissionWatch?.cancel()

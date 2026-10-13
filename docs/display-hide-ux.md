@@ -143,11 +143,23 @@ Mac's signal using a private API. It is not a Hide style. It needs fresh
 consent each time and reconnects automatically after 15 seconds. See
 [private display disable](display-disable.md#app-controls).
 
+## Arrangement protection
+
+**Displays → Arrangement protection** remembers layouts per exact visible display
+set, with an optional preferred main for unsaved sets. It is off by default and
+only corrects after reconnect or wake, not ordinary layout edits. Remember current,
+Forget and Restore arrangement are explicit controls. Recovery suspends it.
+See [remembered arrangements](display-recovery.md#remembered-arrangements) for
+identity/size checks, CLI status, Restore, and the unverified hardware limits.
+
 ## Named manual actions
 
 **Automations → Actions** stores named workflows of 1–8 steps. Each step targets
 a display with **Hide (black out)**, **Hide (remove from desktop)**, **Show** or
-**Move windows**. A display may appear once in the Hide/Show class and once in
+**Move windows**. **Restore arrangement** is a global step with no display target.
+It uses the current exact set or preferred main, with the same recovery and
+verification checks as Displays. Put it before steps that change the visible set.
+A display may appear once in the Hide/Show class and once in
 the separate Move class, so Hide and Move can share a source in either order.
 Hide never moves windows; Move never changes Hide state.
 
