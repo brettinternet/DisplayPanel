@@ -4136,6 +4136,11 @@ final class AppModel: ObservableObject {
                handoffInspectionFailure == nil, !protectionQuiescencePending,
                protectionQuiescenceFailure == nil {
                 rearmProtectionAfterDisplayRecovery()
+            } else if handoffStatus?.hasUnresolvedJournal != true {
+                // Ordinary wake has no recovery journal to trigger rearming.
+                // Reconcile after clearing the lifecycle gate, not only while
+                // refreshDisplays still sees automation as unable to run.
+                reconcileProtection()
             }
         }
         onStatusChange?()

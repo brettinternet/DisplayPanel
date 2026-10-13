@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Resume enabled automation after display wake or configuration changes without requiring a manual refresh.
+
 ## 0.8.1
 
 - Show hidden, paused, and attention states on the menu-bar mark.

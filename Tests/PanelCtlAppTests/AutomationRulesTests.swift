@@ -577,6 +577,81 @@ final class AutomationRulesTests: XCTestCase {
     }
 
     @MainActor
+    func testLifecycleCompletionResumesAutomationWithoutRefreshAndPreservesUserPauses() async throws {
+        let helper = try makeHelper(cleanup: false)
+        let directory = helper.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let log = directory.appendingPathComponent("events.log")
+        setenv("PANELCTL_HELPER", helper.path, 1)
+        setenv("PANELCTL_TEST_LOG", log.path, 1)
+        defer { unsetenv("PANELCTL_HELPER"); unsetenv("PANELCTL_TEST_LOG") }
+        let suite = "panelctl-lifecycle-rearm-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        var settings = ProtectionPreferences()
+        settings.selectedDisplayUUIDs = [inventory[0].uuid!]
+        let rule = ProtectionRule(name: "OLED protection", settings: settings)
+        defaults.set(try JSONEncoder().encode(AutomationPreferences(isEnabled: true, rules: [rule])),
+                     forKey: "automationRules")
+        let coordinator = makeCoordinator(directory: directory.appendingPathComponent("journals"))
+        let model = AppModel(
+            defaults: defaults,
+            displayProvider: { self.inventory },
+            idleSecondsProvider: { 3600 },
+            inspectHandoff: { DisplayHandoffStatus(state: .none, journalPath: "/tmp/no-display-recovery.json") },
+            protectionCoordinator: coordinator,
+            displayWakeSettleDelay: 0.01
+        )
+        try await waitUntil { model.runtimeState == .waiting }
+        let savedPreferences = model.automationPreferences
+        let savedData = defaults.data(forKey: "automationRules")
+
+        model.beginDisplaySleepTransition()
+        model.displayWakeObserved(screensAwake: false)
+        try await waitUntil { !coordinator.hasManagedProcess }
+        XCTAssertTrue(model.displayLifecycleTransitioning, "system wake alone must not resume automation")
+        model.displayWakeObserved(screensAwake: true)
+        XCTAssertTrue(model.displayLifecycleTransitioning, "wait for screen settlement")
+        try await waitUntil { !model.displayLifecycleTransitioning && model.runtimeState == .waiting }
+        XCTAssertTrue(coordinator.hasManagedProcess, "no status query or manual refresh should be needed")
+
+        // Non-sleep screen changes and an unmatched wake also clear this gate.
+        model.displayConfigurationChanged(restartWatcher: true)
+        try await waitUntil { model.runtimeState == .waiting }
+        model.displayWakeObserved(screensAwake: true)
+        try await waitUntil { model.runtimeState == .waiting }
+        let launches = try String(contentsOf: log, encoding: .utf8)
+            .components(separatedBy: .newlines).filter { $0.hasPrefix("launch:") }
+        XCTAssertEqual(launches.count, 4)
+        XCTAssertTrue(launches.dropFirst().allSatisfy { $0.hasSuffix("rearm:1") },
+                      "replacement helpers must not reuse pre-sleep idle time")
+        XCTAssertEqual(model.automationPreferences, savedPreferences)
+        XCTAssertEqual(defaults.data(forKey: "automationRules"), savedData)
+
+        for snoozed in [false, true] {
+            if snoozed {
+                model.setProtectionEnabled(true)
+                model.snooze(for: 3600)
+            } else {
+                model.setProtectionEnabled(false)
+            }
+            try await waitUntil { !coordinator.hasManagedProcess }
+            let pausedPreferences = model.automationPreferences
+            let snoozeExpiry = model.snoozedUntil
+            let eventsBefore = try String(contentsOf: log, encoding: .utf8)
+            model.beginDisplaySleepTransition()
+            model.displayWakeObserved(screensAwake: true)
+            try await waitUntil { !model.displayLifecycleTransitioning }
+            model.displayConfigurationChanged(restartWatcher: true)
+            XCTAssertFalse(coordinator.hasManagedProcess, "lifecycle completion must respect user pauses")
+            XCTAssertEqual(model.automationPreferences, pausedPreferences)
+            XCTAssertEqual(model.snoozedUntil, snoozeExpiry)
+            XCTAssertEqual(try String(contentsOf: log, encoding: .utf8), eventsBefore)
+        }
+        await withCheckedContinuation { continuation in model.shutdown { continuation.resume() } }
+    }
+
+    @MainActor
     func testAggregateStatusAndMasterControlsCoverMultipleEnabledRules() async throws {
         let helper = try makeHelper(cleanup: false)
         defer { try? FileManager.default.removeItem(at: helper.deletingLastPathComponent()) }
@@ -745,7 +820,7 @@ final class AutomationRulesTests: XCTestCase {
         } else {
             body = """
             #!/bin/bash
-            printf 'launch:%s\\n' "$*" >> "$PANELCTL_TEST_LOG"
+            printf 'launch:%s rearm:%s\\n' "$*" "${PANELCTL_REARM_ON_START:-0}" >> "$PANELCTL_TEST_LOG"
             printf '{"state":"waiting","blackedOutDisplayIDs":[]}\\n'
             trap 'printf "term\\n" >> "$PANELCTL_TEST_LOG"; exit 0' TERM
             while IFS= read -r command; do
