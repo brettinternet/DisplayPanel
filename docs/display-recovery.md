@@ -148,6 +148,45 @@ only mode/mirror/move flags is intentionally not repaired. Passive logging needs
 no display writes; a live repair trial still requires separate scoped approval.
 No live trial was performed for TASK-78.
 
+## Protected display modes
+
+**Displays → Mode protection** is off by default for every display. Choose
+**Remember current mode**, then enable **Protect** for that display. Remember
+captures the exact logical resolution, pixel dimensions (scale), refresh rate,
+mode ID and flags. Identity is the saved-display rule: one matching UUID plus
+vendor/model/serial; a numeric display address is rebound only from that identity.
+Only **Remember current mode** or **Forget mode** replaces or removes a saved
+mode. Turning protection off keeps it. Ordinary System Settings edits stand and
+never silently update the saved choice.
+
+After reconnect/input return or wake, PanelCtl waits for stable inventory and
+restores a differing exact mode once, before sampling the arrangement for
+correction. The saved mode must appear in CoreGraphics' offered list, including
+its ID and flags; no nearest resolution, refresh rate or scale is substituted.
+A late mode can arrive within the original 15-second transition deadline. At
+the deadline, protection reports the unavailable mode (or other blocking reason)
+without writing it or proceeding to automatic arrangement correction. Protection
+does not apply on launch, even when arrangement protection does.
+
+Hidden and mirrored displays are skipped. An unresolved recovery journal suspends
+mode protection; Hide/Show recovery keeps owning those modes. PanelCtl operations,
+wake resume and hidden-display input-return repair suspend correction. Each write
+holds the operation and default-journal locks, rechecks identity and topology at
+staging and commit, uses a public session-only CoreGraphics transaction, and verifies
+the resulting exact mode. A failed write or verification is reported and never
+retried in that transition. Own-operation notifications cannot start another pass.
+Results and refusal reasons appear beside the saved mode in Settings.
+
+Rotation is not changed (the public mode setter does not set rotation). HDR,
+color profiles, gamma, firmware and private display-enable setters are excluded.
+Saved mode IDs may cease to be offered after a reboot or driver change; explicitly
+remember the desired current mode again rather than allowing an approximation.
+
+Hardware status: fake-backed tests cover reduced-mode input return, late/missing
+modes, exclusions, ordering, lock and topology races, own notifications, and failed
+verification. No live mode-write, monitor-input, wake or native Settings interaction
+trial was performed for TASK-81; hardware behavior remains unverified.
+
 ## Remembered arrangements
 
 **Displays → Arrangement protection** is separate from recovery. It is off by

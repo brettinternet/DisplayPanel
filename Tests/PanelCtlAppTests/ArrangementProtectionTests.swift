@@ -29,6 +29,21 @@ final class ArrangementProtectionTests: XCTestCase {
             }
             return PanelCtlCore.DisplayArrangement(members: members)
         }
+        static func mode(width: Int = 1920, rate: Double = 240) throws -> RecoveryMode {
+            try JSONDecoder().decode(RecoveryMode.self, from: JSONSerialization.data(withJSONObject: [
+                "id": width, "width": width, "height": 1080, "pixelWidth": width * 2,
+                "pixelHeight": 2160, "refreshRate": rate, "flags": 0
+            ]))
+        }
+        var modes: [String: RecoveryMode] = [:]
+        var modeOffered = true
+        var mirrored: Set<UInt32> = []
+        var modeWrites = 0
+        var modeLockHeld = false
+        var modeFailure = false
+        var modeOnWrite: (() -> Void)?
+        var modeBeforeBoundary: (() -> Void)?
+        var order: [String] = []
         var date = Date()
         var journal = DisplayHandoffStatus(state: .none, journalPath: "/tmp/panelctl-arrangement-fake/current.json")
         var writes = 0
@@ -60,7 +75,9 @@ final class ArrangementProtectionTests: XCTestCase {
             defaults.set(try JSONEncoder().encode(preferences), forKey: AppModel.arrangementPreferencesKey)
         }
         let model = AppModel(defaults: defaults, displayProvider: { state.records }, now: { state.date },
-            idleSecondsProvider: { nil }, isDisplayMirrored: { _ in false }, inspectHandoff: { state.journal },
+            idleSecondsProvider: { nil }, isDisplayMirrored: { state.mirrored.contains($0) }, inspectHandoff: {
+                state.modeLockHeld ? DisplayHandoffStatus(state: .busy, journalPath: state.journal.journalPath) : state.journal
+            },
             coverDisplays: { _ in [] }, quiesceProtection: { $0(true, nil) }, displayWakeSettleDelay: 0.01,
             captureArrangement: { excluded in
                 if state.captureFailure { throw ArrangementProtectionError("Topology is still changing.") }
@@ -74,9 +91,28 @@ final class ArrangementProtectionTests: XCTestCase {
                 guard current == expected else { throw ArrangementProtectionError("Topology changed at write boundary.") }
                 guard !current.samePlacement(as: desired) else { return false }
                 state.writes += 1
+                state.order.append("arrangement")
                 state.onWrite?()
                 if state.failWrite { throw ArrangementProtectionError("Arrangement did not verify.") }
                 state.layout = desired
+                try revalidate()
+                return true
+            }, captureMode: { uuid in
+                let display = try XCTUnwrap(state.records.first { $0.uuid == uuid })
+                return SavedDisplayMode(display: display, mode: try state.modes[uuid] ?? State.mode())
+            }, modeAvailable: { _ in state.modeOffered }, writeMode: { saved, revalidate in
+                state.modeLockHeld = true
+                defer { state.modeLockHeld = false }
+                state.modeBeforeBoundary?()
+                try revalidate()
+                state.modeWrites += 1
+                state.order.append("mode")
+                state.modeOnWrite?()
+                if state.modeFailure { throw ArrangementProtectionError("Saved display mode did not verify.") }
+                state.modes[saved.uuid] = saved.mode
+                if let index = state.layout.members.firstIndex(where: { $0.uuid == saved.uuid }) {
+                    state.layout.members[index].width = Double(saved.mode.width)
+                }
                 try revalidate()
                 return true
             })
@@ -302,6 +338,178 @@ final class ArrangementProtectionTests: XCTestCase {
         model.displayReconfigured(display: 2, flags: .addFlag, ownOperation: true)
         try await Task.sleep(nanoseconds: 60_000_000)
         XCTAssertEqual(state.writes, 1)
+    }
+
+    func testModeRememberIsExplicitOffByDefaultAndPersistsWithoutImplicitReplacement() throws {
+        let state = State()
+        let (model, defaults) = try makeModel(state)
+        let uuid = state.layout.members[0].uuid
+        XCTAssertTrue(model.modePreferences.displays.isEmpty)
+        try model.rememberCurrentMode(uuid: uuid)
+        let saved = try XCTUnwrap(model.modePreferences.displays.first)
+        XCTAssertFalse(saved.enabled)
+        try model.setModeProtectionEnabled(uuid: uuid, enabled: true)
+        state.modes[uuid] = try State.mode(rate: 60)
+        model.refreshDisplays()
+        try model.setModeProtectionEnabled(uuid: uuid, enabled: false)
+        let (reloaded, _) = try makeModel(state, defaults: defaults)
+        XCTAssertEqual(reloaded.modePreferences.displays.first?.saved, saved.saved)
+        XCTAssertFalse(try XCTUnwrap(reloaded.modePreferences.displays.first).enabled)
+        try reloaded.rememberCurrentMode(uuid: uuid)
+        XCTAssertEqual(reloaded.modePreferences.displays.first?.saved.mode.refreshRate, 60)
+        try reloaded.forgetMode(uuid: uuid)
+        XCTAssertTrue(reloaded.modePreferences.displays.isEmpty)
+        XCTAssertEqual(state.modeWrites, 0)
+    }
+
+    func testModeInputReturnRunsBeforeArrangementAndIgnoresManualAndOwnChanges() async throws {
+        let state = State()
+        let (model, _) = try makeModel(state)
+        let uuid = state.layout.members[0].uuid
+        try model.rememberCurrentMode(uuid: uuid)
+        try model.setModeProtectionEnabled(uuid: uuid, enabled: true)
+        try model.rememberCurrentArrangement()
+        model.setArrangementProtectionEnabled(true)
+        state.modes[uuid] = try State.mode(width: 1280, rate: 60)
+        state.layout.members[0].width = 1280
+        state.layout.members[1].x = 1280
+        model.displayParametersChanged()
+        model.displayReconfigured(display: 1, flags: .setModeFlag)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(state.modeWrites, 0, "System Settings changes without a transition stand")
+        state.modeOnWrite = { [weak model] in
+            model?.displayReconfigured(display: 1, flags: .addFlag)
+            model?.displayParametersChanged()
+        }
+        model.displayReconfigured(display: 1, flags: .addFlag)
+        try await waitFor { state.writes == 1 }
+        XCTAssertEqual(state.order, ["mode", "arrangement"])
+        XCTAssertEqual(state.layout.members[1].x, 1920)
+        XCTAssertEqual(state.modes[uuid]?.refreshRate, 240)
+        state.modes[uuid] = try State.mode(rate: 60)
+        model.displayReconfigured(display: 1, flags: .addFlag, ownOperation: true)
+        model.displayReconfigured(display: 1, flags: .setModeFlag)
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(state.modeWrites, 1)
+    }
+
+    func testModeLateArrivalAndDeadlineNeverApproximateOrRetryVerificationFailure() async throws {
+        for outcome in ["late-success", "verification-failure", "deadline"] {
+            let state = State()
+            let (model, _) = try makeModel(state)
+            let uuid = state.layout.members[0].uuid
+            try model.rememberCurrentMode(uuid: uuid)
+            try model.setModeProtectionEnabled(uuid: uuid, enabled: true)
+            state.modes[uuid] = try State.mode(rate: 60)
+            state.modeOffered = false
+            model.displayReconfigured(display: 1, flags: .addFlag)
+            try await waitFor { model.modeResults[uuid]?.contains("unavailable") == true }
+            XCTAssertEqual(state.modeWrites, 0)
+            if outcome == "deadline" {
+                state.date.addTimeInterval(16)
+                try await waitFor { model.modeResults[uuid]?.contains("15 seconds") == true }
+                state.modeOffered = true
+                model.displayReconfigured(display: 1, flags: .setModeFlag)
+                try await Task.sleep(nanoseconds: 40_000_000)
+                XCTAssertEqual(state.modeWrites, 0)
+            } else {
+                state.modeFailure = outcome == "verification-failure"
+                state.modeOffered = true
+                try await waitFor { state.modeWrites == 1 }
+                XCTAssertTrue(model.modeResults[uuid]?.contains(state.modeFailure ? "did not verify" : "Restored and verified") == true)
+                if !state.modeFailure { XCTAssertEqual(state.modes[uuid]?.refreshRate, 240) }
+                model.displayParametersChanged()
+                try await Task.sleep(nanoseconds: 50_000_000)
+                XCTAssertEqual(state.modeWrites, 1)
+            }
+        }
+    }
+
+    func testModeSkipsJournalAndMirrorAndRechecksWakeAtBoundary() async throws {
+        for reason in ["journal", "mirror", "boundary"] {
+            let state = State()
+            let (model, _) = try makeModel(state)
+            let uuid = state.layout.members[0].uuid
+            try model.rememberCurrentMode(uuid: uuid)
+            try model.setModeProtectionEnabled(uuid: uuid, enabled: true)
+            state.modes[uuid] = try State.mode(rate: 60)
+            if reason == "journal" {
+                state.journal = DisplayHandoffStatus(state: .unsupported, journalPath: "/tmp/fake/current.json", journalID: "unresolved")
+            } else if reason == "mirror" {
+                state.mirrored = [1]
+            } else {
+                state.modeBeforeBoundary = { [weak model] in model?.beginDisplaySleepTransition() }
+            }
+            model.displayReconfigured(display: 1, flags: .addFlag)
+            try await Task.sleep(nanoseconds: 70_000_000)
+            XCTAssertEqual(state.modeWrites, 0, reason)
+            XCTAssertNotNil(model.modeResults[uuid])
+        }
+    }
+
+    func testModeStaggeredReconnectKeepsMissingDisplayPendingWithoutReplenishingAttempts() async throws {
+        let state = State()
+        let (model, _) = try makeModel(state)
+        let returning = state.layout.members[2]
+        let waiting = state.layout.members[0].uuid
+        for uuid in [returning.uuid, waiting] {
+            try model.rememberCurrentMode(uuid: uuid)
+            try model.setModeProtectionEnabled(uuid: uuid, enabled: true)
+            state.modes[uuid] = try State.mode(rate: 60)
+        }
+        state.modeOffered = false
+        state.layout.members.removeLast()
+        model.displayReconfigured(display: returning.id, flags: .removeFlag)
+        try await waitFor { model.modeResults[returning.uuid]?.contains("reconnect") == true && model.modeResults[waiting]?.contains("unavailable") == true }
+        state.layout.members.append(returning)
+        state.modeOffered = true
+        model.displayReconfigured(display: returning.id, flags: .addFlag)
+        try await waitFor { state.modeWrites == 2 }
+        XCTAssertEqual(state.modes[returning.uuid]?.refreshRate, 240)
+        XCTAssertEqual(state.modes[waiting]?.refreshRate, 240)
+        XCTAssertEqual(state.modeWrites, 2)
+    }
+
+    func testRealReconnectDuringLaunchSettlementRestoresModeBeforeArrangement() async throws {
+        let state = State()
+        let (model, defaults) = try makeModel(state)
+        let uuid = state.layout.members[0].uuid
+        try model.rememberCurrentMode(uuid: uuid)
+        try model.setModeProtectionEnabled(uuid: uuid, enabled: true)
+        try model.rememberCurrentArrangement()
+        model.setArrangementProtectionEnabled(true)
+        model.setArrangementApplyOnLaunch(true)
+        state.modes[uuid] = try State.mode(width: 1280, rate: 60)
+        state.layout.members[0].width = 1280
+        state.layout.members[1].x = 1280
+        state.captureFailure = true
+        let (reloaded, _) = try makeModel(state, defaults: defaults)
+        try await waitFor { reloaded.arrangementLastResult?.contains("changing") == true }
+        XCTAssertEqual(state.modeWrites, 0, "launch itself cannot restore modes")
+        reloaded.displayReconfigured(display: 1, flags: .addFlag)
+        state.captureFailure = false
+        try await waitFor { state.writes == 1 }
+        XCTAssertEqual(state.order, ["mode", "arrangement"])
+        XCTAssertEqual(state.layout.members[1].x, 1920)
+    }
+
+    func testModeWakeRestoresOnlyAfterResumeAndDoesNotApplyOnLaunch() async throws {
+        let state = State()
+        let (model, defaults) = try makeModel(state)
+        let uuid = state.layout.members[0].uuid
+        try model.rememberCurrentMode(uuid: uuid)
+        try model.setModeProtectionEnabled(uuid: uuid, enabled: true)
+        state.modes[uuid] = try State.mode(rate: 60)
+        let (reloaded, _) = try makeModel(state, defaults: defaults)
+        try await Task.sleep(nanoseconds: 40_000_000)
+        XCTAssertEqual(state.modeWrites, 0)
+        reloaded.beginDisplaySleepTransition()
+        reloaded.displayWakeObserved(screensAwake: false)
+        try await Task.sleep(nanoseconds: 40_000_000)
+        XCTAssertEqual(state.modeWrites, 0)
+        reloaded.displayWakeObserved(screensAwake: true)
+        try await waitFor { state.modeWrites == 1 }
+        XCTAssertEqual(state.modes[uuid]?.refreshRate, 240)
     }
 
     func testExplicitRestoreThroughCLITransportAndActionSharesChecks() async throws {

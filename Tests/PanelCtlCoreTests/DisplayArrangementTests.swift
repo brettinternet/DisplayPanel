@@ -426,6 +426,109 @@ final class DisplayArrangementTests: XCTestCase {
         XCTAssertEqual(pauses, 5)
     }
 
+    private func mode(rate: Double) throws -> RecoveryMode {
+        try JSONDecoder().decode(RecoveryMode.self, from: JSONSerialization.data(withJSONObject: [
+            "id": 7, "width": 1920, "height": 1080, "pixelWidth": 3840,
+            "pixelHeight": 2160, "refreshRate": rate, "flags": 0
+        ]))
+    }
+
+    private func modeController(_ layout: @escaping () -> DisplayArrangement,
+                                current: @escaping () throws -> RecoveryMode,
+                                offered: @escaping () -> [RecoveryMode],
+                                transaction: DisplayModeTransaction) -> DisplayModeProtectionController {
+        var controller = DisplayModeProtectionController()
+        controller.recoveryStore = recoveryStore
+        controller.operationLock = { self.operationStore }
+        controller.records = { self.records(layout()) }
+        controller.mirrored = { _ in false }
+        controller.rotation = { _ in 0 }
+        controller.currentMode = { _ in try current() }
+        controller.availableModes = { _ in offered() }
+        controller.transaction = transaction
+        controller.convergencePause = {}
+        return controller
+    }
+
+    func testModeRestoreExactSessionCommitRebindsAddressAndVerifiesWithoutRetry() throws {
+        var layout = arrangement()
+        let high = try mode(rate: 240), low = try mode(rate: 60)
+        let saved = SavedDisplayMode(display: records(layout)[0], mode: high)
+        layout.members[0].id = 81
+        var current = low
+        var commits = 0
+        var verifySuccess = true
+        let transaction = DisplayModeTransaction(
+            begin: { CGDisplayConfigRef(bitPattern: 1)! },
+            prepare: { id, mode in
+                XCTAssertEqual(id, 81)
+                XCTAssertEqual(mode, high)
+                return { _ in }
+            }, complete: { _, option in
+                XCTAssertEqual(option, .forSession)
+                commits += 1
+                if verifySuccess { current = high }
+            }, cancel: { _ in XCTFail("completed transactions must not cancel") })
+        let sut = modeController({ layout }, current: { current }, offered: { [low, high] }, transaction: transaction)
+        XCTAssertTrue(try sut.restore(saved))
+        XCTAssertEqual(commits, 1)
+        XCTAssertFalse(try sut.restore(saved))
+        current = low
+        verifySuccess = false
+        XCTAssertThrowsError(try sut.restore(saved)) { XCTAssertTrue($0.localizedDescription.contains("did not verify")) }
+        XCTAssertEqual(commits, 2, "verification retries must not write again")
+    }
+
+    func testModeRestoreRejectsMissingExactModeIdentityMirrorsJournalsAndLocks() throws {
+        var layout = arrangement()
+        let high = try mode(rate: 240), low = try mode(rate: 60)
+        let saved = SavedDisplayMode(display: records(layout)[0], mode: high)
+        var offered = [low]
+        var begins = 0
+        var sut = modeController({ layout }, current: { low }, offered: { offered }, transaction: DisplayModeTransaction(
+            begin: { begins += 1; throw RecoveryError.unsafe("unexpected write") }, prepare: { _, _ in { _ in } }))
+        XCTAssertThrowsError(try sut.restore(saved)) { XCTAssertTrue($0.localizedDescription.contains("unavailable")) }
+        offered = [high]
+        layout.members[0].serial += 1
+        XCTAssertThrowsError(try sut.restore(saved))
+        layout = arrangement()
+        layout.members.append(layout.members[0])
+        XCTAssertThrowsError(try sut.restore(saved))
+        layout = arrangement()
+        sut.mirrored = { _ in true }
+        XCTAssertThrowsError(try sut.restore(saved))
+        sut.mirrored = { _ in false }
+        try operationStore.lock()
+        XCTAssertThrowsError(try sut.restore(saved))
+        operationStore.unlock()
+        try recoveryStore.lock()
+        XCTAssertThrowsError(try sut.restore(saved))
+        try recoveryStore.create(RecoveryJournal(snapshot: recoverySnapshot()))
+        recoveryStore.unlock()
+        XCTAssertThrowsError(try sut.restore(saved))
+        XCTAssertEqual(begins, 0)
+    }
+
+    func testModeRestoreCancelsTopologyAndIdentityRacesAtCommitBoundary() throws {
+        for mutation in ["topology", "identity", "mode"] {
+            var layout = arrangement()
+            let high = try mode(rate: 240), low = try mode(rate: 60)
+            let saved = SavedDisplayMode(display: records(layout)[0], mode: high)
+            var current = low
+            var commits = 0, cancels = 0
+            let transaction = DisplayModeTransaction(
+                begin: { CGDisplayConfigRef(bitPattern: 1)! }, prepare: { _, _ in { _ in
+                    if mutation == "topology" { layout.members[1].x += 10 }
+                    if mutation == "identity" { layout.members[0].id = 88 }
+                    if mutation == "mode" { current = high }
+                } }, complete: { _, _ in commits += 1 }, cancel: { _ in cancels += 1 })
+            let sut = modeController({ layout }, current: { current }, offered: { [low, high] }, transaction: transaction)
+            XCTAssertThrowsError(try sut.restore(saved), mutation)
+            XCTAssertEqual(commits, 0, mutation)
+            XCTAssertEqual(cancels, 1, mutation)
+        }
+    }
+
     func testNoOpRestoreDoesNotOpenWriter() throws {
         let current = arrangement()
         let sut = controller(records: { self.records(current) }, transaction: DisplayArrangementTransaction(

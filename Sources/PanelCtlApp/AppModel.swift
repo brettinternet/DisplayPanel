@@ -213,6 +213,18 @@ final class AppModel: ObservableObject {
 
     var onStatusChange: (() -> Void)?
 
+    static let modePreferencesKey = "displayModes.v1"
+    @Published private(set) var modePreferences = ModeProtectionPreferences()
+    @Published private(set) var modeStorageFailure: String?
+    @Published private(set) var modeResults: [String: String] = [:]
+    private let captureMode: (String) throws -> SavedDisplayMode
+    private let modeAvailable: (SavedDisplayMode) throws -> Bool
+    private let writeMode: (SavedDisplayMode, () throws -> Void) throws -> Bool
+    private var modeWriting = false
+    private var modePending: Set<String> = []
+    private var modeTransitionSeeded = false
+    private var modeSample: [DisplayRecord]?
+
     static let arrangementPreferencesKey = "displayArrangements.v1"
     @Published private(set) var arrangementPreferences = ArrangementPreferences()
     @Published private(set) var arrangementStorageFailure: String?
@@ -325,6 +337,9 @@ final class AppModel: ObservableObject {
         writeArrangement: @escaping (PanelCtlCore.DisplayArrangement, PanelCtlCore.DisplayArrangement, Set<String>, () throws -> Void) throws -> Bool = {
             try DisplayArrangementController().restore($0, expected: $1, excluding: $2, revalidate: $3)
         },
+        captureMode: @escaping (String) throws -> SavedDisplayMode = { try DisplayModeProtectionController().capture(uuid: $0) },
+        modeAvailable: @escaping (SavedDisplayMode) throws -> Bool = { try DisplayModeProtectionController().isAvailable($0) },
+        writeMode: @escaping (SavedDisplayMode, () throws -> Void) throws -> Bool = { try DisplayModeProtectionController().restore($0, revalidate: $1) },
         windowMoveUptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         keepWindowsOffScheduler: KeepWindowsOffScheduling? = nil,
         mouseButtonPressed: @escaping () -> Bool = {
@@ -336,6 +351,18 @@ final class AppModel: ObservableObject {
         self.defaults = defaults
         self.captureArrangement = captureArrangement
         self.writeArrangement = writeArrangement
+        self.captureMode = captureMode
+        self.modeAvailable = modeAvailable
+        self.writeMode = writeMode
+        if let data = defaults.data(forKey: Self.modePreferencesKey) {
+            do {
+                let saved = try JSONDecoder().decode(ModeProtectionPreferences.self, from: data)
+                try saved.validate()
+                modePreferences = saved
+            } catch {
+                modeStorageFailure = "Saved modes could not be read and were preserved. \(error.localizedDescription)"
+            }
+        }
         if let data = defaults.data(forKey: Self.arrangementPreferencesKey) {
             do {
                 let saved = try JSONDecoder().decode(ArrangementPreferences.self, from: data)
@@ -488,7 +515,124 @@ final class AppModel: ObservableObject {
         reconcileProtection()
         startCountdownTimer()
         reconcileKeepWindowsOff(startPass: true)
-        if arrangementPreferences.applyOnLaunch { beginArrangementTransition() }
+        if arrangementPreferences.applyOnLaunch { beginArrangementTransition(protectModes: false) }
+    }
+
+    // MARK: Remembered modes
+
+    private func saveModePreferences(_ value: ModeProtectionPreferences) throws {
+        if let modeStorageFailure { throw ArrangementProtectionError(modeStorageFailure) }
+        try value.validate()
+        defaults.set(try JSONEncoder().encode(value), forKey: Self.modePreferencesKey)
+        modePreferences = value
+        cancelArrangementSettlement()
+        onStatusChange?()
+    }
+
+    func rememberCurrentMode(uuid: String) throws {
+        refreshHandoffStatus()
+        if let reason = arrangementSuspensionReason() { throw ArrangementProtectionError(reason) }
+        guard !arrangementExcludedUUIDs.contains(uuid.lowercased()) else {
+            throw ArrangementProtectionError("Show this display before remembering its mode.")
+        }
+        let saved = try captureMode(uuid)
+        try saved.validate()
+        var updated = modePreferences
+        let enabled = updated.displays.first { $0.id == uuid.lowercased() }?.enabled ?? false
+        updated.displays.removeAll { $0.id == uuid.lowercased() }
+        updated.displays.append(ProtectedDisplayMode(saved: saved, enabled: enabled))
+        try saveModePreferences(updated)
+        modeResults[uuid.lowercased()] = "Remembered the exact current mode."
+    }
+
+    func forgetMode(uuid: String) throws {
+        var updated = modePreferences
+        updated.displays.removeAll { $0.id == uuid.lowercased() }
+        try saveModePreferences(updated)
+        modeResults.removeValue(forKey: uuid.lowercased())
+    }
+
+    func setModeProtectionEnabled(uuid: String, enabled: Bool) throws {
+        var updated = modePreferences
+        guard let index = updated.displays.firstIndex(where: { $0.id == uuid.lowercased() }) else {
+            throw ArrangementProtectionError("Remember a mode before enabling protection.")
+        }
+        updated.displays[index].enabled = enabled
+        try saveModePreferences(updated)
+    }
+
+    /// Uses the same transition deadline as arrangement protection, but consumes
+    /// each display before writing. Arrangement sampling starts only afterwards.
+    private func settleProtectedModes() -> Bool {
+        guard !modePending.isEmpty else { return true }
+        let inventory = displayProvider()
+        guard modeSample == inventory else {
+            modeSample = inventory
+            return false
+        }
+        for entry in modePreferences.displays where modePending.contains(entry.id) {
+            let uuid = entry.id
+            let saved = entry.saved
+            do {
+                let candidates = inventory.filter { $0.uuid?.caseInsensitiveCompare(uuid) == .orderedSame }
+                guard !candidates.isEmpty else {
+                    modeResults[uuid] = "Waiting for the saved display to reconnect"
+                    continue
+                }
+                guard candidates.count == 1, let display = candidates.first,
+                      display.vendor == saved.vendor, display.model == saved.model, display.serial == saved.serial else {
+                    throw ArrangementProtectionError("Saved display identity is missing, ambiguous or changed.")
+                }
+                if arrangementExcludedUUIDs.contains(uuid) || isDisplayMirrored(display.id) {
+                    modePending.remove(uuid)
+                    modeResults[uuid] = "Skipped: hidden or mirrored display is owned by recovery."
+                    continue
+                }
+                guard display.online, display.active, !display.asleep else {
+                    modeResults[uuid] = "Waiting for a visible, awake display"
+                    continue
+                }
+                let current = try captureMode(uuid)
+                if current.mode == saved.mode {
+                    modePending.remove(uuid)
+                    modeResults[uuid] = "The saved mode already matches."
+                    continue
+                }
+                guard try modeAvailable(saved) else {
+                    modeResults[uuid] = "Saved mode unavailable: \(saved.mode.description)"
+                    continue
+                }
+                // A failed boundary check or verification consumes this attempt.
+                modePending.remove(uuid)
+                let expectedPreferences = modePreferences
+                func revalidate() throws {
+                    // The core writer owns the journal lock here; inspecting it
+                    // again would mistake our own lock for a competing operation.
+                    if let reason = arrangementSuspensionReason() { throw ArrangementProtectionError(reason) }
+                    guard modePreferences == expectedPreferences, !arrangementExcludedUUIDs.contains(uuid),
+                          !isDisplayMirrored(display.id) else {
+                        throw ArrangementProtectionError("Mode settings or display visibility changed during the operation.")
+                    }
+                }
+                try revalidate()
+                modeWriting = true
+                actionTopologyWriteInProgress = true
+                displayReconfigurationEvents.operationChanged(busy: true)
+                defer {
+                    modeWriting = false
+                    actionTopologyWriteInProgress = false
+                    displayReconfigurationEvents.operationChanged(busy: false)
+                }
+                let changed = try writeMode(saved, revalidate)
+                modeResults[uuid] = changed ? "Restored and verified the exact saved mode." : "The saved mode already matches."
+                displays = displayProvider()
+            } catch {
+                modePending.remove(uuid)
+                modeResults[uuid] = error.localizedDescription
+            }
+        }
+        onStatusChange?()
+        return modePending.isEmpty
     }
 
     // MARK: Remembered arrangements
@@ -682,12 +826,26 @@ final class AppModel: ObservableObject {
         arrangementSettlement = nil
         arrangementDeadline = nil
         arrangementSample = nil
+        modePending = []
+        modeTransitionSeeded = false
+        modeSample = nil
     }
 
-    private func beginArrangementTransition() {
-        guard arrangementPreferences.enabled, !arrangementWriting, !isShuttingDown,
+    private func beginArrangementTransition(protectModes: Bool = true) {
+        guard arrangementPreferences.enabled || (protectModes && modePreferences.displays.contains(where: \.enabled)),
+              !arrangementWriting, !modeWriting, !isShuttingDown,
               !hideOperation.isBusy, runningDisplayAction == nil else { return }
-        if arrangementDeadline == nil { arrangementDeadline = now().addingTimeInterval(15) }
+        if arrangementDeadline == nil {
+            arrangementDeadline = now().addingTimeInterval(15)
+        }
+        // Launch arrangement settlement is not a mode transition. Enroll once
+        // if a real reconnect arrives during it, never replenishing attempts.
+        if protectModes, !modeTransitionSeeded {
+            modeTransitionSeeded = true
+            modePending = modeStorageFailure == nil
+                ? Set(modePreferences.displays.filter(\.enabled).map(\.id)) : []
+        }
+        modeSample = nil
         arrangementSample = nil
         scheduleArrangementSettlement()
     }
@@ -707,15 +865,28 @@ final class AppModel: ObservableObject {
     private func finishArrangementSettlement() {
         guard let deadline = arrangementDeadline else { return }
         guard now() < deadline else {
+            for uuid in modePending {
+                modeResults[uuid] = "Mode protection stopped after 15 seconds: \(modeResults[uuid] ?? "display did not settle"). No mode write was attempted."
+            }
             cancelArrangementSettlement()
             arrangementLastResult = "Arrangement protection stopped: displays did not settle within 15 seconds."
             onStatusChange?()
             return
         }
         refreshHandoffStatus()
-        if arrangementSuspensionReason() != nil {
+        if let reason = arrangementSuspensionReason() {
+            for uuid in modePending { modeResults[uuid] = reason }
+            modeSample = nil
             arrangementSample = nil
             scheduleArrangementSettlement()
+            return
+        }
+        guard settleProtectedModes() else {
+            scheduleArrangementSettlement()
+            return
+        }
+        guard arrangementPreferences.enabled else {
+            cancelArrangementSettlement()
             return
         }
         do {
@@ -4469,7 +4640,7 @@ final class AppModel: ObservableObject {
         // inspect an intermediate journal here: the writer verifies its result,
         // and the next step refreshes and revalidates before doing any work.
         // Sleep/wake/unlock still take the lifecycle path and latch interruption.
-        guard !actionTopologyWriteInProgress, !arrangementWriting else { return }
+        guard !actionTopologyWriteInProgress, !arrangementWriting, !modeWriting else { return }
         // AppKit may deliver the notification after the writer has returned.
         // If it matches our latest verified inventory, nothing new changed.
         // Real inventory changes outside the writer still interrupt the run.
@@ -4585,15 +4756,16 @@ final class AppModel: ObservableObject {
     /// also accompany a user's manual unmirror in System Settings.
     func displayReconfigured(display: UInt32, flags: CGDisplayChangeSummaryFlags,
                              ownOperation: Bool = false) {
-        if !ownOperation, !arrangementWriting, !sleepLifecycleActive {
+        if !ownOperation, !arrangementWriting, !modeWriting, !sleepLifecycleActive {
             if !flags.contains(.beginConfigurationFlag), !flags.intersection([.addFlag, .removeFlag]).isEmpty {
                 beginArrangementTransition()
             } else if arrangementDeadline != nil {
+                modeSample = nil
                 arrangementSample = nil
                 scheduleArrangementSettlement()
             }
         }
-        guard !ownOperation, !isShuttingDown, !sleepLifecycleActive,
+        guard !ownOperation, !arrangementWriting, !modeWriting, !isShuttingDown, !sleepLifecycleActive,
               !hideOperation.isBusy, runningDisplayAction == nil,
               !disconnectAutomationPaused else {
             inputReturnLogger.info("display=\(display) flags=\(flags.rawValue) attribution=suppressed-operation-or-sleep")

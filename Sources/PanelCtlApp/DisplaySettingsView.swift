@@ -18,6 +18,7 @@ struct DisplaySettingsView: View {
                 attentionIDs: Set(model.displayResults.filter(\.value.needsAttention).keys)
             ) { navigation.selectedDisplayID = $0 }
             Form {
+                ModeProtectionSettings(model: model)
                 ArrangementProtectionSettings(model: model)
                 if let failure = model.protectionQuiescenceFailure {
                     Section {

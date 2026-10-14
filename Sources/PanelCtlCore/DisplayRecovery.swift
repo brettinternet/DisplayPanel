@@ -16,14 +16,14 @@ public enum RecoveryError: Error, CustomStringConvertible, LocalizedError {
     public var errorDescription: String? { description }
 }
 
-struct RecoveryMode: Codable, Equatable {
-    let id: Int32
-    let width: Int
-    let height: Int
-    let pixelWidth: Int
-    let pixelHeight: Int
-    let refreshRate: Double
-    let flags: UInt32
+public struct RecoveryMode: Codable, Equatable {
+    public let id: Int32
+    public let width: Int
+    public let height: Int
+    public let pixelWidth: Int
+    public let pixelHeight: Int
+    public let refreshRate: Double
+    public let flags: UInt32
 
     init(_ mode: CGDisplayMode) {
         id = mode.ioDisplayModeID
@@ -32,7 +32,7 @@ struct RecoveryMode: Codable, Equatable {
         refreshRate = mode.refreshRate; flags = mode.ioFlags
     }
 
-    var description: String {
+    public var description: String {
         "\(width)×\(height) at \(refreshRate) Hz (pixels \(pixelWidth)×\(pixelHeight), mode \(id), flags \(flags))"
     }
 
