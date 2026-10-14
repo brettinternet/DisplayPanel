@@ -524,11 +524,12 @@ final class AppModel: ObservableObject {
             try current.validate()
             let canRemember = current.members.count >= 2
             if let saved = arrangementPreferences.remembered.first(where: { $0.setKey == current.setKey }) {
-                let differs = !current.samePlacement(as: saved)
+                let differs: Bool
                 do {
-                    _ = try current.restoring(saved)
+                    differs = !current.samePlacement(as: try current.restoringRemembered(saved))
                 } catch {
-                    return status("suspended", error.localizedDescription, differs: differs, remember: canRemember)
+                    return status("suspended", error.localizedDescription,
+                        differs: !current.samePlacement(as: saved), remember: canRemember)
                 }
                 return status(arrangementPreferences.enabled ? "remembered" : "unprotected",
                     arrangementPreferences.enabled ? "This exact visible set has a remembered arrangement." : "Protection is off; remembered arrangements are kept.",
@@ -577,7 +578,7 @@ final class AppModel: ObservableObject {
         guard current.members.count >= 2 else { throw ArrangementProtectionError("Connect at least two visible displays to remember an arrangement.") }
         var updated = arrangementPreferences
         updated.remembered.removeAll { $0.setKey == current.setKey }
-        updated.remembered.append(current)
+        updated.remembered.append(try current.rememberingRelationships())
         try saveArrangementPreferences(updated)
         arrangementLastResult = "Remembered the current arrangement."
     }
@@ -613,7 +614,7 @@ final class AppModel: ObservableObject {
         try current.validate()
         let desired: PanelCtlCore.DisplayArrangement
         if let saved = arrangementPreferences.remembered.first(where: { $0.setKey == current.setKey }) {
-            desired = try current.restoring(saved)
+            desired = try current.restoringRemembered(saved)
         } else if let preferred = arrangementPreferences.preferredMain,
                   let translated = try current.preferringMain(preferred) {
             desired = translated

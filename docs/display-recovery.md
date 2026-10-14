@@ -190,8 +190,24 @@ arrangement plan; a later topology change stops the run rather than rebinding it
 
 Saved identities require exactly one matching UUID and identical vendor, model
 and serial. A new numeric display ID is allowed between operations, never during
-one. Changed logical size or rotation blocks a saved arrangement. Duplicate or
-ambiguous identities are refused. If macOS swaps UUIDs between identical monitors
+one. Resolution, HiDPI scale and rotation changes are tolerated using the current
+logical sizes; PanelCtl does not restore modes or rotation. Remember also saves a
+neighbor tree rooted at the saved main display. Each neighbor keeps its side and
+top/left or bottom/right edge alignment; other alignments keep their top/left
+offset in logical points. Equal-size alignment ties choose top/left. Neighbor
+selection is deterministic (breadth-first, UUID order), not a guess about ports.
+Older saves infer the same relationships from their saved geometry when needed.
+Unchanged geometry uses the exact saved origins, including older unusual layouts.
+
+Resized layouts must retain each selected shared edge, remain contiguous and
+non-overlapping, and have integer origins in the CoreGraphics range. Disconnected,
+overlapping or corner-only saved layouts cannot adapt. Large offsets or conflicting
+branches can make a resized layout impossible; PanelCtl refuses with a reason
+rather than moving displays arbitrarily or falling back to Preferred main. Extra
+contacts outside the neighbor tree are not constrained. Remember current can
+replace a refused layout. A mode change alone still does not trigger protection;
+use Restore arrangement explicitly or wait for a reconnect/wake transition.
+Duplicate or ambiguous identities are refused. If macOS swaps UUIDs between identical monitors
 with no serial, PanelCtl cannot detect that swap and will not guess using ports,
 names or positions. Show a blacked-out main display before remembering/restoring
 an arrangement; it must belong to the visible set.
@@ -203,8 +219,8 @@ only public CoreGraphics origins with session scope, and verifies the result.
 It does not write modes, mirroring, private setters, DDC, permanent preferences,
 windows or Spaces. Recovery journals are never overwritten by Remember.
 
-**Hardware status:** TASK-79 has fake-backed writer, lifecycle, CLI and Action
-coverage only. Real reconnect/wake timing, input-return flags and CoreGraphics
+**Hardware status:** TASK-79 and TASK-80 have fake-backed writer, lifecycle, CLI,
+Action and resized-layout coverage only. Real reconnect/wake timing, input-return flags and CoreGraphics
 layout acceptance remain unverified. No live arrangement trial was performed;
 hardware writes still require separate scoped approval.
 

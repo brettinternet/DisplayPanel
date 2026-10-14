@@ -106,6 +106,126 @@ final class DisplayArrangementTests: XCTestCase {
         XCTAssertThrowsError(try current.restoring(missing))
     }
 
+    func testRememberedResolutionScaleAndRotationKeepMixedEdgesAndMain() throws {
+        let saved = try DisplayArrangement(members: [
+            member(1, width: 2000, height: 1200, main: true),
+            member(2, x: 2000, y: 200, width: 1600, height: 1000), // bottom aligned
+            member(3, x: -1000, width: 1000, height: 800), // top aligned
+            member(4, x: 1500, y: -600, width: 500, height: 600), // right aligned above
+            member(5, x: 250, y: 1200, width: 800, height: 600) // offset below
+        ]).rememberingRelationships()
+        XCTAssertEqual(saved.relationships?.map(\.side), [.right, .left, .above, .below])
+        XCTAssertEqual(saved.relationships?.map(\.alignment), [.end, .start, .end, .offset])
+        let decoded = try JSONDecoder().decode(DisplayArrangement.self, from: JSONEncoder().encode(saved))
+        XCTAssertEqual(decoded, saved)
+        var current = saved
+        current.members[0].width = 2400 // resolution
+        current.members[0].height = 1350
+        current.members[1].width = 800 // HiDPI logical size
+        current.members[1].height = 500
+        current.members[2].width = 800 // rotated bounds
+        current.members[2].height = 1000
+        current.members[2].rotation = 90
+        current = try XCTUnwrap(current.preferringMain(current.members[1]))
+        current.members.reverse()
+        current.members[0].id = 99
+        let restored = try current.restoringRemembered(decoded)
+        let ordered = restored.members.sorted { $0.model < $1.model }
+        XCTAssertEqual(ordered.map(\.x), [0, 2400, -800, 1900, 250])
+        XCTAssertEqual(ordered.map(\.y), [0, 850, 0, -600, 1350])
+        XCTAssertEqual(ordered.map(\.main), [true, false, false, false, false])
+        XCTAssertEqual(ordered.map(\.width), [2400, 800, 800, 500, 800])
+        XCTAssertEqual(ordered[2].rotation, 90)
+        XCTAssertEqual(ordered[4].id, 99)
+        XCTAssertThrowsError(try current.restoring(saved), "low-level restoration must remain strict")
+    }
+
+    func testLegacyRememberedLayoutsAdaptButUnchangedGeometryKeepsExactOrigins() throws {
+        let original = arrangement()
+        let data = try JSONEncoder().encode(original)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertNil(object["relationships"], "legacy payload has only members")
+        let legacy = try JSONDecoder().decode(DisplayArrangement.self, from: data)
+        var current = original
+        current.members[0].width = 2560
+        XCTAssertEqual(try current.restoringRemembered(legacy).members[1].x, 2560)
+        var unusual = original
+        unusual.members[1].x = 2500
+        unusual.members[1].y = -137
+        let saved = try unusual.rememberingRelationships()
+        XCTAssertNil(saved.relationships)
+        XCTAssertEqual(try original.restoringRemembered(saved).members, unusual.members)
+        XCTAssertThrowsError(try current.restoringRemembered(saved))
+        var impostor = current
+        impostor.members[1].serial += 1
+        XCTAssertThrowsError(try impostor.restoringRemembered(legacy))
+        var corrupted = try original.rememberingRelationships()
+        corrupted.relationships?[0].side = .left
+        XCTAssertThrowsError(try current.restoringRemembered(corrupted))
+    }
+
+    func testResizedLayoutsRefuseOverlapLostContactAndUnrepresentableOrigins() throws {
+        let branching = try DisplayArrangement(members: [
+            member(1, width: 1000, height: 1000, main: true),
+            member(2, x: 1000, width: 500, height: 500),
+            member(3, x: 1000, y: 500, width: 500, height: 500)
+        ]).rememberingRelationships()
+        var current = branching
+        current.members[1].height = 800
+        XCTAssertThrowsError(try current.restoringRemembered(branching)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("overlap"))
+        }
+        let offset = try DisplayArrangement(members: [
+            member(1, width: 1000, height: 1000, main: true),
+            member(2, x: 1000, y: 800, width: 500, height: 500)
+        ]).rememberingRelationships()
+        current = offset
+        current.members[0].height = 700
+        XCTAssertThrowsError(try current.restoringRemembered(offset)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("shared edge"))
+        }
+        for width in [Double(Int32.max) + 1, 1920.5] {
+            current = arrangement()
+            current.members[0].width = width
+            XCTAssertThrowsError(try current.restoringRemembered(arrangement())) { error in
+                XCTAssertTrue(error.localizedDescription.contains("unrepresentable"))
+            }
+        }
+    }
+
+    func testAdaptedLayoutUsesStrictFakeWriterAndRefusesModeRace() throws {
+        let saved = try arrangement().rememberingRelationships()
+        var current = arrangement()
+        current.members[0].width = 2560
+        let expected = current
+        let desired = try current.restoringRemembered(saved)
+        var staged: [UInt32: Int32] = [:]
+        var completes = 0, cancels = 0
+        var race = false
+        let transaction = DisplayArrangementTransaction(
+            begin: { CGDisplayConfigRef(bitPattern: 1)! },
+            origin: { _, id, x, _ in
+                staged[id] = x
+                if race { current.members[0].width = 3000 }
+            },
+            complete: { _, scope in
+                XCTAssertEqual(scope, .forSession)
+                completes += 1
+                current = desired
+            },
+            cancel: { _ in cancels += 1 }
+        )
+        let sut = controller(records: { self.records(current) }, transaction: transaction)
+        XCTAssertTrue(try sut.restore(desired, expected: expected))
+        XCTAssertEqual(staged[2], 2560)
+        XCTAssertEqual(completes, 1)
+        current = expected
+        race = true
+        XCTAssertThrowsError(try sut.restore(desired, expected: expected))
+        XCTAssertEqual(completes, 1, "geometry races cannot complete a transaction")
+        XCTAssertEqual(cancels, 1)
+    }
+
     func testPreferringMainTranslatesEveryOriginAndValidatesMetadata() throws {
         let base = DisplayArrangement(members: [
             member(1, main: true), member(2, x: 1920), member(3, x: 1920, y: 1080)

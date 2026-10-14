@@ -35,6 +35,7 @@ public struct DisplayArrangementMember: Codable, Equatable {
 
 public struct DisplayArrangement: Codable, Equatable {
     public var members: [DisplayArrangementMember]
+    public var relationships: [DisplayArrangementRelationship]?
 
     public init(members: [DisplayArrangementMember]) {
         self.members = members

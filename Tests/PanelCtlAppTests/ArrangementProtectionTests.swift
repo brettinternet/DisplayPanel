@@ -99,6 +99,7 @@ final class ArrangementProtectionTests: XCTestCase {
         XCTAssertFalse(model.arrangementPreferences.applyOnLaunch)
         try model.rememberCurrentArrangement()
         let first = try XCTUnwrap(model.arrangementPreferences.remembered.first)
+        XCTAssertEqual(first.relationships?.count, 2)
         state.layout.members[1].x += 100
         model.refreshDisplays()
         XCTAssertTrue(model.arrangementStatus.differs)
@@ -211,13 +212,40 @@ final class ArrangementProtectionTests: XCTestCase {
         XCTAssertEqual(hiddenModel.arrangementStatus.state, "unprotected")
     }
 
-    func testChangedSizeAndIdentityRefuseWithoutFallingBackToPreferredMain() throws {
+    func testResizedReconnectRepairsOnceAndStatusComparesAdaptedLayout() async throws {
+        for (width, height, rotation) in [(2560.0, 1440.0, 0.0), (960.0, 540.0, 0.0), (1080.0, 1920.0, 90.0)] {
+            let state = State()
+            let (model, _) = try makeModel(state)
+            try model.rememberCurrentArrangement()
+            let saved = model.arrangementPreferences.remembered
+            model.setArrangementProtectionEnabled(true)
+            state.layout.members[0].width = width
+            state.layout.members[0].height = height
+            state.layout.members[0].rotation = rotation
+            model.displayParametersChanged()
+            try await Task.sleep(nanoseconds: 40_000_000)
+            XCTAssertEqual(state.writes, 0, "a mode change alone must not start correction")
+            XCTAssertTrue(model.arrangementStatus.differs)
+            model.displayReconfigured(display: 1, flags: .addFlag)
+            try await waitFor { state.writes == 1 }
+            XCTAssertEqual(state.layout.members.map(\.x), [0, Int32(width), Int32(width) + 1920])
+            XCTAssertEqual(state.layout.members[0].rotation, rotation)
+            XCTAssertTrue(state.layout.members[0].main)
+            XCTAssertFalse(model.arrangementStatus.differs)
+            XCTAssertEqual(model.arrangementStatus.state, "remembered")
+            XCTAssertEqual(model.arrangementPreferences.remembered, saved, "adaptation must not overwrite the saved baseline")
+            XCTAssertEqual(model.restoreArrangement().outcome, .noOp)
+            XCTAssertEqual(state.writes, 1, "restoring the adapted layout again is a no-op")
+        }
+    }
+
+    func testUnrepresentableSizeAndIdentityRefuseWithoutFallingBackToPreferredMain() throws {
         let state = State()
         let (model, _) = try makeModel(state)
         try model.rememberCurrentArrangement()
         try model.setArrangementPreferredMain(uuid: state.layout.members[1].uuid)
         model.setArrangementProtectionEnabled(true)
-        state.layout.members[1].width = 1600
+        state.layout.members[1].width = Double(Int32.max)
         XCTAssertEqual(model.arrangementStatus.state, "suspended")
         XCTAssertTrue(model.arrangementStatus.canRemember, "explicit Remember can replace stale geometry")
         XCTAssertEqual(model.restoreArrangement().outcome, .refused)
@@ -309,8 +337,15 @@ final class ArrangementProtectionTests: XCTestCase {
         XCTAssertNotNil(DisplayActionPresentation.alignedStepResults(for: action, steps: actionResult.steps))
         XCTAssertEqual(state.writes, 2)
         state.layout.members[1].rotation = 90
+        state.layout.members[1].width = 1080
+        state.layout.members[1].height = 1920
+        let rotated = await model.handleDisplayControlRequest(AppControlRequest(command: .runAction, actionID: action.id))
+        XCTAssertEqual(rotated.outcome, .done)
+        XCTAssertEqual(state.layout.members[2].x, 3000)
+        XCTAssertEqual(state.writes, 3)
+        state.layout.members[1].serial += 1
         let refused = await model.handleDisplayControlRequest(AppControlRequest(command: .runAction, actionID: action.id))
         XCTAssertEqual(refused.outcome, .refused)
-        XCTAssertEqual(state.writes, 2)
+        XCTAssertEqual(state.writes, 3)
     }
 }
