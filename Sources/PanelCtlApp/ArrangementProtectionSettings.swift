@@ -105,7 +105,9 @@ struct ArrangementProtectionSettings: View {
                     ForEach(model.arrangementPreferences.remembered, id: \.setKey) { arrangement in
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(arrangement.members.map { $0.name ?? String($0.uuid.prefix(8)) }.joined(separator: ", "))
+                                // Left to right, like the display tiles.
+                                Text(arrangement.members.sorted { ($0.x, $0.y) < ($1.x, $1.y) }
+                                    .map { $0.name ?? String($0.uuid.prefix(8)) }.joined(separator: ", "))
                                 if let main = arrangement.members.first(where: \.main) {
                                     Text("Main: \(main.name ?? main.uuid)")
                                         .font(.caption)
