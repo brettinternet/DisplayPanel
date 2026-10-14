@@ -2,9 +2,10 @@
 id: TASK-81
 title: Protect display modes after reconnect and input return
 status: Done
-assignee: []
+assignee:
+  - '@pi'
 created_date: '2026-10-13 23:03'
-updated_date: '2026-10-14 01:02'
+updated_date: '2026-10-14 01:33'
 labels: []
 dependencies:
   - TASK-79
@@ -38,6 +39,8 @@ A monitor returning from another computer's input can come back with a reduced m
 
 <!-- SECTION:PLAN:BEGIN -->
 1. Add exact-mode capture/restore with saved-display identity checks, operation/journal locks, session-only transaction and verification. 2. Persist explicit per-display Remember/Forget and opt-in settings; run bounded mode settlement before arrangement correction, sharing transition suppression and lifecycle guards. 3. Add fake-backed regression coverage for transition timing, exclusions, boundaries and verification; document fields and untested hardware status. 4. Run focused checks and one independent safety review, commit, merge to main, finalize task and remove the owned worktree.
+
+Review follow-up: retain matching modes as observations until the shared transition finishes; revalidate identity/address after Remember captures a mode. Add fake-backed regressions for staggered reconnect and numeric-ID reassignment, verify focused suites, and commit fixes.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -46,10 +49,16 @@ A monitor returning from another computer's input can come back with a reduced m
 Implemented explicit per-display saved modes and opt-in controls, exact session-only locked writer, bounded transition settlement before arrangement, and documented excluded fields/hardware status. Validation: 41 focused fake-backed tests passed (17 core arrangement/mode + 24 app arrangement/mode/input-return/wake/action); 5 mode app tests passed again after adding a journal-lock reentrancy regression. AppModel LSP diagnostics clean; core diagnostics initially unknown, compiler successful. Independent read-only safety review in progress. Worktree receipt: .git/worktrees/task-81-mode-protection/agent-creation.json; owner session 01a137b5-5073-7416-ab28-28396639a5f2. No live display writes or native UI trials.
 
 Delivered as 9a1a220 (Protect saved display modes after transitions), fast-forward merged into primary main. Independent reviewer found two concrete lost-transition cases (staggered reconnect and reconnect during launch settlement); both fixed with focused regressions. Final verification: swift test --disable-sandbox --filter "ArrangementProtectionTests|DisplayArrangementTests|DisplayHideAppTests.testInputReturn|DisplayHideAppTests.testSleepWake|DisplayReconfiguration" passed 43 tests (17 core, 26 app), no failures. All changed production source files have clean LSP diagnostics; git diff --check and commit formatting/secret checks pass. AC1: explicit Remember/Forget, default-off persistence regression. AC2/4: exact session-only commit, offered-mode deadline, lock/identity/topology races, verification failure and own-notification regressions. AC3/5: user-edit no-op, journal/mirror skips, wake/input-return safety, and mode-before-arrangement ordering tests; docs describe protected fields and exclusions. Owned worktree and branch task-81-mode-protection removed via Worktrunk after receipt and pane checks; post-remove workspace cleanup verified separately. No remaining implementation blocker or resumable step; no push, hardware write or native UI trial performed.
+
+Review of TASK-78 through TASK-81 found two TASK-81 defects: a no-op mode check prematurely consumes a later reconnect while another protected display is pending; Remember reads mode after inventory but validates the stale inventory, allowing numeric-ID reuse to save another display mode. Fixing on primary main; offline checks only.
+
+Review follow-up delivered in 5cd33c6. Matching-mode observations are reopened on a later re-link within the fixed transition deadline, but actual write/refusal attempts remain consumed. Remember rechecks current identity, numeric address and visibility after reading the mode, refusing reassignment. Two new fake regressions pass; disabling the two fixes reproduces both failures. Final affected-suite run: 249 tests, 10 intentional native-UI skips, zero failures (arrangement/modes, Hide/mirroring, Actions and app-control). Warnings-as-errors build including tests and git diff --check passed. Core/test LSP clean; AppModel diagnostic report unknown, compiler verified. Independent core reviewer identified the capture race; parent reviewed app lifecycle and TASK-78/79/80 integration with no other confirmed defects. Offline only; no hardware writes, native UI, push or new worktree.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Added opt-in per-display exact mode protection after reconnect/input return/wake, before arrangement correction, with bounded waiting, strict identity and operation-lock checks, session-only writes and failure reporting. Merged implementation 9a1a220 to main; 43 focused tests pass. Both independent review findings fixed. Hardware and native Settings interaction remain unverified and are documented; HDR/color/rotation excluded. Worktree and branch cleaned up.
+
+Review follow-up: committed 5cd33c6 fixes missed staggered reconnects after matching-mode observations and stale identity/address capture in Remember. Two regression tests reproduce the original failures; 249 affected tests completed with 10 native-UI skips and no failures, plus warnings-as-errors build.
 <!-- SECTION:FINAL_SUMMARY:END -->
