@@ -37,6 +37,7 @@ final class ArrangementProtectionTests: XCTestCase {
         }
         var modes: [String: RecoveryMode] = [:]
         var modeOffered = true
+        var unoffered: Set<String> = []
         var mirrored: Set<UInt32> = []
         var modeWrites = 0
         var modeLockHeld = false
@@ -100,7 +101,7 @@ final class ArrangementProtectionTests: XCTestCase {
             }, captureMode: { uuid in
                 let display = try XCTUnwrap(state.records.first { $0.uuid == uuid })
                 return SavedDisplayMode(display: display, mode: try state.modes[uuid] ?? State.mode())
-            }, modeAvailable: { _ in state.modeOffered }, writeMode: { saved, revalidate in
+            }, modeAvailable: { state.modeOffered && !state.unoffered.contains($0.uuid) }, writeMode: { saved, revalidate in
                 state.modeLockHeld = true
                 defer { state.modeLockHeld = false }
                 state.modeBeforeBoundary?()
@@ -447,7 +448,7 @@ final class ArrangementProtectionTests: XCTestCase {
         }
     }
 
-    func testModeStaggeredReconnectKeepsMissingDisplayPendingWithoutReplenishingAttempts() async throws {
+    func testModeStaggeredReconnectReopensMissingDisplayWithoutReplenishingAttempts() async throws {
         let state = State()
         let (model, _) = try makeModel(state)
         let returning = state.layout.members[2]
@@ -474,11 +475,15 @@ final class ArrangementProtectionTests: XCTestCase {
         let state = State()
         let (model, _) = try makeModel(state)
         let first = state.layout.members[0]
+        let waiting = state.layout.members[1]
         let returning = state.layout.members[2]
-        for uuid in [first.uuid, returning.uuid] {
+        for uuid in [first.uuid, waiting.uuid, returning.uuid] {
             try model.rememberCurrentMode(uuid: uuid)
             try model.setModeProtectionEnabled(uuid: uuid, enabled: true)
         }
+        // A saved mode that is not offered yet keeps this transition open.
+        state.modes[waiting.uuid] = try State.mode(rate: 60)
+        state.unoffered = [waiting.uuid]
         state.layout.members.removeLast()
         state.modes[returning.uuid] = try State.mode(rate: 60)
         model.displayReconfigured(display: returning.id, flags: .removeFlag)
@@ -502,6 +507,44 @@ final class ArrangementProtectionTests: XCTestCase {
         try await Task.sleep(nanoseconds: 40_000_000)
         XCTAssertEqual(state.modeWrites, 2, "only the display without an attempt can be restored")
         XCTAssertEqual(state.modes[first.uuid]?.refreshRate, 60, "an actual write consumes the attempt for the whole batch")
+    }
+
+    func testAbsentOrUnofferedProtectedModeStillAllowsOneArrangementCorrection() async throws {
+        let state = State()
+        let (model, _) = try makeModel(state)
+        let away = state.layout.members[2]
+        try model.rememberCurrentMode(uuid: away.uuid)
+        try model.setModeProtectionEnabled(uuid: away.uuid, enabled: true)
+        state.layout.members.removeLast()
+        try model.rememberCurrentArrangement()
+        model.setArrangementProtectionEnabled(true)
+        let saved = state.layout
+        state.layout.members[1].x += 100
+        model.displayReconfigured(display: away.id, flags: .removeFlag)
+        try await waitFor { state.writes == 1 }
+        XCTAssertTrue(state.layout.samePlacement(as: saved), "an absent protected display is not settling")
+        XCTAssertEqual(state.modeWrites, 0)
+
+        let late = State()
+        let (lateModel, _) = try makeModel(late)
+        let uuid = late.layout.members[0].uuid
+        try lateModel.rememberCurrentMode(uuid: uuid)
+        try lateModel.setModeProtectionEnabled(uuid: uuid, enabled: true)
+        try lateModel.rememberCurrentArrangement()
+        lateModel.setArrangementProtectionEnabled(true)
+        let lateSaved = late.layout
+        late.modes[uuid] = try State.mode(rate: 60)
+        late.modeOffered = false
+        late.layout.members[2].x += 100
+        lateModel.displayReconfigured(display: 1, flags: .addFlag)
+        try await waitFor { lateModel.modeResults[uuid]?.contains("unavailable") == true }
+        try await Task.sleep(nanoseconds: 40_000_000)
+        XCTAssertEqual(late.writes, 0, "arrangement waits while the saved mode may still be offered")
+        late.date.addTimeInterval(16)
+        try await waitFor { late.writes == 1 }
+        XCTAssertTrue(late.layout.samePlacement(as: lateSaved))
+        XCTAssertEqual(late.modeWrites, 0)
+        XCTAssertTrue(lateModel.modeResults[uuid]?.contains("15 seconds") == true)
     }
 
     func testRealReconnectDuringLaunchSettlementRestoresModeBeforeArrangement() async throws {

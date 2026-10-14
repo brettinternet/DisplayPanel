@@ -163,10 +163,13 @@ After reconnect/input return or wake, PanelCtl waits for stable inventory and
 restores a differing exact mode once, before sampling the arrangement for
 correction. The saved mode must appear in CoreGraphics' offered list, including
 its ID and flags; no nearest resolution, refresh rate or scale is substituted.
-A late mode can arrive within the original 15-second transition deadline. At
-the deadline, protection reports the unavailable mode (or other blocking reason)
-without writing it or proceeding to automatic arrangement correction. Protection
-does not apply on launch, even when arrangement protection does.
+A late mode can arrive within the original 15-second transition deadline, and
+arrangement correction waits for it. At the deadline, protection reports the
+unavailable mode (or other blocking reason) without writing it; arrangement
+correction still gets its one attempt with the current sizes. A protected display
+that is not connected does not delay arrangement correction; its own later
+reconnect is a new transition. Protection does not apply on launch, even when
+arrangement protection does.
 
 Hidden and mirrored displays are skipped. An unresolved recovery journal suspends
 mode protection; Hide/Show recovery keeps owning those modes. PanelCtl operations,

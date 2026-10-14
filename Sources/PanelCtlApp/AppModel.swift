@@ -222,7 +222,9 @@ final class AppModel: ObservableObject {
     private let writeMode: (SavedDisplayMode, () throws -> Void) throws -> Bool
     private var modeWriting = false
     private var modePending: Set<String> = []
-    private var modeMatched: Set<String> = []
+    /// Matching or absent displays: observed without a write attempt, so a
+    /// later re-link in the same transition reopens them.
+    private var modeObserved: Set<String> = []
     private var modeTransitionSeeded = false
     private var modeSample: [DisplayRecord]?
 
@@ -562,21 +564,28 @@ final class AppModel: ObservableObject {
         try saveModePreferences(updated)
     }
 
+    private enum ModeSettlement { case done, awaitingOffer, waiting }
+
     /// Uses the same transition deadline as arrangement protection, but consumes
-    /// each display before writing. Arrangement sampling starts only afterwards.
-    private func settleProtectedModes() -> Bool {
-        guard !modePending.isEmpty else { return true }
+    /// each display before writing. Only a display still waiting for its saved
+    /// mode to be offered can delay, but not cancel, arrangement correction.
+    private func settleProtectedModes() -> ModeSettlement {
+        guard !modePending.isEmpty else { return .done }
         let inventory = displayProvider()
         guard modeSample == inventory else {
             modeSample = inventory
-            return false
+            return .waiting
         }
+        var waiting = false
         for entry in modePreferences.displays where modePending.contains(entry.id) {
             let uuid = entry.id
             let saved = entry.saved
             do {
                 let candidates = inventory.filter { $0.uuid?.caseInsensitiveCompare(uuid) == .orderedSame }
                 guard !candidates.isEmpty else {
+                    // An absent display cannot change the visible set's sizes.
+                    modePending.remove(uuid)
+                    modeObserved.insert(uuid)
                     modeResults[uuid] = "Waiting for the saved display to reconnect"
                     continue
                 }
@@ -590,13 +599,14 @@ final class AppModel: ObservableObject {
                     continue
                 }
                 guard display.online, display.active, !display.asleep else {
+                    waiting = true
                     modeResults[uuid] = "Waiting for a visible, awake display"
                     continue
                 }
                 let current = try captureMode(uuid)
                 if current.mode == saved.mode {
                     modePending.remove(uuid)
-                    modeMatched.insert(uuid)
+                    modeObserved.insert(uuid)
                     modeResults[uuid] = "The saved mode already matches."
                     continue
                 }
@@ -634,7 +644,13 @@ final class AppModel: ObservableObject {
             }
         }
         onStatusChange?()
-        return modePending.isEmpty
+        return modePending.isEmpty ? .done : waiting ? .waiting : .awaitingOffer
+    }
+
+    private func stopPendingModes() {
+        for uuid in modePending {
+            modeResults[uuid] = "Mode protection stopped after 15 seconds: \(modeResults[uuid] ?? "display did not settle"). No mode write was attempted."
+        }
     }
 
     // MARK: Remembered arrangements
@@ -829,7 +845,7 @@ final class AppModel: ObservableObject {
         arrangementDeadline = nil
         arrangementSample = nil
         modePending = []
-        modeMatched = []
+        modeObserved = []
         modeTransitionSeeded = false
         modeSample = nil
     }
@@ -848,10 +864,10 @@ final class AppModel: ObservableObject {
             modePending = modeStorageFailure == nil
                 ? Set(modePreferences.displays.filter(\.enabled).map(\.id)) : []
         } else if protectModes {
-            // A matching observation is not a write attempt. A later re-link
-            // in this same batch may change it while another mode is pending.
-            modePending.formUnion(modeMatched)
-            modeMatched = []
+            // An observation is not a write attempt. A later re-link in this
+            // same batch may change or return it while another mode is pending.
+            modePending.formUnion(modeObserved)
+            modeObserved = []
         }
         modeSample = nil
         arrangementSample = nil
@@ -872,25 +888,19 @@ final class AppModel: ObservableObject {
 
     private func finishArrangementSettlement() {
         guard let deadline = arrangementDeadline else { return }
-        guard now() < deadline else {
-            for uuid in modePending {
-                modeResults[uuid] = "Mode protection stopped after 15 seconds: \(modeResults[uuid] ?? "display did not settle"). No mode write was attempted."
-            }
-            cancelArrangementSettlement()
-            arrangementLastResult = "Arrangement protection stopped: displays did not settle within 15 seconds."
-            onStatusChange?()
-            return
-        }
+        // The pass at the deadline may still finish, but never waits again.
+        let expired = now() >= deadline
         refreshHandoffStatus()
         if let reason = arrangementSuspensionReason() {
             for uuid in modePending { modeResults[uuid] = reason }
             modeSample = nil
             arrangementSample = nil
-            scheduleArrangementSettlement()
+            continueArrangementSettlement(expired: expired)
             return
         }
-        guard settleProtectedModes() else {
-            scheduleArrangementSettlement()
+        let modes = settleProtectedModes()
+        guard modes == .done || (modes == .awaitingOffer && arrangementPreferences.enabled) else {
+            continueArrangementSettlement(expired: expired)
             return
         }
         guard arrangementPreferences.enabled else {
@@ -900,11 +910,14 @@ final class AppModel: ObservableObject {
         do {
             let current = try captureArrangement(arrangementExcludedUUIDs)
             try current.validate()
-            guard arrangementSample == current else {
+            // A mode that may still be offered can change sizes: sample now, but
+            // write only after it finishes or the deadline gives up on it.
+            guard arrangementSample == current, modes == .done || expired else {
                 arrangementSample = current
-                scheduleArrangementSettlement()
+                continueArrangementSettlement(expired: expired)
                 return
             }
+            stopPendingModes()
             // Consume the transition before writing. Notifications from our own
             // operation cannot replenish it, and a failed write is never retried.
             cancelArrangementSettlement()
@@ -917,9 +930,20 @@ final class AppModel: ObservableObject {
             // Wait within the original deadline, never extend it or write early.
             arrangementSample = nil
             arrangementLastResult = error.localizedDescription
-            scheduleArrangementSettlement()
+            continueArrangementSettlement(expired: expired)
             onStatusChange?()
         }
+    }
+
+    private func continueArrangementSettlement(expired: Bool) {
+        guard expired else { return scheduleArrangementSettlement() }
+        stopPendingModes()
+        let arrangementWaited = arrangementPreferences.enabled
+        cancelArrangementSettlement()
+        if arrangementWaited {
+            arrangementLastResult = "Arrangement protection stopped: displays did not settle within 15 seconds."
+        }
+        onStatusChange?()
     }
 
     var activeDisplays: [DisplayRecord] {
