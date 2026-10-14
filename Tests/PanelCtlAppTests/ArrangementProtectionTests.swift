@@ -470,6 +470,40 @@ final class ArrangementProtectionTests: XCTestCase {
         XCTAssertEqual(state.modeWrites, 2)
     }
 
+    func testLaterRelinkRechecksMatchingModeButNeverReplenishesAWriteAttempt() async throws {
+        let state = State()
+        let (model, _) = try makeModel(state)
+        let first = state.layout.members[0]
+        let returning = state.layout.members[2]
+        for uuid in [first.uuid, returning.uuid] {
+            try model.rememberCurrentMode(uuid: uuid)
+            try model.setModeProtectionEnabled(uuid: uuid, enabled: true)
+        }
+        state.layout.members.removeLast()
+        state.modes[returning.uuid] = try State.mode(rate: 60)
+        model.displayReconfigured(display: returning.id, flags: .removeFlag)
+        try await waitFor {
+            model.modeResults[first.uuid]?.contains("already matches") == true &&
+                model.modeResults[returning.uuid]?.contains("reconnect") == true
+        }
+        state.modes[first.uuid] = try State.mode(rate: 60)
+        model.displayReconfigured(display: first.id, flags: .setModeFlag)
+        try await Task.sleep(nanoseconds: 40_000_000)
+        XCTAssertEqual(state.modeWrites, 0, "a matching observation is only reopened by another transition")
+        model.displayReconfigured(display: first.id, flags: .addFlag)
+        try await waitFor { state.modeWrites == 1 }
+        XCTAssertEqual(state.modes[first.uuid]?.refreshRate, 240)
+
+        state.modes[first.uuid] = try State.mode(rate: 60)
+        model.displayReconfigured(display: first.id, flags: .addFlag)
+        state.layout.members.append(returning)
+        model.displayReconfigured(display: returning.id, flags: .addFlag)
+        try await waitFor { state.modes[returning.uuid]?.refreshRate == 240 }
+        try await Task.sleep(nanoseconds: 40_000_000)
+        XCTAssertEqual(state.modeWrites, 2, "only the display without an attempt can be restored")
+        XCTAssertEqual(state.modes[first.uuid]?.refreshRate, 60, "an actual write consumes the attempt for the whole batch")
+    }
+
     func testRealReconnectDuringLaunchSettlementRestoresModeBeforeArrangement() async throws {
         let state = State()
         let (model, defaults) = try makeModel(state)

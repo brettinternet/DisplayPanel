@@ -450,6 +450,25 @@ final class DisplayArrangementTests: XCTestCase {
         return controller
     }
 
+    func testRememberModeRefusesIdentityOrAddressChangesDuringCapture() throws {
+        for mutation in ["replacement", "rebind"] {
+            var layout = arrangement()
+            let original = records(layout)[0]
+            let low = try mode(rate: 60)
+            let sut = modeController({ layout }, current: {
+                if mutation == "replacement" {
+                    layout.members[0].uuid = "00000000-0000-0000-0000-000000000099"
+                } else {
+                    layout.members[0].id = 99
+                }
+                return low
+            }, offered: { [low] }, transaction: DisplayModeTransaction(
+                begin: { XCTFail("Remember must not write"); throw RecoveryError.unsafe("unexpected write") }
+            ))
+            XCTAssertThrowsError(try sut.capture(uuid: try XCTUnwrap(original.uuid)), mutation)
+        }
+    }
+
     func testModeRestoreExactSessionCommitRebindsAddressAndVerifiesWithoutRetry() throws {
         var layout = arrangement()
         let high = try mode(rate: 240), low = try mode(rate: 60)

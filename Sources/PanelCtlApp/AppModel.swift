@@ -222,6 +222,7 @@ final class AppModel: ObservableObject {
     private let writeMode: (SavedDisplayMode, () throws -> Void) throws -> Bool
     private var modeWriting = false
     private var modePending: Set<String> = []
+    private var modeMatched: Set<String> = []
     private var modeTransitionSeeded = false
     private var modeSample: [DisplayRecord]?
 
@@ -595,6 +596,7 @@ final class AppModel: ObservableObject {
                 let current = try captureMode(uuid)
                 if current.mode == saved.mode {
                     modePending.remove(uuid)
+                    modeMatched.insert(uuid)
                     modeResults[uuid] = "The saved mode already matches."
                     continue
                 }
@@ -827,6 +829,7 @@ final class AppModel: ObservableObject {
         arrangementDeadline = nil
         arrangementSample = nil
         modePending = []
+        modeMatched = []
         modeTransitionSeeded = false
         modeSample = nil
     }
@@ -844,6 +847,11 @@ final class AppModel: ObservableObject {
             modeTransitionSeeded = true
             modePending = modeStorageFailure == nil
                 ? Set(modePreferences.displays.filter(\.enabled).map(\.id)) : []
+        } else if protectModes {
+            // A matching observation is not a write attempt. A later re-link
+            // in this same batch may change it while another mode is pending.
+            modePending.formUnion(modeMatched)
+            modeMatched = []
         }
         modeSample = nil
         arrangementSample = nil

@@ -75,6 +75,10 @@ public struct DisplayModeProtectionController {
         }
         let saved = SavedDisplayMode(display: display, mode: try currentMode(display.id))
         _ = try eligible(saved, inventory: inventory)
+        let fresh = try eligible(saved, inventory: records())
+        guard fresh == display else {
+            throw RecoveryError.unsafe("display identity or topology changed while remembering its mode")
+        }
         return saved
     }
 
