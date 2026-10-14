@@ -28,6 +28,8 @@ final class AppModel: ObservableObject {
     static let githubURL = URL(string: "https://github.com/brettinternet/panelctl")!
     static let scriptingDocsURL = URL(string: "https://github.com/brettinternet/panelctl/blob/main/docs/usage.md#scripted-hide-and-show")!
     static let experimentalDocsURL = URL(string: "https://github.com/brettinternet/panelctl/blob/main/docs/display-hide-ux.md#experimental-features")!
+    static let modeProtectionDocsURL = URL(string: "https://github.com/brettinternet/panelctl/blob/main/docs/display-recovery.md#protected-display-modes")!
+    static let arrangementDocsURL = URL(string: "https://github.com/brettinternet/panelctl/blob/main/docs/display-recovery.md#remembered-arrangements")!
 
     @Published var automationPreferences: AutomationPreferences {
         didSet {

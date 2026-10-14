@@ -1,46 +1,63 @@
 import SwiftUI
 import PanelCtlCore
 
+/// One display's saved mode and its protection switch, on that display's page.
 struct ModeProtectionSettings: View {
     @ObservedObject var model: AppModel
+    let tile: DisplayTile
     @State private var failure: String?
 
     var body: some View {
-        Section {
-            DisclosureGroup("Mode protection") {
-                ForEach(model.activeDisplays, id: \.id) { display in
-                    if let uuid = display.uuid {
-                        HStack {
-                            Text(display.settingsName)
-                            Spacer()
-                            Button("Remember current mode") {
-                                perform { try model.rememberCurrentMode(uuid: uuid) }
-                            }
-                            .disabled(model.hideConfigurationFrozen || model.isBlackoutHidden(uuid))
-                        }
+        if let uuid = tile.uuid, UUID(uuidString: uuid) != nil {
+            let entry = model.modePreferences.displays.first { $0.id == uuid.lowercased() }
+            Section {
+                Toggle(isOn: Binding(
+                    get: { entry?.enabled ?? false },
+                    set: { enabled in perform { try model.setModeProtectionEnabled(uuid: uuid, enabled: enabled) } }
+                )) {
+                    Text("Restore saved mode")
+                    Text(entry.map { Self.summary($0.saved.mode) } ?? "Remember the current mode first.")
+                }
+                .disabled(entry == nil)
+                .accessibilityLabel("Restore saved mode for \(tile.name)")
+                HStack {
+                    Button("Remember Current Mode") { perform { try model.rememberCurrentMode(uuid: uuid) } }
+                        .disabled(tile.display == nil || model.hideConfigurationFrozen || model.isBlackoutHidden(uuid))
+                        .accessibilityLabel("Remember current mode for \(tile.name)")
+                    if entry != nil {
+                        Button("Forget") { perform { try model.forgetMode(uuid: uuid) } }
+                            .accessibilityLabel("Forget saved mode for \(tile.name)")
                     }
                 }
-                ForEach(model.modePreferences.displays) { entry in
-                    VStack(alignment: .leading) {
-                        Toggle("Protect \(entry.saved.name ?? entry.saved.uuid)", isOn: Binding(
-                            get: { entry.enabled },
-                            set: { enabled in perform { try model.setModeProtectionEnabled(uuid: entry.id, enabled: enabled) } }
-                        ))
-                        Text(entry.saved.mode.description).font(.caption).foregroundStyle(.secondary)
-                        Button("Forget mode") { perform { try model.forgetMode(uuid: entry.id) } }
-                        if let result = model.modeResults[entry.id] {
-                            Text(result).font(.caption).textSelection(.enabled)
-                        }
-                    }
+                if let problem = failure ?? model.modeStorageFailure {
+                    Text(problem)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if let result = model.modeResults[uuid.lowercased()] {
+                    Text(result)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                if let message = failure ?? model.modeStorageFailure {
-                    Text(message).font(.caption).textSelection(.enabled)
-                }
-                Text("Off by default. Remember, then enable protection for each display. Restores exact resolution, refresh rate and scale once after reconnect or wake, before arrangement protection. Waits up to 15 seconds; never approximates. Ordinary System Settings edits stand. Session-only; no rotation, HDR or color profile changes.")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            } header: {
+                Text("Display mode")
+            } footer: {
+                SectionFooter("Restores this exact resolution, refresh rate and scale once after a reconnect or wake. Changes you make in System Settings stand.",
+                              learnMore: AppModel.modeProtectionDocsURL)
             }
         }
+    }
+
+    private static func summary(_ mode: RecoveryMode) -> String {
+        var parts = ["\(mode.width) × \(mode.height)"]
+        if mode.refreshRate > 0 {
+            parts.append("\(mode.refreshRate.formatted(.number.precision(.fractionLength(0...2)))) Hz")
+        }
+        if mode.pixelWidth > mode.width { parts.append("HiDPI") }
+        return parts.joined(separator: " · ")
     }
 
     private func perform(_ action: () throws -> Void) {

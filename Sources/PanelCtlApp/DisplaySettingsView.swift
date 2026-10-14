@@ -17,9 +17,8 @@ struct DisplaySettingsView: View {
                 selectedID: selected?.id,
                 attentionIDs: Set(model.displayResults.filter(\.value.needsAttention).keys)
             ) { navigation.selectedDisplayID = $0 }
+            ArrangementStatusRow(model: model)
             Form {
-                ModeProtectionSettings(model: model)
-                ArrangementProtectionSettings(model: model)
                 if let failure = model.protectionQuiescenceFailure {
                     Section {
                         HStack(alignment: .firstTextBaseline) {
@@ -38,6 +37,7 @@ struct DisplaySettingsView: View {
                     summarySection(selected)
                     hideSection(selected, tiles: tiles)
                     keepWindowsOffSection(selected)
+                    ModeProtectionSettings(model: model, tile: selected)
                     if pageProblem == nil, isJournalTarget(selected), let status = model.handoffStatus {
                         Section {
                             recoveryDetails(status, targetUUID: selected.uuid)

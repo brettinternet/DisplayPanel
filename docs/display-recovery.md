@@ -150,13 +150,12 @@ No live trial was performed for TASK-78.
 
 ## Protected display modes
 
-**Displays → Mode protection** is off by default for every display. Choose
-**Remember current mode**, then enable **Protect** for that display. Remember
-captures the exact logical resolution, pixel dimensions (scale), refresh rate,
+Each display's page in **Displays** has a **Display mode** section; protection is
+off by default for every display. Choose **Remember Current Mode**, then turn on
+**Restore saved mode**. Remember captures the exact logical resolution, pixel dimensions (scale), refresh rate,
 mode ID and flags. Identity is the saved-display rule: one matching UUID plus
 vendor/model/serial; a numeric display address is rebound only from that identity.
-Only **Remember current mode** or **Forget mode** replaces or removes a saved
-mode. Turning protection off keeps it. Ordinary System Settings edits stand and
+Only **Remember Current Mode** or **Forget** replaces or removes a saved mode. Turning protection off keeps it. Ordinary System Settings edits stand and
 never silently update the saved choice.
 
 After reconnect/input return or wake, PanelCtl waits for stable inventory and
@@ -192,15 +191,16 @@ trial was performed for TASK-81; hardware behavior remains unverified.
 
 ## Remembered arrangements
 
-**Displays → Arrangement protection** is separate from recovery. It is off by
-default, as is **Apply on launch**. **Remember current** saves origins and the
-main display for the exact visible display set. Save each set you use separately,
+**Displays → Arrangement…**, under the display tiles, is separate from recovery.
+It covers every display, so it appears once rather than on each display's page.
+Protection is off by default, as is **Also apply on launch**. **Remember Current
+Arrangement** saves origins and the main display for the exact visible display set. Save each set you use separately,
 for example three monitors and the two that remain when one is away. Remembering
 requires at least two visible displays, no mirrors and no unresolved journal.
 Only Remember updates a saved set. Forget removes it; turning protection off
 keeps saved sets and the preferred main choice.
 
-A **Preferred main** is independent of saved sets. When a set has no saved
+A **Preferred main display** is independent of saved sets. When a set has no saved
 arrangement and that display is visible, PanelCtl makes it main by translating
 all origins equally. Relative placement stays unchanged. A saved arrangement
 always takes precedence, even if its geometry no longer matches. An absent or
@@ -215,8 +215,9 @@ retry. Ordinary move, mode and main-display notifications do not start correctio
 so a layout edit in System Settings is left alone. macOS cannot distinguish a
 manual edit made during the same reconnect window from system drift.
 
-**Restore arrangement** runs the same checks explicitly, even with protection
-off. It is also a global Action step and a CLI command through the running app.
+**Restore** in the Arrangement sheet runs the same checks explicitly, even with
+protection off. **Restore arrangement** is also a global Action step and a CLI
+command through the running app.
 It does not launch the app or retry a lost response.
 
 ```sh
@@ -226,7 +227,7 @@ panelctl app status --json
 
 Status reports `remembered`, `preferred-main`, `unprotected` or `suspended`, the
 reason, whether the saved layout differs, and the last result. When it differs,
-Remember current replaces that set with the new layout. Put Restore before Action
+Remember Current Arrangement replaces that set with the new layout. Put Restore before Action
 steps that change the visible set. Actions preflight every step and freeze the
 arrangement plan; a later topology change stops the run rather than rebinding it.
 
@@ -246,8 +247,8 @@ non-overlapping, and have integer origins in the CoreGraphics range. Disconnecte
 overlapping or corner-only saved layouts cannot adapt. Large offsets or conflicting
 branches can make a resized layout impossible; PanelCtl refuses with a reason
 rather than moving displays arbitrarily or falling back to Preferred main. Extra
-contacts outside the neighbor tree are not constrained. Remember current can
-replace a refused layout. A mode change alone still does not trigger protection;
+contacts outside the neighbor tree are not constrained. Remember Current
+Arrangement can replace a refused layout. A mode change alone still does not trigger protection;
 use Restore arrangement explicitly or wait for a reconnect/wake transition.
 Duplicate or ambiguous identities are refused. If macOS swaps UUIDs between identical monitors
 with no serial, PanelCtl cannot detect that swap and will not guess using ports,

@@ -145,10 +145,13 @@ consent each time and reconnects automatically after 15 seconds. See
 
 ## Arrangement protection
 
-**Displays → Arrangement protection** remembers layouts per exact visible display
-set, with an optional preferred main for unsaved sets. It is off by default and
-only corrects after reconnect or wake, not ordinary layout edits. Remember current,
-Forget and Restore arrangement are explicit controls. Recovery suspends it.
+**Displays → Arrangement…**, under the display tiles, remembers layouts per exact
+visible display set, with an optional preferred main display for unsaved sets. It
+covers every display, so it appears once rather than on each display's page. It
+is off by default and only corrects after reconnect or wake, not ordinary layout
+edits. Remember Current Arrangement, Forget and Restore are explicit controls.
+Recovery suspends it. Each display's own page has a **Display mode** section for
+[protected display modes](display-recovery.md#protected-display-modes).
 See [remembered arrangements](display-recovery.md#remembered-arrangements) for
 identity/size checks, CLI status, Restore, and the unverified hardware limits.
 

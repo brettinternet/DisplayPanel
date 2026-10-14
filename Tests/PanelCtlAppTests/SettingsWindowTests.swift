@@ -462,23 +462,36 @@ final class SettingsWindowTests: XCTestCase {
         // These SwiftUI buttons are rendered, but are not NSButtons in the
         // synthetic view tree. Use native mouse events at screenshot-verified
         // positions in this fixed-size fixture, then assert their actual effect.
-        func click(x: CGFloat, top: CGFloat) throws {
-            let frame = try XCTUnwrap(content.superview)
+        func click(_ target: NSWindow, x: CGFloat, top: CGFloat) throws {
+            let frame = try XCTUnwrap(target.contentView?.superview)
             let point = frame.convert(NSPoint(x: x, y: frame.isFlipped ? top : frame.bounds.height - top), to: nil)
             let down = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [],
-                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: target.windowNumber,
                 context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
             let up = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseUp, location: point, modifierFlags: [],
-                timestamp: ProcessInfo.processInfo.systemUptime + 0.01, windowNumber: window.windowNumber,
+                timestamp: ProcessInfo.processInfo.systemUptime + 0.01, windowNumber: target.windowNumber,
                 context: nil, eventNumber: 1, clickCount: 1, pressure: 0))
             NSApp.postEvent(up, atStart: true)
-            window.sendEvent(down)
+            target.sendEvent(down)
         }
-        try click(x: 340, top: 240) // Arrangement protection disclosure.
-        spin { content.layoutSubtreeIfNeeded(); return nativeViews(in: content).compactMap { $0 as? NSSwitch }.count == 3 }
-        // Controls exist before the 150 ms disclosure animation reaches its final geometry.
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        try click(x: 100, top: 369) // Remember current.
+        let output = ProcessInfo.processInfo.environment["PANELCTL_SETTINGS_FIXTURE_OUTPUT"]
+        if let output {
+            try writeSnapshot(of: window, to: output, name: "arrangement-row")
+            // A mode belongs to its display's page.
+            try model.rememberCurrentMode(uuid: Self.sideUUID)
+            try model.setModeProtectionEnabled(uuid: Self.sideUUID, enabled: true)
+            try writeSnapshot(of: window, to: output, name: "display-mode")
+        }
+        // Arrangement protection is global: one row under the tiles, not a
+        // section on each display's page.
+        try click(window, x: 610, top: 215) // Arrangement… button.
+        spin { window.attachedSheet != nil }
+        let sheet = try XCTUnwrap(window.attachedSheet)
+        defer { window.endSheet(sheet) }
+        // Controls exist before the sheet animation reaches its final geometry.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+        if let output { try writeSnapshot(of: sheet, to: output, name: "arrangement-sheet-empty") }
+        try click(sheet, x: 140, top: 327) // Remember Current Arrangement.
         spin { model.arrangementPreferences.remembered.count == 1 }
         XCTAssertEqual(model.arrangementPreferences.remembered.count, 1)
         XCTAssertFalse(model.arrangementPreferences.enabled)
@@ -490,9 +503,7 @@ final class SettingsWindowTests: XCTestCase {
         model.setArrangementProtectionEnabled(true)
         model.setArrangementApplyOnLaunch(true)
         XCTAssertEqual(model.arrangementStatus.state, "remembered")
-        if let output = ProcessInfo.processInfo.environment["PANELCTL_SETTINGS_FIXTURE_OUTPUT"] {
-            try writeSnapshot(of: window, to: output, name: "remembered-arrangement")
-        }
+        if let output { try writeSnapshot(of: sheet, to: output, name: "arrangement-sheet") }
         model.setArrangementProtectionEnabled(false)
         XCTAssertEqual(model.arrangementPreferences.remembered, saved)
         XCTAssertTrue(model.arrangementStatus.canRestore)
@@ -2016,6 +2027,17 @@ final class SettingsWindowTests: XCTestCase {
             },
             writeArrangement: { _, _, _, _ in
                 XCTFail("Settings editing must never write display arrangements")
+                return false
+            },
+            captureMode: { uuid in
+                let display = try XCTUnwrap(displays.first { $0.uuid?.caseInsensitiveCompare(uuid) == .orderedSame })
+                return SavedDisplayMode(display: display, mode: try JSONDecoder().decode(RecoveryMode.self, from: JSONSerialization.data(withJSONObject: [
+                    "id": 1, "width": Int(display.bounds.width), "height": Int(display.bounds.height),
+                    "pixelWidth": display.pixelWidth, "pixelHeight": display.pixelHeight, "refreshRate": 144, "flags": 0
+                ])))
+            },
+            writeMode: { _, _ in
+                XCTFail("Settings editing must never write display modes")
                 return false
             }
         )
