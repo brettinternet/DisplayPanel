@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@pi'
 created_date: '2026-10-13 23:03'
-updated_date: '2026-10-14 01:33'
+updated_date: '2026-10-14 02:27'
 labels: []
 dependencies:
   - TASK-79
@@ -53,6 +53,8 @@ Delivered as 9a1a220 (Protect saved display modes after transitions), fast-forwa
 Review of TASK-78 through TASK-81 found two TASK-81 defects: a no-op mode check prematurely consumes a later reconnect while another protected display is pending; Remember reads mode after inventory but validates the stale inventory, allowing numeric-ID reuse to save another display mode. Fixing on primary main; offline checks only.
 
 Review follow-up delivered in 5cd33c6. Matching-mode observations are reopened on a later re-link within the fixed transition deadline, but actual write/refusal attempts remain consumed. Remember rechecks current identity, numeric address and visibility after reading the mode, refusing reassignment. Two new fake regressions pass; disabling the two fixes reproduces both failures. Final affected-suite run: 249 tests, 10 intentional native-UI skips, zero failures (arrangement/modes, Hide/mirroring, Actions and app-control). Warnings-as-errors build including tests and git diff --check passed. Core/test LSP clean; AppModel diagnostic report unknown, compiler verified. Independent core reviewer identified the capture race; parent reviewed app lifecycle and TASK-78/79/80 integration with no other confirmed defects. Offline only; no hardware writes, native UI, push or new worktree.
+
+Second review (Pi session, primary main): a disconnected mode-protected display stayed in modePending, so every reconnect, disconnect or wake while it was away held arrangement correction until the 15-second deadline, then dropped it as 'did not settle'. An unoffered saved mode at the deadline also dropped arrangement correction. Fixed in fa2224a: absent displays become observations, reopened by a later re-link in the batch, and arrangement samples while a mode awaits its offer, then gets its one attempt when the mode finishes or at the deadline. The arrangement 'stopped' message now appears only when arrangement protection is on. New regression testAbsentOrUnofferedProtectedModeStillAllowsOneArrangementCorrection fails on the old code (both halves). The batch-attempt regression keeps its transition open with an unoffered mode instead of an absent display. 46 focused tests pass; warnings-as-errors build passes; display-recovery.md updated.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
