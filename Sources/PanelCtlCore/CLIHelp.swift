@@ -238,8 +238,11 @@ public enum CLIHelp {
             run-action --action <UUID> invokes one saved Action with 1–8 ordered
             Hide (black out), Hide (remove from desktop), Show, Move windows or Restore arrangement steps,
             only in the running app. Accessibility is checked without prompting; use
-            the in-app Allow Accessibility button before Move windows. It never launches,
-            queues or retries a request.
+            the in-app Allow Accessibility button before Move windows. It never launches
+            the app or retries a request. Explicit show and Show-only Actions for journaled
+            displays can wait within an existing monitor input-return settlement window
+            (up to 15 seconds), then revalidate and run once. Actual sleep, changed
+            identities/journal or expiry stop the request. Other busy requests are not queued.
             The workflow is preflighted as a whole, then runs sequentially and
             non-atomically. Disconnected or verified already-hidden targets can be
             skipped with a reason; identity and recovery safeguards still apply.

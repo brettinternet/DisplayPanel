@@ -130,7 +130,7 @@ final class AppModel: ObservableObject {
         didSet {
             displayReconfigurationEvents.operationChanged(busy: hideOperation.isBusy)
             if hideOperation.isBusy {
-                cancelInputReturnSettlement()
+                if inputReturnShowCompletion == nil { cancelInputReturnSettlement() }
                 cancelArrangementSettlement()
             }
         }
@@ -281,6 +281,8 @@ final class AppModel: ObservableObject {
     private var inputReturnAttributed = false
     private var inputReturnSample: String?
     private var inputReturnRepairFailed = false
+    /// One explicit Show owns the existing settlement window instead of re-hide.
+    private var inputReturnShowCompletion: ((DisplayHideError?) -> Void)?
     private static let preferencesKey = "blackoutPreferences"
     private static let automationPreferencesKey = "automationRules"
     private static let hidePreferencesKey = "displayHidePreferences"
@@ -1496,6 +1498,9 @@ final class AppModel: ObservableObject {
     func displayActionRunBlocker(for action: DisplayAction) -> String? {
         if let displayActionStorageFailure { return displayActionStorageFailure }
         guard (1...8).contains(action.steps.count) else { return DisplayActionValidationError.invalidStepCount.localizedDescription }
+        if canWaitForInputReturnShow(action) {
+            return displayActionEnvironmentBlocker(prefix: "", actionLeaseID: nil, allowingInputReturnWait: true)
+        }
         var hiddenBlackouts = Set(blackoutHiddenDisplays.keys)
         let unresolvedRemovals = unresolvedHandoffRemovals
         var hiddenRemovals = Set(unresolvedRemovals.map { $0.target.uuid.lowercased() })
@@ -1677,14 +1682,15 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    private func displayActionEnvironmentBlocker(prefix: String, actionLeaseID: UUID?) -> String? {
+    private func displayActionEnvironmentBlocker(prefix: String, actionLeaseID: UUID?,
+                                                 allowingInputReturnWait: Bool = false) -> String? {
         if hideOperation.isBusy { return prefix + DisplayHideError.actionInProgress.localizedDescription }
         if runningDisplayAction != nil, runningDisplayAction?.id != actionLeaseID {
             return displayActionBusyMessage
         }
         if controlRunningRule != nil { return protectionRuleBusyMessage }
         if handoffStatus?.state == .busy { return prefix + DisplayHideError.actionInProgress.localizedDescription }
-        if displayLifecycleTransitioning { return prefix + DisplayHideError.sleeping.localizedDescription }
+        if displayLifecycleTransitioning, !allowingInputReturnWait { return prefix + DisplayHideError.sleeping.localizedDescription }
         if protectionQuiescencePending { return prefix + Self.automationStopping.localizedDescription }
         if let failure = protectionQuiescenceFailure {
             return prefix + "Automation cleanup needs attention. Choose Retry Automation Cleanup, then try again. (\(failure))"
@@ -1878,6 +1884,7 @@ final class AppModel: ObservableObject {
     /// Why the Action can't run right now, or its progress; nil when it's ready.
     func displayActionStatus(for action: DisplayAction) -> String? {
         if let run = runningDisplayAction, run.id == action.id {
+            if inputReturnShowCompletion != nil { return "Waiting for displays to settle…" }
             return "Running step \(run.currentStep) of \(run.totalSteps)…"
         }
         if let displayActionStorageFailure { return displayActionStorageFailure }
@@ -2806,7 +2813,7 @@ final class AppModel: ObservableObject {
     )
 
     /// Why Show must wait, apart from the hidden display's own state.
-    private func showWait(actionLeaseID: UUID? = nil) -> DisplayHideError? {
+    private func showWait(actionLeaseID: UUID? = nil, allowingInputReturnWait: Bool = false) -> DisplayHideError? {
         if hideOperation.isBusy { return .actionInProgress }
         if runningDisplayAction != nil, runningDisplayAction?.id != actionLeaseID {
             return .recoveryBlocksAction(displayActionBusyMessage)
@@ -2817,7 +2824,7 @@ final class AppModel: ObservableObject {
         if disconnectAutomationPaused || disconnectInspectionFailure != nil {
             return .recoveryBlocksAction("Full disconnect is pausing automation or awaiting verified recovery.")
         }
-        if displayLifecycleTransitioning { return .sleeping }
+        if displayLifecycleTransitioning, !allowingInputReturnWait { return .sleeping }
         if protectionQuiescencePending { return Self.automationStopping }
         return nil
     }
@@ -2832,9 +2839,10 @@ final class AppModel: ObservableObject {
                 return
             }
             guard let uuid = tile.uuid, let removal = handoffStatus?.removal(for: uuid) else { return }
-            guard removal.canShow || canAttemptGuardedRecoveryShow(removal) else { return }
+            let canWait = canWaitForInputReturnShow([uuid])
+            guard canWait || removal.canShow || canAttemptGuardedRecoveryShow(removal) else { return }
             tile.action = .show
-            tile.actionBlocker = showWait()?.localizedDescription
+            tile.actionBlocker = showWait(allowingInputReturnWait: canWait)?.localizedDescription
         case .on, .blackedOut, .asleep, .mirrored, .unavailable:
             guard let display = tile.display else { return }
             tile.action = .hide
@@ -3677,9 +3685,9 @@ final class AppModel: ObservableObject {
     }
 
     /// Runs Hide, Show or Toggle Hide for a script, like the display's Hide or
-    /// Show button, and answers when it finishes. A request that can't run now
-    /// is refused, never queued for later. The response includes only the
-    /// requested display.
+    /// Show button, and answers when it finishes. Explicit Show can wait within
+    /// an existing input-return settlement window; other unavailable requests
+    /// are refused. The response includes only the requested display.
     func handleDisplayControlRequest(
         _ request: AppControlRequest,
         receivedAt: ContinuousClock.Instant = .now
@@ -3706,6 +3714,17 @@ final class AppModel: ObservableObject {
                     $0.targetUUID.caseInsensitiveCompare(request.targetUUID ?? "") == .orderedSame
                 }
             )
+        }
+        func response(for result: DisplayOperationResult) -> AppControlResponse {
+            if result.succeeded {
+                if result.inputOutcome?.isPartial == true {
+                    return response(.partial, result.message, detail: result.inputMessage, error: result.inputMessage)
+                }
+                return response(.done, result.message, detail: result.inputMessage)
+            }
+            let outcome: AppControlOutcome = displayRecoveryProblem != nil ? .recoveryNeeded
+                : result.inputOutcome == nil ? .refused : .failed
+            return response(outcome, result.message, detail: result.inputMessage)
         }
         guard request.hasSupportedProtocol,
               request.command.isDisplayCommand, request.durationSeconds == nil,
@@ -3737,8 +3756,15 @@ final class AppModel: ObservableObject {
         guard handoffStatus?.state != .busy else {
             return response(.busy, "Another display operation is running. Try again when it finishes.")
         }
-        guard !displayLifecycleTransitioning else {
+        let canWait = request.command == .show && canWaitForInputReturnShow([uuid])
+        guard !displayLifecycleTransitioning || canWait else {
             return response(.refused, DisplayHideError.sleeping.localizedDescription)
+        }
+        if canWait {
+            let result = await withCheckedContinuation { continuation in
+                show(targetUUID: uuid) { continuation.resume(returning: $0) }
+            }
+            return response(for: result)
         }
         let tile = displayTiles.first { $0.uuid?.caseInsensitiveCompare(uuid) == .orderedSame }
         let hidden = tile?.status == .hidden || tile?.status == .needsRecovery
@@ -3776,15 +3802,7 @@ final class AppModel: ObservableObject {
                 show(targetUUID: uuid, completion: finished)
             }
         }
-        if result.succeeded {
-            if result.inputOutcome?.isPartial == true {
-                return response(.partial, result.message, detail: result.inputMessage, error: result.inputMessage)
-            }
-            return response(.done, result.message, detail: result.inputMessage)
-        }
-        let outcome: AppControlOutcome = displayRecoveryProblem != nil ? .recoveryNeeded
-            : result.inputOutcome == nil ? .refused : .failed
-        return response(outcome, result.message, detail: result.inputMessage)
+        return response(for: result)
     }
 
     private func handleDisplayActionControlRequest(
@@ -3882,6 +3900,30 @@ final class AppModel: ObservableObject {
         runningDisplayAction = AppControlRunningAction(id: id, name: action.name, currentStep: 1, totalSteps: action.steps.count)
         acquiredActionLease = true
         onStatusChange?()
+
+        if canWaitForInputReturnShow(action),
+           displayActionEnvironmentBlocker(prefix: "", actionLeaseID: id, allowingInputReturnWait: true) == nil {
+            inputReturnShowCompletion = { [self] error in
+                if let error {
+                    refuse(.refused, error.localizedDescription, for: action)
+                    return
+                }
+                guard displayActions.actions.first(where: { $0.id == id }) == action else {
+                    refuse(.refused, "The Action changed while Show waited. Review it and try again.", for: action)
+                    return
+                }
+                // No operation ran yet. Release only this reservation, without
+                // marking a completed Action or admitting an intervening task.
+                runningDisplayAction = nil
+                runningDisplayActionIDs.remove(id)
+                acquiredActionLease = false
+                runDisplayAction(id: id, receivedAt: receivedAt, completion: completion)
+            }
+            inputReturnSample = nil
+            scheduleInputReturnSettlement()
+            onStatusChange?()
+            return
+        }
 
         // Read one fresh topology and journal snapshot without reconciling helpers.
         preflightingDisplayAction = true
@@ -4488,6 +4530,10 @@ final class AppModel: ObservableObject {
         expectedTarget: DisplayIdentitySnapshot? = nil,
         completion: ((DisplayOperationResult) -> Void)? = nil
     ) {
+        guard !hideOperation.isBusy else {
+            refuse(.hide, targetUUID: targetUUID, error: DisplayHideError.actionInProgress, completion: completion)
+            return
+        }
         guard runningDisplayAction == nil || runningDisplayAction?.id == actionLeaseID else {
             refuse(.hide, targetUUID: targetUUID, error: DisplayHideError.recoveryBlocksAction(displayActionBusyMessage), completion: completion)
             return
@@ -4614,8 +4660,31 @@ final class AppModel: ObservableObject {
     /// a different display, so a stale action never shows another one.
     func show(targetUUID: String, actionLeaseID: UUID? = nil,
               completion: ((DisplayOperationResult) -> Void)? = nil) {
+        guard !hideOperation.isBusy else {
+            refuse(.show, targetUUID: targetUUID, error: DisplayHideError.actionInProgress, completion: completion)
+            return
+        }
         guard runningDisplayAction == nil || runningDisplayAction?.id == actionLeaseID else {
             refuse(.show, targetUUID: targetUUID, error: DisplayHideError.recoveryBlocksAction(displayActionBusyMessage), completion: completion)
+            return
+        }
+        if canWaitForInputReturnShow([targetUUID]), showWait(allowingInputReturnWait: true) == nil {
+            let configuration = hidePreferences[targetUUID]
+            inputReturnShowCompletion = { [self] error in
+                hideOperation = .idle
+                let refusal = error ?? (hidePreferences[targetUUID] != configuration
+                    ? .unavailable("The Show setup changed while waiting. Review it and try again.") : nil)
+                if let refusal {
+                    if !isShuttingDown { reconcileProtection() }
+                    refuse(.show, targetUUID: targetUUID, error: refusal, completion: completion)
+                } else {
+                    show(targetUUID: targetUUID, actionLeaseID: actionLeaseID, completion: completion)
+                }
+            }
+            hideOperation = .showing(targetUUID)
+            inputReturnSample = nil
+            scheduleInputReturnSettlement()
+            onStatusChange?()
             return
         }
         cancelPendingSleepHideResume()
@@ -4694,6 +4763,11 @@ final class AppModel: ObservableObject {
     }
 
     func displayParametersChanged() {
+        if inputReturnShowCompletion != nil {
+            inputReturnSample = nil
+            scheduleInputReturnSettlement()
+            return
+        }
         // Screen notifications during Remove/Show are not cancellation. Do not
         // inspect an intermediate journal here: the writer verifies its result,
         // and the next step refreshes and revalidates before doing any work.
@@ -4814,6 +4888,11 @@ final class AppModel: ObservableObject {
     /// also accompany a user's manual unmirror in System Settings.
     func displayReconfigured(display: UInt32, flags: CGDisplayChangeSummaryFlags,
                              ownOperation: Bool = false) {
+        if inputReturnShowCompletion != nil {
+            inputReturnSample = nil
+            scheduleInputReturnSettlement()
+            return
+        }
         if !ownOperation, !arrangementWriting, !modeWriting, !sleepLifecycleActive {
             if !flags.contains(.beginConfigurationFlag), !flags.intersection([.addFlag, .removeFlag]).isEmpty {
                 beginArrangementTransition()
@@ -4854,7 +4933,24 @@ final class AppModel: ObservableObject {
         return true
     }
 
+    private func canWaitForInputReturnShow(_ action: DisplayAction) -> Bool {
+        let targets = action.steps.compactMap { $0.target?.uuid }
+        return (1...8).contains(action.steps.count) && action.steps.allSatisfy { $0.effect == .show } &&
+            targets.count == action.steps.count && canWaitForInputReturnShow(targets)
+    }
+
+    private func canWaitForInputReturnShow(_ targets: [String]) -> Bool {
+        guard displayLifecycleTransitioning, !sleepLifecycleActive, !isShuttingDown,
+              inputReturnShowCompletion == nil, let intent = inputReturnIntent,
+              !targets.isEmpty else { return false }
+        return targets.allSatisfy { target in
+            intent.journalRemovals.contains { $0.target.uuid.caseInsensitiveCompare(target) == .orderedSame }
+        }
+    }
+
     private func cancelInputReturnSettlement(endLifecycle: Bool = true) {
+        let showCompletion = inputReturnShowCompletion
+        inputReturnShowCompletion = nil
         let wasPending = inputReturnIntent != nil
         inputReturnSettlement?.cancel()
         inputReturnSettlement = nil
@@ -4863,6 +4959,7 @@ final class AppModel: ObservableObject {
         inputReturnSample = nil
         inputReturnAttributed = false
         if wasPending, endLifecycle, !sleepLifecycleActive { setDisplayLifecycleTransitioning(false) }
+        showCompletion?(.unavailable("Show was cancelled by another display transition. Try again once displays settle."))
     }
 
     private func scheduleInputReturnSettlement() {
@@ -4895,13 +4992,36 @@ final class AppModel: ObservableObject {
         }
         let attributed = inputReturnAttributed
         let expired = now() >= (inputReturnDeadline ?? now())
-        if !identityChanged, !expired, (!stable || (attributed && !ready)) {
+        if !identityChanged, !expired, (!stable || ((attributed || inputReturnShowCompletion != nil) && !ready)) {
             scheduleInputReturnSettlement()
             return
         }
-        // Consume before entering the synchronous writer; callbacks cannot
-        // extend this deadline or give the transaction a second attempt.
+        // Consume before entering a writer or resuming explicit Show. No event
+        // can extend this deadline or give the request a second attempt.
+        let showCompletion = inputReturnShowCompletion
+        inputReturnShowCompletion = nil
         cancelInputReturnSettlement(endLifecycle: false)
+        if let showCompletion {
+            let unchanged = handoffInspectionFailure == nil &&
+                handoffStatus?.journalID == intent.journalID &&
+                handoffStatus?.baselineIdentity == intent.baselineIdentity &&
+                intent.journalIdentity != nil && handoffStatus?.journalIdentity == intent.journalIdentity &&
+                handoffStatus.map { sameSleepRemovalIdentities(intent.journalRemovals, in: $0) } == true
+            let error: DisplayHideError?
+            if expired {
+                error = .unavailable("Show stopped: displays did not settle within 15 seconds. Try again once they settle.")
+            } else if identityChanged || !unchanged {
+                error = .unavailable("Show stopped: the captured display identities or recovery journal changed. Inspect recovery before trying again.")
+            } else if !stable || !ready || isShuttingDown || runningActionInterrupted {
+                error = .unavailable("Show was interrupted before displays settled. Try again once they settle.")
+            } else {
+                error = nil
+            }
+            if error != nil { inputReturnRepairFailed = true }
+            setDisplayLifecycleTransitioning(false)
+            showCompletion(error)
+            return
+        }
         defer { setDisplayLifecycleTransitioning(false) }
         guard attributed else {
             refreshHandoffStatus()

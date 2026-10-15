@@ -93,6 +93,20 @@ connector checks still apply, and the monitor must accept DDC on the Mac's link.
 Returning to mirroring alone does not count as shown.
 Without a configured return input, use the monitor's input button first.
 
+If explicit **Show** arrives while the app is settling a monitor input return,
+it waits for two quiet matching observations within that transition's original
+15-second deadline, then revalidates and runs once. This applies to individual
+Show (including `app show`) and saved Actions containing only Show steps for
+journaled displays. It replaces pending background re-hide, not a failed write.
+Other requests remain busy while it waits; mixed Actions and Toggle do not wait.
+Actual sleep, unlock, app shutdown, changed identities/journal or an expired
+window cancel the request without showing anything. A failure never replays the
+request or retries a hardware write; the unresolved journal remains available.
+Fresh normal Show checks still require the exact saved modes and identities.
+
+This timing path is verified with fake-backed tests only; monitor/driver timing
+and a live power-off/input-return trial still require separate approval.
+
 Recovery reports the current identity, lifecycle or exact saved-mode blocker
 rather than hiding it behind an earlier generic layout error. Failed restoration
 retains the unresolved journal. An online display is not evidence that its Mac

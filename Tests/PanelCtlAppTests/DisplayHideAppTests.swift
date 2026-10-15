@@ -64,9 +64,11 @@ final class DisplayHideAppTests: XCTestCase {
         let box = StatusBox(hidden)
         var showCalls = 0
         var watcherWasStoppedBeforeShow = false
+        var clock = Date()
         let model = makeModel(
             defaults: defaults,
             displays: displays,
+            now: { clock },
             status: { box.value },
             useManagedProtectionService: true,
             showDisplay: { _, _ in
@@ -76,7 +78,8 @@ final class DisplayHideAppTests: XCTestCase {
                 watcherWasStoppedBeforeShow = lines.contains("stop")
                 box.value = self.handoffStatus(.none, target: nil, source: nil)
                 return .notRequested
-            }
+            },
+            displayWakeSettleDelay: 0.01
         )
         try await waitUntil { model.runtimeState == .waiting }
         var lines = try await waitForLogLines(1, at: log)
@@ -98,6 +101,20 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertFalse(lines[0].contains("--sleep-after"))
         XCTAssertFalse(lines[0].contains("--keep-displays-awake"))
 
+        // A timed-out pending Show must release its operation before rearming
+        // the hidden-source overlay, rather than leaving automation suspended.
+        model.displayReconfigured(display: displays[1].id, flags: .removeFlag)
+        var expiredShow: DisplayOperationResult?
+        model.show(targetUUID: Self.targetUUID) { expiredShow = $0 }
+        XCTAssertEqual(model.hideOperation, .showing(Self.targetUUID))
+        clock.addTimeInterval(16)
+        model.displayReconfigured(display: displays[1].id, flags: .addFlag)
+        try await waitUntil { expiredShow != nil }
+        XCTAssertFalse(expiredShow?.succeeded == true)
+        XCTAssertEqual(showCalls, 0)
+        XCTAssertEqual(model.hideOperation, .idle)
+        try await waitUntil { model.runtimeState == .waiting }
+
         try Data().write(to: blackoutTrigger)
         try await waitUntil { model.runtimeState == .blackedOut }
         XCTAssertEqual(model.protectionRuleRowStatus(for: rule).text, "Blackout active · Sleep paused while a display is removed; restores overlay instead")
@@ -107,8 +124,8 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertTrue(menuTitles.contains("Show Target"), "Show stays reachable over a source overlay")
         XCTAssertTrue(menuTitles.contains("Restore"), "protection Restore stays available over a source overlay")
         XCTAssertTrue(try model.restoreBlackout(), "Restore controls the overlay while the journal remains hidden")
-        lines = try await waitForLogLines(2, at: log)
-        XCTAssertEqual(lines[1], "command:restore")
+        lines = try await waitForLogLines(4, at: log)
+        XCTAssertEqual(lines[3], "command:restore")
         XCTAssertEqual(showCalls, 0, "Restore never invokes Show")
         XCTAssertEqual(model.handoffStatus?.state, .hidden)
 
@@ -116,7 +133,7 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertTrue(shown.succeeded)
         lines = try String(contentsOf: log, encoding: .utf8).split(separator: "\n").map(String.init)
         XCTAssertTrue(watcherWasStoppedBeforeShow)
-        XCTAssertEqual(lines.filter { $0 == "stop" }.count, 1)
+        XCTAssertEqual(lines.filter { $0 == "stop" }.count, 2, "input return stops the first overlay; Show stops its replacement")
         XCTAssertEqual(showCalls, 1)
         XCTAssertEqual(box.value.state, .none)
 
@@ -1934,6 +1951,193 @@ final class DisplayHideAppTests: XCTestCase {
     func testInputReturnFailedVerificationNeverLoops() async throws {
         for scenario in ["failed-verification", "commit-failure"] {
             try await exerciseWakeCore(layoutDrift: false, inputReturn: scenario)
+        }
+    }
+
+    func testShowActionWaitsForInputReturnBeforeShowingBothDisplaysOnce() async throws {
+        let defaults = try makeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
+        let targets = [displays[1], displays[2]]
+        var removals = targets.enumerated().map {
+            sleepRemoval(id: "entry-\($0.offset)", target: $0.element, source: displays[0], resolved: false)
+        }
+        var connected = displays
+        var topology = "initial"
+        var shows: [String] = []
+        var hides = 0
+        let model = AppModel(
+            defaults: defaults, displayProvider: { connected },
+            inspectHandoff: {
+                self.multiHandoffStatus(removals, observations: [], journalID: "journal",
+                                       baselineIdentity: "baseline", observedTopologyIdentity: topology)
+            },
+            sleepResumeHideDisplay: { _, _, _ in hides += 1; return .notRequested },
+            showDisplay: { key, _ in
+                let uuid = String(key.split(separator: "|").last!)
+                shows.append(uuid)
+                let index = try XCTUnwrap(targets.firstIndex { $0.uuid == uuid })
+                removals[index] = self.sleepRemoval(id: "entry-\(index)", target: targets[index],
+                                                    source: self.displays[0], resolved: true)
+                return .notRequested
+            },
+            quiesceProtection: { $0(true, nil) }, displayWakeSettleDelay: 0.01
+        )
+        let action = DisplayAction(name: "Show both", steps: targets.map {
+            DisplayActionStep(target: DisplayIdentitySnapshot($0), effect: .show)
+        })
+        try model.saveDisplayAction(action)
+        try await waitUntil { !model.protectionQuiescencePending }
+        model.displayReconfigured(display: targets[0].id, flags: .removeFlag)
+        connected.remove(at: 1)
+        topology = "returning"
+        XCTAssertNil(model.displayActionRunBlocker(for: action), "Run must admit the bounded wait")
+        var result: AppControlResponse?
+        var completions = 0
+        model.runDisplayAction(id: action.id) { result = $0; completions += 1 }
+        XCTAssertEqual(model.runningDisplayAction?.id, action.id)
+        XCTAssertEqual(model.displayActionStatus(for: action), "Waiting for displays to settle…")
+        let duplicate = await model.handleDisplayControlRequest(AppControlRequest(command: .runAction, actionID: action.id))
+        XCTAssertEqual(duplicate.outcome, .busy)
+        try await Task.sleep(nanoseconds: 40_000_000)
+        XCTAssertNil(result)
+        XCTAssertTrue(shows.isEmpty, "do not write while a target is missing")
+        XCTAssertEqual(hides, 0)
+
+        connected = displays
+        topology = "settled"
+        model.displayReconfigured(display: targets[0].id, flags: .addFlag)
+        model.displayParametersChanged()
+        try await waitUntil { result != nil }
+        XCTAssertEqual(result?.outcome, .done, result?.summary ?? "missing result")
+        XCTAssertEqual(result?.steps?.map(\.outcome), [.done, .done])
+        XCTAssertEqual(shows, targets.compactMap(\.uuid))
+        XCTAssertEqual(completions, 1)
+        XCTAssertEqual(hides, 0, "explicit Show replaces background re-hide")
+        XCTAssertNil(model.runningDisplayAction)
+        XCTAssertFalse(model.displayLifecycleTransitioning)
+        XCTAssertFalse(model.handoffStatus?.hasUnresolvedJournal == true)
+    }
+
+    func testPendingShowActionRefusesChangedStateAndNeverRetriesAWrite() async throws {
+        for scenario in ["timeout", "identity", "journal", "sleep", "unlock", "shutdown", "writer"] {
+            let defaults = try makeDefaults()
+            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
+            let targets = [displays[1], displays[2]]
+            let removals = targets.enumerated().map {
+                sleepRemoval(id: "entry-\($0.offset)", target: $0.element, source: displays[0], resolved: false)
+            }
+            var connected = displays
+            var clock = Date()
+            var journalID = "journal"
+            var shows = 0
+            var hides = 0
+            let model = AppModel(
+                defaults: defaults, displayProvider: { connected }, now: { clock },
+                inspectHandoff: {
+                    self.multiHandoffStatus(removals, observations: [], journalID: journalID, baselineIdentity: "baseline")
+                },
+                sleepResumeHideDisplay: { _, _, _ in hides += 1; return .notRequested },
+                showDisplay: { _, _ in shows += 1; throw RecoveryError.unsafe("synthetic restore failure") },
+                quiesceProtection: { $0(true, nil) }, displayWakeSettleDelay: 0.01
+            )
+            let action = DisplayAction(name: "Show both", steps: targets.map {
+                DisplayActionStep(target: DisplayIdentitySnapshot($0), effect: .show)
+            })
+            try model.saveDisplayAction(action)
+            try await waitUntil { !model.protectionQuiescencePending }
+            model.displayReconfigured(display: targets[0].id, flags: .removeFlag)
+            var result: AppControlResponse?
+            var completions = 0
+            model.runDisplayAction(id: action.id) { result = $0; completions += 1 }
+            XCTAssertNil(result, scenario)
+            switch scenario {
+            case "timeout":
+                clock.addTimeInterval(16)
+                model.displayReconfigured(display: targets[0].id, flags: .addFlag)
+            case "identity":
+                connected[1] = Self.display(index: 2, id: 999, uuid: Self.targetUUID, name: "Replacement", main: false)
+            case "journal": journalID = "replacement"
+            case "sleep": model.beginDisplaySleepTransition()
+            case "unlock": model.displayConfigurationChanged(restartWatcher: true)
+            case "shutdown": model.shutdown(completion: {})
+            default: break
+            }
+            try await waitUntil { result != nil }
+            XCTAssertFalse(result?.ok == true, scenario)
+            XCTAssertEqual(result?.steps?.last?.outcome, .notRun, scenario)
+            XCTAssertNil(model.runningDisplayAction, scenario)
+            XCTAssertEqual(shows, scenario == "writer" ? 1 : 0, scenario)
+            XCTAssertTrue(model.handoffStatus?.hasUnresolvedJournal == true, scenario)
+            if scenario == "timeout" { XCTAssertTrue(result?.summary.contains("15 seconds") == true) }
+            if scenario == "sleep" { model.displayWakeObserved(screensAwake: true) }
+            model.displayReconfigured(display: targets[0].id, flags: .addFlag)
+            model.displayParametersChanged()
+            try await Task.sleep(nanoseconds: 60_000_000)
+            XCTAssertEqual(shows, scenario == "writer" ? 1 : 0, "no replay: \(scenario)")
+            XCTAssertEqual(completions, 1, scenario)
+            XCTAssertEqual(hides, 0, scenario)
+        }
+    }
+
+    func testIndividualAndScriptShowWaitForInputReturnWithExclusiveOwnership() async throws {
+        for scripted in [false, true] {
+            let defaults = try makeDefaults()
+            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
+            var removal = sleepRemoval(id: "entry", target: displays[1], source: displays[0], resolved: false)
+            var shows = 0
+            var connected = displays
+            let model = AppModel(
+                defaults: defaults, displayProvider: { connected },
+                inspectHandoff: {
+                    let observedRemoval = connected.contains { $0.uuid == Self.targetUUID } ? removal :
+                        self.sleepRemoval(id: "entry", target: self.displays[1], source: self.displays[0],
+                                          resolved: false, canShow: false, topologyVerified: false)
+                    return self.multiHandoffStatus([observedRemoval], observations: [], journalID: "journal", baselineIdentity: "baseline")
+                },
+                sleepResumeHideDisplay: { _, _, _ in XCTFail("Show must suppress re-hide"); return .notRequested },
+                showDisplay: { _, _ in
+                    shows += 1
+                    removal = self.sleepRemoval(id: "entry", target: self.displays[1], source: self.displays[0], resolved: true)
+                    return .notRequested
+                },
+                quiesceProtection: { $0(true, nil) }, displayWakeSettleDelay: 0.01
+            )
+            try await waitUntil { !model.protectionQuiescencePending }
+            model.displayReconfigured(display: displays[1].id, flags: .removeFlag)
+            connected.remove(at: 1)
+            model.refreshDisplays()
+            let tile = try XCTUnwrap(model.displayTiles.first { $0.uuid == Self.targetUUID })
+            XCTAssertFalse(model.handoffStatus?.removal(for: Self.targetUUID)?.canShow == true)
+            XCTAssertEqual(tile.action, .show, "Settings/menu must still offer the bounded wait for an absent target")
+            XCTAssertNil(tile.actionBlocker)
+            XCTAssertTrue(model.hiddenDisplayTiles.contains { $0.uuid == Self.targetUUID }, "Show All must retain it")
+            var result: DisplayOperationResult?
+            var scriptResult: AppControlResponse?
+            if scripted {
+                Task { @MainActor in
+                    scriptResult = await model.handleDisplayControlRequest(
+                        AppControlRequest(command: .show, targetUUID: Self.targetUUID)
+                    )
+                }
+            } else {
+                model.show(targetUUID: Self.targetUUID) { result = $0 }
+            }
+            try await waitUntil { model.hideOperation.isBusy }
+            var refused: DisplayOperationResult?
+            model.hide(targetUUID: Self.targetUUID) { refused = $0 }
+            XCTAssertFalse(refused?.succeeded == true)
+            XCTAssertTrue(model.hideOperation.isBusy, "another request must not cancel the pending Show")
+            try await Task.sleep(nanoseconds: 40_000_000)
+            XCTAssertNil(result)
+            XCTAssertNil(scriptResult)
+            XCTAssertEqual(shows, 0)
+            connected = displays
+            model.displayParametersChanged()
+            try await waitUntil { result != nil || scriptResult != nil }
+            XCTAssertTrue(scripted ? scriptResult?.ok == true : result?.succeeded == true)
+            XCTAssertEqual(shows, 1)
+            XCTAssertEqual(model.hideOperation, .idle)
+            XCTAssertFalse(model.displayLifecycleTransitioning)
         }
     }
 
@@ -3917,6 +4121,7 @@ final class DisplayHideAppTests: XCTestCase {
         defaults: UserDefaults,
         displays: [DisplayRecord],
         displayProvider: (() -> [DisplayRecord])? = nil,
+        now: @escaping () -> Date = Date.init,
         idleSecondsProvider: @escaping () -> TimeInterval? = { nil },
         status: @escaping () -> DisplayHandoffStatus? = { nil },
         quiesceProtection: @escaping ProtectionQuiesce = { $0(true, nil) },
@@ -3936,6 +4141,7 @@ final class DisplayHideAppTests: XCTestCase {
         return AppModel(
             defaults: defaults,
             displayProvider: displayProvider ?? { displays },
+            now: now,
             idleSecondsProvider: idleSecondsProvider,
             isDisplayMirrored: isDisplayMirrored,
             inspectHandoff: { status() ?? fallback },

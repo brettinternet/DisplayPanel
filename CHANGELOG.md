@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Let Show wait for an in-progress monitor input switch before restoring displays, without retrying failed writes.
 - Resume enabled automation after display wake or configuration changes without requiring a manual refresh.
 
 ## 0.8.1

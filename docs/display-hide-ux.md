@@ -173,6 +173,11 @@ panelctl app run-action --action ACTION_UUID --json
 - Runs only from **Run** or this command, never from rules, login or wake. Action steps keep their saved effects; `--style` applies only to direct Hide and Toggle Hide CLI requests.
 - Before any change, PanelCtl checks every step. A refusal names the step and
   changes nothing.
+- A Show-only Action for journaled displays can wait for an in-progress monitor
+  input return, within its original 15-second window, then revalidate and run
+  once. Individual Show behaves the same. This replaces background re-hide;
+  it does not retry failed writes. Sleep, unlock, shutdown, identity/journal
+  changes or timeout cancel the wait. Mixed Actions and Toggle do not wait.
 - Steps run in order. Disconnected targets and targets verified hidden by the
   other Hide style are skipped with a visible reason, without showing them or
   switching styles. Other failures stop the run; earlier steps stay done.
