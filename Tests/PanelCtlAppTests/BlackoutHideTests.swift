@@ -89,6 +89,21 @@ final class BlackoutHideTests: XCTestCase {
         XCTAssertEqual(tile(Self.sideUUID, relaunched).status, .on)
     }
 
+    func testHiddenDisplayKeepsSavedNameWhenLiveNameDisappears() throws {
+        var connected = displays
+        let model = try makeModel(displays: { connected })
+        XCTAssertEqual(hide(Self.sideUUID, model)?.succeeded, true)
+
+        connected[1] = Self.display(2, id: 909, uuid: Self.sideUUID.lowercased(), name: nil)
+        model.refreshDisplays()
+        XCTAssertEqual(tile(Self.sideUUID, model).name, "Side")
+        XCTAssertEqual(tile(Self.sideUUID, model).action, .show)
+
+        connected[1] = Self.display(2, id: 909, uuid: Self.sideUUID, name: "Current name")
+        model.refreshDisplays()
+        XCTAssertEqual(tile(Self.sideUUID, model).name, "Current name", "Prefer an available live name")
+    }
+
     func testVerifiedRemovalSourceCanBeHiddenAndExternalMirrorsStillRefuse() async throws {
         var handoff = Self.handoffStatus(target: displays[1], source: displays[0])
         var mirrored: Set<UInt32> = [101, 202]
@@ -694,7 +709,7 @@ final class BlackoutHideTests: XCTestCase {
     }
 
     private static func display(
-        _ index: Int, id: UInt32, uuid: String, name: String, main: Bool = false, asleep: Bool = false
+        _ index: Int, id: UInt32, uuid: String, name: String?, main: Bool = false, asleep: Bool = false
     ) -> DisplayRecord {
         DisplayRecord(
             index: index,

@@ -2612,13 +2612,15 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(tiles[2].id, Self.targetKey)
 
         // A display hidden by mirroring shares its source's origin and follows it.
-        let mirrored = Self.display(index: 2, id: 202, uuid: Self.targetUUID, name: "Dell", main: false, x: 0)
+        let mirrored = Self.display(index: 2, id: 909, uuid: Self.targetUUID.lowercased(), name: nil, main: false, x: 0)
         connected = [mirrored, asleep, main, left]
         box.value = handoffStatus(.hidden, target: right, source: main, journalID: "tiles", canShow: true)
         model.refreshDisplays()
         tiles = model.displayTiles
         XCTAssertEqual(tiles.map(\.id), [Self.replacementUUID.lowercased(), Self.mainUUID.lowercased(), Self.targetKey, Self.sourceUUID.lowercased()])
         XCTAssertEqual(tiles.map(\.status), [.on, .on, .hidden, .asleep])
+        XCTAssertEqual(tiles.map(\.name), ["Dell (1)", "Main OLED", "Dell (2)", "Sleepy"],
+                       "A nameless hidden inventory record uses its journaled name by UUID, not numeric ID")
         XCTAssertNil(model.displayRecoveryProblem)
 
         // A journaled display that is gone stays listed, last, by its saved name.
@@ -4173,7 +4175,7 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertLessThanOrEqual(frame.maxX, window.contentLayoutRect.width + 1, file: file, line: line)
     }
 
-    private static func display(index: Int, id: UInt32, uuid: String, name: String, main: Bool,
+    private static func display(index: Int, id: UInt32, uuid: String, name: String?, main: Bool,
                                 serial: UInt32? = nil, x: Int? = nil, asleep: Bool = false,
                                 online: Bool = true, active: Bool? = nil) -> DisplayRecord {
         DisplayRecord(

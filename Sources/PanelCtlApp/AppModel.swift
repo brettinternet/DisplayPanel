@@ -2738,10 +2738,15 @@ final class AppModel: ObservableObject {
                 return lhs.id < rhs.id
             }
         var tiles = present.map { display in
-            DisplayTile(
+            // Hidden displays can remain in inventory after losing their NSScreen name.
+            let savedName = display.uuid.flatMap { uuid in
+                journalTargets.first { $0.uuid.caseInsensitiveCompare(uuid) == .orderedSame }?.name ??
+                    blackoutHiddenDisplays[uuid.lowercased()]?.name
+            }
+            return DisplayTile(
                 id: display.uuid?.lowercased() ?? "display-\(display.id)",
                 uuid: display.uuid,
-                name: display.settingsName,
+                name: display.name ?? savedName ?? display.settingsName,
                 status: tileStatus(for: display, isJournalTarget: isJournalTarget(display)),
                 display: display
             )
