@@ -529,6 +529,65 @@ final class BlackoutHideTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: log, encoding: .utf8).split(separator: "\n").count, 2)
     }
 
+    func testShowAllRestoresMixedHiddenDisplaysAndRemovesMenuItem() async throws {
+        var handoff = Self.handoffStatus(target: displays[1], source: displays[0])
+        let model = try makeModel(
+            handoff: { handoff },
+            showDisplay: { _, _ in
+                handoff = Self.noHandoffStatus()
+                return .notRequested
+            }
+        )
+        try await waitUntil("automation stopped") { !model.protectionQuiescencePending }
+        XCTAssertEqual(hide(Self.thirdUUID, model)?.succeeded, true)
+        let delegate = AppDelegate()
+        delegate.model = model
+        let menu = delegate.makeMenu()
+        let bulk = try XCTUnwrap(menu.item(withTitle: "Show All Displays"))
+        XCTAssertTrue(bulk.isEnabled)
+        let third = try XCTUnwrap(menu.item(withTitle: "Show Third"))
+        XCTAssertGreaterThan(menu.index(of: bulk), menu.index(of: third))
+
+        let finished = expectation(description: "both displays shown")
+        finished.expectedFulfillmentCount = 2
+        var shown: [String] = []
+        model.showAllDisplays { uuid, result in
+            XCTAssertTrue(result.succeeded, result.message)
+            shown.append(uuid)
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 5)
+        XCTAssertEqual(shown, [Self.sideUUID, Self.thirdUUID])
+        XCTAssertTrue(model.hiddenDisplayTiles.isEmpty)
+        XCTAssertEqual(coverRequests.last, [])
+        XCTAssertNil(delegate.makeMenu().item(withTitle: "Show All Displays"))
+    }
+
+    func testShowAllStopsAtFailedRestoreAndLeavesRemainingDisplayHidden() async throws {
+        let handoff = Self.handoffStatus(target: displays[1], source: displays[0])
+        let model = try makeModel(
+            handoff: { handoff },
+            showDisplay: { _, _ in
+                throw NSError(domain: "fake-show", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "Restore refused"])
+            }
+        )
+        try await waitUntil("automation stopped") { !model.protectionQuiescencePending }
+        XCTAssertEqual(hide(Self.thirdUUID, model)?.succeeded, true)
+        let failed = expectation(description: "failed restore surfaced")
+        var results: [String] = []
+        model.showAllDisplays { uuid, result in
+            results.append(uuid)
+            XCTAssertFalse(result.succeeded)
+            XCTAssertTrue(result.message.contains("Restore refused"), result.message)
+            failed.fulfill()
+        }
+        await fulfillment(of: [failed], timeout: 5)
+        XCTAssertEqual(results, [Self.sideUUID])
+        XCTAssertTrue(model.isBlackoutHidden(Self.thirdUUID))
+        XCTAssertEqual(model.hiddenDisplayTiles.count, 2)
+    }
+
     // MARK: Helpers
 
     private func makeModel(

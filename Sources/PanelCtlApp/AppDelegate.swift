@@ -512,6 +512,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 items.append(result)
             }
         }
+        if !model.hiddenDisplayTiles.isEmpty {
+            let showAll = item("Show All Displays", action: #selector(showAllDisplaysFromMenu))
+            let blocker = model.hiddenDisplayTiles.compactMap(\.actionBlocker).first
+            showAll.isEnabled = blocker == nil
+            showAll.toolTip = blocker
+            items.append(showAll)
+        }
         guard !items.isEmpty else { return }
         menu.addItem(.separator())
         items.forEach(menu.addItem)
@@ -619,6 +626,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func showDisplayFromMenu(_ sender: NSMenuItem) {
         guard let uuid = sender.representedObject as? String else { return }
         model.show(targetUUID: uuid) { [weak self] in self?.revealFailure($0, displayUUID: uuid) }
+    }
+
+    @objc private func showAllDisplaysFromMenu() {
+        model.showAllDisplays { [weak self] uuid, result in
+            self?.revealFailure(result, displayUUID: uuid)
+        }
     }
 
     /// A menu action that fails opens its display in Settings, where the result is shown.

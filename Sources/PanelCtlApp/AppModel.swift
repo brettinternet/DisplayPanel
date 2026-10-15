@@ -4586,6 +4586,25 @@ final class AppModel: ObservableObject {
                                   returnInput: input.value, returnInputWarning: input.warning)
     }
 
+    var hiddenDisplayTiles: [DisplayTile] {
+        displayTiles.filter { $0.status == .hidden || $0.action == .show }
+    }
+
+    /// Snapshot the targets, but revalidate each Show through the normal single-display path.
+    /// Stop at the first failure so recovery never silently escalates.
+    func showAllDisplays(completion: @escaping (String, DisplayOperationResult) -> Void) {
+        let targets = hiddenDisplayTiles.compactMap(\.uuid)
+        func showNext(_ index: Int) {
+            guard index < targets.count else { return }
+            let uuid = targets[index]
+            show(targetUUID: uuid) { result in
+                completion(uuid, result)
+                if result.succeeded { showNext(index + 1) }
+            }
+        }
+        showNext(0)
+    }
+
     /// Shows a hidden display right away. Refuses when the journal belongs to
     /// a different display, so a stale action never shows another one.
     func show(targetUUID: String, actionLeaseID: UUID? = nil,
