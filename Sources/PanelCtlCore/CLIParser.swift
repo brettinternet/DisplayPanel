@@ -42,22 +42,25 @@ public struct BlackoutOptions: Equatable {
     /// Hidden displays need watcher or one-shot ownership and UUIDs that aren't selected.
     var hiddenDisplaysAreValid: Bool {
         guard !hiddenDisplayUUIDs.isEmpty else { return true }
-        let keys = hiddenDisplayUUIDs.map { $0.uppercased() }
+        guard let keys = Self.normalizedUniqueUUIDKeys(hiddenDisplayUUIDs) else { return false }
         return (watch || runOnce) &&
-            keys.allSatisfy { UUID(uuidString: $0) != nil } &&
-            Set(keys).count == keys.count &&
             !selectors.contains { keys.contains($0.uppercased()) }
     }
 
     var otherRuleDisplaysAreValid: Bool {
         guard !otherRuleDisplayUUIDs.isEmpty else { return true }
-        let keys = otherRuleDisplayUUIDs.map { $0.uppercased() }
+        guard let keys = Self.normalizedUniqueUUIDKeys(otherRuleDisplayUUIDs) else { return false }
         let hidden = Set(hiddenDisplayUUIDs.map { $0.uppercased() })
         return (watch || runOnce) &&
-            keys.allSatisfy { UUID(uuidString: $0) != nil } &&
-            Set(keys).count == keys.count &&
             hidden.isDisjoint(with: keys) &&
             !selectors.contains { keys.contains($0.uppercased()) }
+    }
+
+    private static func normalizedUniqueUUIDKeys(_ values: [String]) -> [String]? {
+        let keys = values.map { $0.uppercased() }
+        guard keys.allSatisfy({ UUID(uuidString: $0) != nil }),
+              Set(keys).count == keys.count else { return nil }
+        return keys
     }
 
     public init(
