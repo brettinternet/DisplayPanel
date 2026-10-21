@@ -17,6 +17,8 @@ Run these from your logged-in desktop session.
 | `recovery rehearse --timeout 5s` | No | Save, start the helper, verify at the deadline |
 | `recovery restore [--display UUID]` | **Yes** | Restore one removed display (or a saved layout), then verify |
 | `recovery guard --timeout 15s` | **Yes** | Save, then restore on deadline, exit or signal |
+| `recovery keep-shown --consent-recovery` | No | Archive a previous-boot public Hide journal and accept the current desktop |
+| `recovery hide-again --consent-recovery` | **Yes** | Archive the old journal and hide its targets using a fresh baseline; no input switching |
 
 ```text
 ~/Library/Application Support/PanelCtl/Recovery/current.json   # default --journal
@@ -44,8 +46,8 @@ Restore refuses, without writing, when:
 
 It never retries, guesses IDs, resets firmware, writes permanent configuration
 or reboots. There is no force flag. Fix the cause by hand, then run
-`recovery verify`. If the Mac rebooted, keep the old journal and use a new
-`--journal` path.
+`recovery verify`. If the Mac rebooted, the old transaction cannot be replayed;
+use [previous-session recovery](#recovering-after-reboot) instead of moving or deleting the journal.
 
 If restore can't succeed, turn off mirroring in **System Settings → Displays**,
 drag the menu bar back to the original display, then run `recovery verify`.
@@ -115,6 +117,65 @@ input is selected and never causes automatic Show or an input write.
 Hide is session-only: after logout or reboot, macOS loads its own layout. If
 macOS brings back a mirror itself, PanelCtl shows that display as **Mirrored**;
 turn off mirroring in System Settings → Displays.
+
+## Recovering after reboot
+
+A reboot ends the old Hide session. Numeric display and mode IDs may now belong
+to different things, so PanelCtl never restores or edits the old baseline to
+make its checks pass.
+
+When all captured monitors return as separate, awake displays with the same
+stable identities, PanelCtl compares two matching observations. If the complete
+desktop matches the old arrangement, main display, rotation, mode attributes and
+color profile on the same OS build, inspection automatically archives the old
+journal and clears recovery **without writing any display settings**. Boot-local
+display and mode IDs need not match. Intent-preserving transition observations
+do not perform this cleanup. Relaunch never automatically hides displays again.
+
+Otherwise **Settings → Displays → Recover previous session** offers two outcomes
+directly from **Needs recovery**, with a confirmation covering every unresolved
+display in the old journal:
+
+- **Keep displays shown:** archive the old journal and accept the current desktop.
+  No display, mode, arrangement or input writes.
+- **Hide again:** archive the old journal, capture the current desktop as the new
+  Show baseline, and mirror the old target/source relationships using freshly
+  verified identities in one session transaction. No preliminary Show, input
+  switching, or replay of old numeric IDs. A failure keeps the new recovery
+  journal and never retries the write.
+
+A monitor may be on the other computer's input and still appear active to macOS;
+Hide again works in that case without interrupting its selected input. If it is
+missing, asleep or inactive, return it to the Mac input or reconnect it first.
+Surviving mirrors must be turned off in System Settings → Displays. Changed or
+ambiguous identities, changed connectors, another user/Mac and private-disconnect
+evidence remain blocked; these buttons are not a force reset.
+
+**Current modes become the new baseline.** An off-input monitor may expose only
+60 Hz rather than its previous 240 Hz. Explicit confirmation accepts that mode
+and layout; subsequent Show restores the new baseline, not the archived one.
+Return monitors to their Mac inputs and select the desired modes first if you
+want those captured instead. Automatic cleanup never accepts a reduced mode.
+
+The equivalent CLI operations affect the whole journal, not one `--display`:
+
+```sh
+panelctl recovery status
+panelctl recovery keep-shown --consent-recovery
+# Or, explicitly hide the previous targets again:
+panelctl recovery hide-again --consent-recovery
+```
+
+Both take `--journal <path>`. The old bytes remain in `recovery-<old-id>.json`,
+including any unresolved/interrupted evidence. The new record links back with
+`supersedesJournalID`; it does not claim the old transaction restored successfully.
+Archive conflicts or persistence failures stop recovery. Journal/topology changes
+since confirmation invalidate it. Same-boot recovery and private disconnect keep
+their existing strict rules.
+
+Fake-backed tests cover reboot/ID reuse, acceptance, re-hide, reduced modes,
+refusals and evidence preservation. No live re-hide/input-return hardware trial
+was performed for this path.
 
 ## Monitor input return while hidden
 

@@ -7,6 +7,8 @@ struct DisplaySettingsView: View {
     @ObservedObject var navigation: SettingsNavigation
     /// Input codes being typed while "Other…" is chosen, by tile ID.
     @State private var customInputs: [String: String] = [:]
+    @State private var pendingSessionRecovery: DisplaySessionRecovery?
+    @State private var recoveryHidesAgain = false
 
     var body: some View {
         let tiles = model.displayTiles
@@ -28,6 +30,12 @@ struct DisplaySettingsView: View {
                                 .disabled(model.protectionQuiescencePending || model.hideOperation.isBusy)
                         }
                     }
+                }
+                if let recovery = model.handoffStatus?.sessionRecovery {
+                    sessionRecoverySection(recovery)
+                }
+                if let result = model.sessionRecoveryResult {
+                    Section { Text(result).textSelection(.enabled) }
                 }
                 let pageProblem = model.pageRecoveryProblem
                 if let pageProblem {
@@ -59,6 +67,19 @@ struct DisplaySettingsView: View {
             // Another display is another page: replace its controls instead of
             // animating one display's settings into the next.
             .id(selected?.id)
+        }
+        .alert(recoveryHidesAgain ? "Hide these displays again?" : "Keep these displays shown?",
+               isPresented: Binding(get: { pendingSessionRecovery != nil }, set: { if !$0 { pendingSessionRecovery = nil } }),
+               presenting: pendingSessionRecovery) { recovery in
+            Button(recoveryHidesAgain ? "Hide again" : "Keep displays shown") {
+                model.recoverPreviousSession(recovery, hideAgain: recoveryHidesAgain)
+                pendingSessionRecovery = nil
+            }
+            Button("Cancel", role: .cancel) { pendingSessionRecovery = nil }
+        } message: { recovery in
+            Text((recoveryHidesAgain
+                  ? "Remove these displays from the Mac desktop again without showing them or switching inputs first. "
+                  : "Clear the previous session’s recovery requirement without changing any display settings. ") + recovery.confirmation)
         }
     }
 
@@ -502,6 +523,33 @@ struct DisplaySettingsView: View {
 
     // MARK: Recovery
 
+    private func sessionRecoverySection(_ recovery: DisplaySessionRecovery) -> some View {
+        Section {
+            Text("The previous display session ended. Choose what these displays should do now.")
+            Text(recovery.displayNames.joined(separator: ", "))
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("Hide again") {
+                    recoveryHidesAgain = true
+                    pendingSessionRecovery = recovery
+                }
+                Button("Keep displays shown") {
+                    recoveryHidesAgain = false
+                    pendingSessionRecovery = recovery
+                }
+            }
+            .disabled(!recovery.canRecover || model.sessionRecoveryBlocker != nil)
+            if let blocker = model.sessionRecoveryBlocker {
+                Text(blocker).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                Button("Check Again") { model.refreshDisplays() }
+            }
+        } header: {
+            Text("Recover previous session")
+        } footer: {
+            Text("Both choices preserve the old journal. Hide again uses the current modes and arrangement; neither choice switches monitor inputs.")
+        }
+    }
+
     /// A recovery problem that no display tile shows.
     private func pageRecoverySection(_ problem: String) -> some View {
         Section {
@@ -523,7 +571,9 @@ struct DisplaySettingsView: View {
     private func recoveryDetails(_ status: DisplayHandoffStatus, targetUUID: String? = nil) -> some View {
         DisclosureGroup("Recovery details") {
             if status.state == .recovery {
-                Text("If a guarded Restore is refused, keep the journal, correct mirroring and arrangement in System Settings → Displays, then Check Again.")
+                Text(status.sessionRecovery != nil
+                     ? "The previous session cannot be replayed. Use Hide again or Keep displays shown above. If a monitor is unavailable, return it to the Mac input; if it is mirrored, turn off mirroring in System Settings first."
+                     : "If a guarded Restore is refused, keep the journal, correct mirroring and arrangement in System Settings → Displays, then Check Again.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -533,7 +583,9 @@ struct DisplaySettingsView: View {
                 }
             }
             CommandCopyRow("Journal", command: status.journalPath)
-            if let selected = targetUUID.flatMap({ status.removal(for: $0) }) {
+            if status.sessionRecovery != nil {
+                CommandCopyRow("Status command", command: status.inspectionCommand)
+            } else if let selected = targetUUID.flatMap({ status.removal(for: $0) }) {
                 removalDetails(selected)
                 let command = "panelctl recovery restore --display \(shellQuote(selected.target.uuid)) --journal \(shellQuote(status.journalPath))"
                 CommandCopyRow("Recovery command", command: command)

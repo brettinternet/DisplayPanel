@@ -166,6 +166,7 @@ public enum CLIParseError: Error, Equatable, CustomStringConvertible {
     case missingAppCommand
     case missingRecoveryAction
     case invalidRecoveryTimeout
+    case sessionRecoveryConsentRequired
     case disableRequirements
     case mirrorRequirements
     case unmirrorRequirements
@@ -232,6 +233,8 @@ public enum CLIParseError: Error, Equatable, CustomStringConvertible {
         case .missingAppCommand: return "missing app command (use 'panelctl help app' for usage)"
         case .missingRecoveryAction: return "missing recovery action (use 'panelctl help recovery' for usage)"
         case .invalidRecoveryTimeout: return "recovery watchdog timeout must be from 1 through 60 seconds"
+        case .sessionRecoveryConsentRequired:
+            return "keep-shown and hide-again require --consent-recovery: archive the previous session and accept the current modes and arrangement for every journaled display; no input switching"
         case .disableRequirements: return "disable requires exactly one --display or --index, --consent-disable, and --timeout (1–60 seconds)"
         case .mirrorRequirements: return "mirror requires --display, --source and --consent-mirror"
         case .unmirrorRequirements: return "unmirror requires --consent-unmirror (restores the journaled topology)"
@@ -381,12 +384,18 @@ public enum CLIParser {
         guard let raw = args.first else { throw CLIParseError.missingRecoveryAction }
         if raw == "disable" { return try parseDisable(Array(args.dropFirst())) }
         guard let action = RecoveryAction(rawValue: raw) else { throw CLIParseError.unknownCommand(raw) }
+        let sessionRecovery = action == .keepShown || action == .hideAgain
+        var consent = false
         var timeout: TimeInterval?
         var journal: String?
         var selector: String?
         var i = 1
         while i < args.count {
             switch args[i] {
+            case "--consent-recovery":
+                guard sessionRecovery else { throw CLIParseError.unknownOption(args[i]) }
+                guard !consent else { throw CLIParseError.duplicateOption(args[i]) }
+                consent = true
             case "--timeout":
                 guard action == .rehearse || action == .guard else { throw CLIParseError.unknownOption(args[i]) }
                 guard timeout == nil else { throw CLIParseError.duplicateOption(args[i]) }
@@ -411,6 +420,7 @@ public enum CLIParser {
             }
             i += 1
         }
+        guard !sessionRecovery || consent else { throw CLIParseError.sessionRecoveryConsentRequired }
         if let selector {
             return .recoverySelected(action: action, timeout: timeout, selector: selector, journalPath: journal)
         }

@@ -118,6 +118,7 @@ public struct DisplayHandoffStatus: Equatable {
     /// Stable normalized digest of the latest observation; exact checks still use RecoverySnapshot.verify.
     public let observedTopologyIdentity: String?
     public let removals: [DisplayHandoffRemoval]
+    public let sessionRecovery: DisplaySessionRecovery?
 
     public var hasUnresolvedJournal: Bool { removals.contains(where: \.isUnresolved) || state != .none }
     public func removal(for uuid: String) -> DisplayHandoffRemoval? {
@@ -148,7 +149,8 @@ public struct DisplayHandoffStatus: Equatable {
         baselineIdentity: String? = nil,
         observedTopologyIdentity: String? = nil,
         journalIdentity: String? = nil,
-        removals: [DisplayHandoffRemoval] = []
+        removals: [DisplayHandoffRemoval] = [],
+        sessionRecovery: DisplaySessionRecovery? = nil
     ) {
         self.state = state
         self.target = target
@@ -166,6 +168,7 @@ public struct DisplayHandoffStatus: Equatable {
         self.observedTopologyIdentity = observedTopologyIdentity
         self.journalIdentity = journalIdentity
         self.removals = removals
+        self.sessionRecovery = sessionRecovery
     }
 
     fileprivate static func shellQuote(_ value: String) -> String {
@@ -389,7 +392,8 @@ public enum DisplayHandoff {
             mirrorTopologyVerified: journal.mirrorTopologyVerified,
             baselineIdentity: journal.baselineIdentity,
             observedTopologyIdentity: journal.observedTopologyIdentity,
-            journalIdentity: journal.journalIdentity, removals: removals
+            journalIdentity: journal.journalIdentity, removals: removals,
+            sessionRecovery: status.sessionRecovery
         )
     }
 }

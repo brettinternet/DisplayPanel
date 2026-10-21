@@ -4117,6 +4117,85 @@ final class DisplayHideAppTests: XCTestCase {
         }
     }
 
+    func testPreviousSessionRecoveryOffersBothOutcomesWithoutOrdinaryHideShowOrDDC() async throws {
+        for hideAgain in [false, true] {
+            let confirmation = DisplaySessionRecovery(
+                journalID: "previous-boot", journalIdentity: "journal", topologyIdentity: "desktop",
+                displayNames: ["Target", "Mirror source"], blocker: nil, canAutomaticallyKeepShown: false
+            )
+            let removals = [displays[1], displays[2]].enumerated().map {
+                sleepRemoval(id: "entry-\($0.offset)", target: $0.element, source: displays[0],
+                             resolved: false, state: "needsAttention", canShow: false, topologyVerified: false)
+            }
+            var status = multiHandoffStatus(removals, observations: [], journalID: "previous-boot",
+                                           state: .recovery, sessionRecovery: confirmation)
+            var calls = 0
+            let model = makeModel(
+                defaults: try makeDefaults(), displays: displays, status: { status },
+                hideDisplay: { _, _, _ in XCTFail("must not run configured Hide/input switching"); return .notRequested },
+                showDisplay: { _, _ in XCTFail("must not restore the previous boot"); return .notRequested },
+                recoverDisplaySession: { captured, requestedHide in
+                    calls += 1
+                    XCTAssertEqual(captured, confirmation)
+                    XCTAssertEqual(requestedHide, hideAgain)
+                    let updated = [self.displays[1], self.displays[2]].enumerated().map {
+                        self.sleepRemoval(id: "fresh-\($0.offset)", target: $0.element,
+                                          source: self.displays[0], resolved: !hideAgain)
+                    }
+                    status = self.multiHandoffStatus(updated, observations: [], journalID: "fresh")
+                }
+            )
+            try await waitUntil { !model.protectionQuiescencePending }
+            XCTAssertTrue(model.displayTiles.contains { $0.status == .needsRecovery })
+            XCTAssertNil(model.sessionRecoveryBlocker)
+            model.recoverPreviousSession(confirmation, hideAgain: hideAgain)
+            XCTAssertTrue(model.hideOperation.isBusy)
+            model.recoverPreviousSession(confirmation, hideAgain: hideAgain)
+            try await waitUntil { !model.hideOperation.isBusy }
+            XCTAssertEqual(calls, 1)
+            XCTAssertFalse(model.displayTiles.contains { $0.status == .needsRecovery })
+            XCTAssertTrue(model.sessionRecoveryResult?.contains(hideAgain ? "Hidden again" : "Displays kept shown") == true)
+        }
+    }
+
+    func testPreviousSessionRecoveryCancelsDuringCleanupAndKeepsRecoveryOnFailure() async throws {
+        for scenario in ["cleanup", "sleep", "writer"] {
+            let confirmation = DisplaySessionRecovery(
+                journalID: "previous-boot", journalIdentity: "journal", topologyIdentity: "desktop",
+                displayNames: ["Target"], blocker: nil, canAutomaticallyKeepShown: false
+            )
+            let removal = sleepRemoval(id: "old", target: displays[1], source: displays[0],
+                                       resolved: false, state: "needsAttention", canShow: false, topologyVerified: false)
+            let status = multiHandoffStatus([removal], observations: [], journalID: "previous-boot",
+                                           state: .recovery, sessionRecovery: confirmation)
+            var delayed = false
+            var completion: ((Bool, String?) -> Void)?
+            var calls = 0
+            let model = makeModel(
+                defaults: try makeDefaults(), displays: displays, status: { status },
+                quiesceProtection: { callback in
+                    if delayed { completion = callback } else { callback(true, nil) }
+                },
+                recoverDisplaySession: { _, _ in
+                    calls += 1
+                    throw RecoveryError.unsafe("new recovery failed")
+                }
+            )
+            try await waitUntil { !model.protectionQuiescencePending }
+            delayed = true
+            model.recoverPreviousSession(confirmation, hideAgain: true)
+            if scenario == "sleep" {
+                model.setDisplayLifecycleTransitioning(true)
+                model.setDisplayLifecycleTransitioning(false)
+            }
+            try XCTUnwrap(completion)(scenario != "cleanup", "cleanup failed")
+            try await waitUntil { !model.hideOperation.isBusy }
+            XCTAssertEqual(calls, scenario == "writer" ? 1 : 0, scenario)
+            XCTAssertTrue(model.handoffStatus?.hasUnresolvedJournal == true)
+            XCTAssertTrue(model.sessionRecoveryResult?.contains("Couldn’t recover") == true)
+        }
+    }
+
     private func makeModel(
         defaults: UserDefaults,
         displays: [DisplayRecord],
@@ -4132,6 +4211,9 @@ final class DisplayHideAppTests: XCTestCase {
         hideDisplay: @escaping (DisplayHideIdentity, DisplayHideIdentity, UInt8?) throws -> DisplayInputOutcome = { _, _, _ in .notRequested },
         sleepResumeHideDisplay: ((DisplayHideIdentity, DisplayHideIdentity, DisplayHideWakeExpectation) throws -> DisplayInputOutcome)? = nil,
         showDisplay: @escaping (String, UInt8?) throws -> DisplayInputOutcome = { _, _ in .notRequested },
+        recoverDisplaySession: @escaping (DisplaySessionRecovery, Bool) throws -> Void = { _, _ in
+            XCTFail("unexpected previous-session recovery")
+        },
         displayWakeSettleDelay: TimeInterval = 1,
         checkDDCInput: @escaping (DisplayHideIdentity) throws -> DDCInputReading = { _ in
             DDCInputReading(displayID: 0, uuid: "", current: 1)
@@ -4150,6 +4232,7 @@ final class DisplayHideAppTests: XCTestCase {
                 try hideDisplay(target, source, nil)
             },
             showDisplay: showDisplay,
+            recoverDisplaySession: recoverDisplaySession,
             checkDDCInput: checkDDCInput,
             // Black out never draws over a real screen in tests.
             coverDisplays: coverDisplays,
@@ -4206,7 +4289,8 @@ final class DisplayHideAppTests: XCTestCase {
                                    observations: [DisplayHideObservation], journalID: String,
                                    state: DisplayHandoffStatus.State? = nil,
                                    baselineIdentity: String? = nil,
-                                   observedTopologyIdentity: String? = nil) -> DisplayHandoffStatus {
+                                   observedTopologyIdentity: String? = nil,
+                                   sessionRecovery: DisplaySessionRecovery? = nil) -> DisplayHandoffStatus {
         let unresolved = removals.filter(\.isUnresolved)
         let primary = unresolved.first ?? removals.first
         return DisplayHandoffStatus(
@@ -4221,7 +4305,7 @@ final class DisplayHideAppTests: XCTestCase {
             baselineIdentity: baselineIdentity,
             observedTopologyIdentity: observedTopologyIdentity ?? baselineIdentity,
             journalIdentity: "fixture-\(journalID)-\(removals.map(\.state).joined(separator: ","))",
-            removals: removals
+            removals: removals, sessionRecovery: sessionRecovery
         )
     }
 

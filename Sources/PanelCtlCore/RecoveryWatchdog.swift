@@ -3,6 +3,8 @@ import Darwin
 
 public enum RecoveryAction: String, Equatable {
     case capture, status, verify, restore, rehearse, `guard`, enable, panic
+    case keepShown = "keep-shown"
+    case hideAgain = "hide-again"
 }
 
 public enum DisplayRecovery {
@@ -10,6 +12,18 @@ public enum DisplayRecovery {
                            displaySelector: String? = nil, executable: URL) throws {
         let store = RecoveryStore(url: journalPath.map { URL(fileURLWithPath: $0) } ?? RecoveryStore.defaultURL)
         if action == .status {
+            try printJournal(store.load())
+            return
+        }
+        if action == .keepShown || action == .hideAgain {
+            let mirror = MirrorController()
+            let controller = DisplayHideController(store: store, mirror: mirror,
+                                                   operationLock: { RecoveryStore.operationLock() })
+            guard let recovery = try controller.inspect(preservingMirrorIntent: true).sessionRecovery else {
+                throw RecoveryError.unsafe("no previous-boot public Hide journal is eligible; inspect recovery status")
+            }
+            if let blocker = recovery.blocker { throw RecoveryError.unsafe(blocker) }
+            try controller.recoverSession(recovery, hideAgain: action == .hideAgain)
             try printJournal(store.load())
             return
         }

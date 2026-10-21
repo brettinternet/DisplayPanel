@@ -158,6 +158,7 @@ final class AppModel: ObservableObject {
     }
     @Published private(set) var displayLifecycleTransitioning = false {
         didSet {
+            if displayLifecycleTransitioning, sessionRecoveryInProgress { sessionRecoveryInterrupted = true }
             if oldValue != displayLifecycleTransitioning { reconcileKeepWindowsOff(startPass: true) }
         }
     }
@@ -261,6 +262,10 @@ final class AppModel: ObservableObject {
     private let hideDisplay: (DisplayHideIdentity, DisplayHideIdentity, UInt8?) throws -> DisplayInputOutcome
     private let sleepResumeHideDisplay: (DisplayHideIdentity, DisplayHideIdentity, DisplayHideWakeExpectation) throws -> DisplayInputOutcome
     private let showDisplay: (String, UInt8?) throws -> DisplayInputOutcome
+    private let recoverDisplaySession: (DisplaySessionRecovery, Bool) throws -> Void
+    private var sessionRecoveryInProgress = false
+    private var sessionRecoveryInterrupted = false
+    @Published private(set) var sessionRecoveryResult: String?
     private let checkDDCInput: (DisplayHideIdentity) throws -> DDCInputReading
     private let coverDisplays: @MainActor (Set<UInt32>) -> Set<UInt32>
     private let quiesceProtection: ProtectionQuiesce?
@@ -325,6 +330,9 @@ final class AppModel: ObservableObject {
                 return try DisplayHideController().show(expectedJournalID: pieces[0], targetUUID: pieces[1], returnInput: input)
             }
             return try DisplayHideController().show(expectedJournalID: key, returnInput: input)
+        },
+        recoverDisplaySession: @escaping (DisplaySessionRecovery, Bool) throws -> Void = {
+            try DisplayHideController().recoverSession($0, hideAgain: $1)
         },
         checkDDCInput: @escaping (DisplayHideIdentity) throws -> DDCInputReading = {
             try DisplayHideController().checkInputAvailability(target: $0)
@@ -406,6 +414,7 @@ final class AppModel: ObservableObject {
         self.hideDisplay = hideDisplay
         self.sleepResumeHideDisplay = sleepResumeHideDisplay
         self.showDisplay = showDisplay
+        self.recoverDisplaySession = recoverDisplaySession
         self.checkDDCInput = checkDDCInput
         self.coverDisplays = coverDisplays ?? HiddenDisplayOverlays().cover
         self.quiesceProtection = quiesceProtection
@@ -4518,6 +4527,85 @@ final class AppModel: ObservableObject {
         return hideRequest(target: targetSnapshot, source: sourceSnapshot, configuration: configuration)
     }
 
+    var sessionRecoveryBlocker: String? {
+        if isShuttingDown { return "PanelCtl is shutting down." }
+        if hideOperation.isBusy || runningDisplayAction != nil || preflightingDisplayAction ||
+            controlRunningRule != nil || arrangementWriting || modeWriting {
+            return "Wait for the current display operation to finish."
+        }
+        if displayLifecycleTransitioning { return "Wait for displays to finish waking or reconnecting." }
+        if disconnectAutomationPaused || disconnectInspectionFailure != nil || disconnectRecoveryBlocked {
+            return "Finish full-disconnect recovery first."
+        }
+        if protectionQuiescencePending { return Self.automationStopping.localizedDescription }
+        if let failure = protectionQuiescenceFailure { return failure }
+        if !blackoutHiddenDisplays.isEmpty { return "Show blacked-out displays before recovering the previous session." }
+        return handoffStatus?.sessionRecovery?.blocker
+    }
+
+    /// Explicitly chooses the outcome for the whole previous-session Hide set.
+    /// The confirmation survives UI refreshes, but never a topology/journal change.
+    func recoverPreviousSession(_ confirmation: DisplaySessionRecovery, hideAgain: Bool) {
+        guard let status = handoffStatus,
+              status.sessionRecovery == confirmation,
+              confirmation.canRecover, sessionRecoveryBlocker == nil,
+              let first = status.removals.first(where: \.isUnresolved) else {
+            sessionRecoveryResult = sessionRecoveryBlocker ?? "Recovery changed. Check Again and confirm the current displays."
+            return
+        }
+        let targets = status.removals.filter(\.isUnresolved).map { $0.target.uuid }
+        cancelPendingSleepHideResume()
+        sessionRecoveryInProgress = true
+        sessionRecoveryInterrupted = false
+        sessionRecoveryResult = nil
+        hideOperation = hideAgain ? .hiding(first.target.uuid) : .showing(first.target.uuid)
+        manualActivityDate = now()
+        onStatusChange?()
+        stopManagedProtection { [weak self] succeeded, message in
+            Task { @MainActor in
+                guard let self else { return }
+                defer {
+                    self.sessionRecoveryInProgress = false
+                    self.hideOperation = .idle
+                    self.lastHideOrShowFinished = .now
+                    if !self.isShuttingDown { self.rearmProtectionAfterDisplayRecovery() }
+                    self.onStatusChange?()
+                }
+                do {
+                    guard succeeded else {
+                        self.protectionQuiescenceFailure = message ?? "Automation cleanup could not be verified."
+                        throw DisplayHideError.recoveryBlocksAction(self.protectionQuiescenceFailure!)
+                    }
+                    guard !self.isShuttingDown, !self.sessionRecoveryInterrupted,
+                          !self.displayLifecycleTransitioning,
+                          !self.disconnectAutomationPaused else {
+                        throw DisplayHideError.recoveryBlocksAction("Recovery was cancelled by a lifecycle change. Check Again before trying again.")
+                    }
+                    try self.recoverDisplaySession(confirmation, hideAgain)
+                    self.displays = self.displayProvider()
+                    self.refreshHandoffStatus()
+                    if hideAgain {
+                        guard targets.allSatisfy({ uuid in
+                            let removal = self.handoffStatus?.removal(for: uuid)
+                            return removal?.state == "mirrored" && removal?.topologyVerified == true
+                        }) else {
+                            throw DisplayHideError.recoveryBlocksAction("The new Hide could not be verified. Inspect recovery before continuing.")
+                        }
+                    } else if self.handoffStatus?.hasUnresolvedJournal != false || self.handoffInspectionFailure != nil {
+                        throw DisplayHideError.recoveryBlocksAction("The new desktop could not be verified. Inspect recovery before continuing.")
+                    }
+                    self.sessionRecoveryResult = hideAgain
+                        ? "Hidden again using this session’s layout. The previous journal was archived. No input was switched."
+                        : "Displays kept shown. The previous session’s journal was archived; no display settings were changed."
+                    for uuid in targets { self.displayResults[uuid.lowercased()] = nil }
+                } catch {
+                    self.sessionRecoveryResult = "Couldn’t recover the previous session. \(error.localizedDescription)"
+                    self.refreshHandoffStatus()
+                }
+            }
+        }
+    }
+
     /// Hides a display right away in its style: blacked out, or removed from
     /// the desktop. The outcome is kept in `displayResults` and passed to `completion`.
     func hide(
@@ -4852,7 +4940,7 @@ final class AppModel: ObservableObject {
         let wasUnresolved = previous?.hasUnresolvedJournal == true || previousFailure != nil
         let actionRunActive = runningDisplayAction != nil || preflightingDisplayAction
         handoffInspectionFailure = nil
-        handoffStatus = inputReturnIntent != nil || inputReturnRepairFailed
+        handoffStatus = inputReturnIntent != nil || inputReturnRepairFailed || sessionRecoveryInProgress
             ? inspectHandoffPreservingIntent() : inspectHandoff()
         handoffInspectionFailure = handoffStatus?.inspectionFailure
         let isUnresolved = handoffStatus?.hasUnresolvedJournal == true || handoffInspectionFailure != nil

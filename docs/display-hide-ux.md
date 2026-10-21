@@ -215,7 +215,9 @@ Each new operation captures current display IDs. An Action keeps those captured
 identities for its entire run; a connection change stops it instead of choosing
 new IDs mid-run. A step checked as already complete cannot later become a write.
 Recovery journals and pending operations are never rebound to new IDs or a new
-session. Unresolved recovery still needs attention before conflicting work.
+session. After reboot, guarded recovery can archive the old journal unchanged
+and capture a fresh baseline; it never replays the old transaction. Other
+unresolved recovery still needs attention before conflicting work.
 
 ## Rules and hidden displays
 
@@ -233,11 +235,22 @@ a black window only: no DDC dimming, and **Sleep** becomes Restore.
 | Blacked out | An automation cover; **Restore** ends it |
 | Asleep / Unavailable | Wake or reconnect the display |
 | Mirrored | Mirrored outside PanelCtl; fix in System Settings → Displays |
-| Needs recovery | Read the reason; Show when allowed |
+| Needs recovery | Read the reason; Show when allowed, or recover the previous session after reboot |
 
 Removed displays stay listed even when disconnected. Reconnect the same
 monitor, then **Check Again**. Recovery problems also appear as a banner and in
-the menu as **Review Display Recovery…**. See [display recovery](display-recovery.md).
+the menu as **Review Display Recovery…**.
+
+After reboot, **Recover previous session** offers **Hide again** and **Keep displays
+shown** directly on this page. Both archive the previous journal and accept the
+current modes/layout; Hide again uses a fresh session transaction without Show or
+input switching. These choices apply to the whole previous Hide set. If macOS
+still sees an off-input monitor as active and separate, it can be hidden again
+without returning its input first. Missing/inactive monitors must reconnect;
+existing mirrors must be turned off. A reduced current refresh rate becomes the
+new Show baseline only with explicit confirmation. A fully matching restored
+desktop is recognized automatically with no display writes. See
+[previous-session recovery](display-recovery.md#recovering-after-reboot).
 
 If PanelCtl can't confirm that dimmed brightness was restored, automation
 pauses and **Retry Automation Cleanup** appears. It only restores saved

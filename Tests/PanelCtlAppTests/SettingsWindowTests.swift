@@ -1611,6 +1611,17 @@ final class SettingsWindowTests: XCTestCase {
             observations: [recoveryObservation(displays[1]), recoveryObservation(displays[2])],
             baselineIdentity: "synthetic-baseline", removals: wakeRemovals
         )
+        func rebootRecovery(blocker: String?) -> DisplayHandoffStatus {
+            DisplayHandoffStatus(
+                state: .recovery, target: wakeRemovals[0].target, source: wakeRemovals[0].source,
+                journalPath: Self.journalPath, journalID: "previous-boot",
+                reason: "The previous display session ended; the old transaction cannot be replayed.",
+                observations: [recoveryObservation(displays[1])], removals: [wakeRemovals[0]],
+                sessionRecovery: DisplaySessionRecovery(
+                    journalID: "previous-boot", journalIdentity: "synthetic-journal", topologyIdentity: "synthetic-desktop",
+                    displayNames: [wakeRemovals[0].target.name], blocker: blocker, canAutomaticallyKeepShown: false)
+            )
+        }
         let scenarios: [(name: String, experimental: Bool, status: DisplayHandoffStatus?, tab: SettingsTab)] = [
             ("off", false, nil, .displays),
             ("blacked-out", false, nil, .displays),
@@ -1624,6 +1635,9 @@ final class SettingsWindowTests: XCTestCase {
             ("hidden", true, hiddenStatus(), .displays),
             ("recovery", true, recovery, .displays),
             ("wake-reset", true, wakeRecovery, .displays),
+            ("previous-session", false, rebootRecovery(blocker: nil), .displays),
+            ("previous-session-unavailable", false,
+             rebootRecovery(blocker: "Return the captured monitor to its Mac input or reconnect it, then Check Again."), .displays),
             ("recovery-banner", true, recovery, .automation),
             ("recovery-journal", false, targetless, .displays),
             ("cleanup-displays", true, nil, .displays),

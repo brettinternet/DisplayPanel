@@ -1131,6 +1131,111 @@ final class DisplayHideTests: XCTestCase {
         XCTAssertEqual(commits, 1)
     }
 
+    func testPreviousBootAutomaticAcceptanceRejectsMeaningfulDesktopChanges() throws {
+        let old = try previousBootJournal()
+        let originalBytes = try Data(contentsOf: store.url)
+        for field in ["x", "rotation", "colorProfileDigest", "mode"] {
+            topology.snapshot = try snapshot(boot: "new-boot") { displays in
+                if field == "mode" {
+                    var mode = displays[1]["mode"] as! [String: Any]
+                    mode["pixelWidth"] = 5120
+                    displays[1]["mode"] = mode
+                } else {
+                    displays[1][field] = field == "colorProfileDigest" ? String(repeating: "a", count: 64) : 90
+                }
+            }
+            let status = try controller().inspect()
+            let recovery = try XCTUnwrap(status.sessionRecovery)
+            XCTAssertTrue(recovery.canRecover, field)
+            XCTAssertFalse(recovery.canAutomaticallyKeepShown, field)
+            XCTAssertTrue(status.hasUnresolvedRecovery, field)
+            XCTAssertEqual(try Data(contentsOf: store.url), originalBytes)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: archiveURL(old).path))
+        XCTAssertEqual(writerCount, 0)
+    }
+
+    func testPreviousBootRecoveryNeverRetiresPrivateEvidenceInLegacyMirror() throws {
+        var old = try previousBootJournal()
+        old.version = 2
+        old.publicMirrorSession = nil
+        old.mirrorTargetID = targetID
+        old.mirrorSourceID = sourceID
+        old.disableAttempted = false // Presence alone is private provenance.
+        try store.lock()
+        try store.save(old)
+        store.unlock()
+        let originalBytes = try Data(contentsOf: store.url)
+        topology.snapshot = try snapshot(boot: "new-boot")
+        let status = try controller().inspect()
+        XCTAssertNil(status.sessionRecovery)
+        XCTAssertTrue(status.hasUnresolvedRecovery)
+        XCTAssertEqual(try Data(contentsOf: store.url), originalBytes)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: archiveURL(old).path))
+        XCTAssertEqual(writerCount, 0)
+    }
+
+    func testPreviousBootHideAgainCancelsIfTopologyChangesAfterStaging() throws {
+        let old = try previousBootJournal()
+        topology.snapshot = try snapshot(boot: "new-boot")
+        let confirmation = try XCTUnwrap(controller().inspect(preservingMirrorIntent: true).sessionRecovery)
+        var cancels = 0
+        let transaction = MirrorTransaction(
+            begin: { OpaquePointer(bitPattern: 123)! },
+            stage: { _, _, _ in
+                self.topology.snapshot = try self.snapshot(boot: "new-boot") { $0[0]["id"] = 400 }
+            },
+            complete: { _, _ in XCTFail("numeric ID changed before commit") },
+            cancel: { _ in cancels += 1 }
+        )
+        XCTAssertThrowsError(try controller(transaction: transaction).recoverSession(confirmation, hideAgain: true))
+        XCTAssertEqual(cancels, 1)
+        XCTAssertEqual(try store.load().state, .needsAttention)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archiveURL(old).path))
+        XCTAssertEqual(writerCount, 0)
+    }
+
+    func testPreviousBootRecoveryRevalidatesFreshTransportEvidence() throws {
+        for phase in ["settlement", "staging"] {
+            store = RecoveryStore(url: directory.appendingPathComponent("\(phase).json"))
+            topology.snapshot = try snapshot()
+            let old = try previousBootJournal()
+            topology.snapshot = try snapshot(boot: "new-boot")
+            let confirmation = try XCTUnwrap(controller().inspect(preservingMirrorIntent: true).sessionRecovery)
+            func changePort() {
+                let before = topology.snapshot
+                var changed = before.displays
+                changed[1].identityEvidence = RecoveryIdentityEvidence(
+                    source: .syntheticFixture, capturedAt: Date(), transportLocation: "different-port")
+                topology.snapshot = RecoverySnapshot(bootSession: before.bootSession, osBuild: before.osBuild,
+                                                     userID: before.userID, displays: changed)
+                XCTAssertEqual(before.stableTopologyIdentity(), topology.snapshot.stableTopologyIdentity(),
+                               "transport evidence is deliberately not part of the topology token")
+                XCTAssertNoThrow(try before.verify(topology.snapshot))
+            }
+            var cancels = 0
+            let transaction = MirrorTransaction(
+                begin: { OpaquePointer(bitPattern: 123)! },
+                stage: { _, _, _ in if phase == "staging" { changePort() } },
+                complete: { _, _ in XCTFail("changed transport must refuse before completion") },
+                cancel: { _ in cancels += 1 }
+            )
+            let subject = controller(transaction: transaction, pause: {
+                if phase == "settlement" { changePort() }
+            })
+            XCTAssertThrowsError(try subject.recoverSession(confirmation, hideAgain: true))
+            XCTAssertEqual(cancels, phase == "staging" ? 1 : 0)
+            if phase == "settlement" {
+                XCTAssertEqual(try store.load().id, old.id)
+                XCTAssertFalse(FileManager.default.fileExists(atPath: archiveURL(old).path))
+            } else {
+                XCTAssertEqual(try store.load().state, .needsAttention)
+                XCTAssertTrue(FileManager.default.fileExists(atPath: archiveURL(old).path))
+            }
+            XCTAssertEqual(writerCount, 0)
+        }
+    }
+
     private func previousBootJournal() throws -> RecoveryJournal {
         let baseline = topology.snapshot
         let removals = [1, 2].map {
@@ -1149,7 +1254,8 @@ final class DisplayHideTests: XCTestCase {
     }
 
     private func controller(transaction: MirrorTransaction = MirrorTransaction(),
-                             restore: ((RecoverySnapshot) throws -> Void)? = nil) -> DisplayHideController {
+                             restore: ((RecoverySnapshot) throws -> Void)? = nil,
+                             pause: @escaping () -> Void = {}) -> DisplayHideController {
         let mirror = MirrorController(
             records: { self.topology.records },
             operationLock: { self.operationStore },
@@ -1160,7 +1266,7 @@ final class DisplayHideTests: XCTestCase {
                     if let restore { try restore(snapshot) }
                     else { self.topology.snapshot = snapshot }
                 },
-                convergencePause: {}
+                convergencePause: pause
             ),
             preflightModes: { _ in },
             transaction: transaction

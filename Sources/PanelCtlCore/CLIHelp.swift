@@ -39,6 +39,7 @@ public enum CLIHelp {
             return """
             Usage: panelctl recovery <capture|status|verify|restore|enable|panic|rehearse|guard> [--journal <path>]
             Usage: panelctl recovery <verify|restore> [--display <UUID>] [--journal <path>]
+            Usage: panelctl recovery <keep-shown|hide-again> --consent-recovery [--journal <path>]
             Usage: panelctl recovery disable (--display <selector> | --index <n>) --consent-disable --timeout <1s...60s> [--journal <path>]
             Usage: panelctl recovery <rehearse|guard> [--timeout <1s...60s>] [--journal <path>]
 
@@ -53,6 +54,14 @@ public enum CLIHelp {
             turn off mirroring and drag the menu bar back in System Settings → Displays.
             Missing/ambiguous displays or changed rotation/color space require manual
             intervention. HDR/profile restoration is NOT implemented.
+
+            After reboot, keep-shown archives the previous public Hide journal and accepts
+            the current desktop without display writes. hide-again captures a fresh baseline
+            and hides the entire previous Hide set once, without restoring or switching inputs.
+            Both require all captured displays awake, separate and uniquely identified.
+            Current modes (including reduced refresh rates) become the new Show baseline.
+            Missing displays must return to the Mac input first. Neither bypasses private
+            disconnect recovery or trusts old numeric IDs. Consent covers the whole journal.
 
             Experimental disable requests one non-main external display for a bounded
             helper-owned lease. Consent is mandatory; there is no indefinite mode.

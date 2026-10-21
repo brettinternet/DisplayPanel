@@ -342,6 +342,15 @@ final class DisplayRecoveryTests: XCTestCase {
             XCTAssertEqual(try CLIParser.parse(["recovery", action]),
                            .recovery(action: RecoveryAction(rawValue: action)!, timeout: nil, journalPath: nil))
         }
+        for action in ["keep-shown", "hide-again"] {
+            XCTAssertThrowsError(try CLIParser.parse(["recovery", action]))
+            XCTAssertEqual(try CLIParser.parse(["recovery", action, "--consent-recovery", "--journal", "/private/test/current.json"]),
+                           .recovery(action: RecoveryAction(rawValue: action)!, timeout: nil, journalPath: "/private/test/current.json"))
+            for extra in [["--display", "1"], ["--timeout", "5s"], ["--consent-recovery"]] {
+                XCTAssertThrowsError(try CLIParser.parse(["recovery", action, "--consent-recovery"] + extra))
+            }
+        }
+        XCTAssertThrowsError(try CLIParser.parse(["recovery", "restore", "--consent-recovery"]))
         XCTAssertEqual(try CLIParser.parse(["recovery", "rehearse", "--timeout", "1m", "--journal", "/private/test/current.json"]),
                        .recovery(action: .rehearse, timeout: 60, journalPath: "/private/test/current.json"))
         for args in [

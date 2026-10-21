@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@pi'
 created_date: '2026-10-21 22:45'
-updated_date: '2026-10-21 22:49'
+updated_date: '2026-10-21 22:58'
 labels: []
 dependencies: []
 ordinal: 72010
@@ -36,4 +36,6 @@ After logout/reboot with AW3425DW and DELL S2721DGF hidden, the previous-boot pu
 
 <!-- SECTION:NOTES:BEGIN -->
 Core implementation added: previous-boot public-only assessment, two matching observations, strict unchanged write validation, evidence-preserving archive/replacement, and one fresh multi-target Hide transaction with no DDC. Six new fake-backed regressions pass, covering swapped IDs, reduced modes/manual acceptance, unsafe inventory, archive/confirmation failures and one-shot transaction failure. No live state was changed.
+
+UI/model and CLI implemented: direct confirmed Hide again / Keep displays shown, whole-session scope, cleanup/lifecycle/busy gates, no configured input replay. Recovery CLI requires --consent-recovery. Independent reviewer 9d4d8b48 passed after fresh transport-evidence revalidation correction; focused settlement/staging regression passed. Affected suites: 201 tests, 10 native UI skips, zero failures (191 runnable); warnings-as-errors build and CLI help execution passed. SourceKit has stale cross-module diagnostics although compiler/tests pass. Settings snapshot fixture now includes eligible and unavailable previous-session states; native visual check awaits explicit user permission. No live journal or display writes performed.
 <!-- SECTION:NOTES:END -->

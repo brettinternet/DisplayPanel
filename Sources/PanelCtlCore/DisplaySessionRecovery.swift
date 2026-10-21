@@ -154,8 +154,9 @@ extension MirrorController {
             guard stableRecoveryDigest(try store.load()) == confirmation.journalIdentity else {
                 throw RecoveryError.unsafe("journal changed before retirement; no recovery was started")
             }
-            try current.verify(engine.capture())
-            try validateCurrentDesktop(journal: old, current: current, available: records())
+            let observed = try engine.capture()
+            try current.verify(observed)
+            try validateCurrentDesktop(journal: old, current: observed, available: records())
         }
         engine.convergencePause()
         try validateBeforeReplacement()
@@ -180,8 +181,9 @@ extension MirrorController {
         let pendingIdentity = stableRecoveryDigest(replacement)
         do {
             try transaction.apply(removals: session.removals.map { ($0.targetID, $0.sourceID) }, origins: []) {
-                try current.verify(engine.capture())
-                try validateCurrentDesktop(journal: old, current: current, available: records())
+                let observed = try engine.capture()
+                try current.verify(observed)
+                try validateCurrentDesktop(journal: old, current: observed, available: records())
                 guard stableRecoveryDigest(try store.load()) == pendingIdentity else {
                     throw RecoveryError.unsafe("new Hide journal changed before the write; keep recovery")
                 }
@@ -200,7 +202,7 @@ extension MirrorController {
             replacement.state = .mirrored
             try store.save(replacement)
         } catch {
-            if stableRecoveryDigest(try? store.load()) == pendingIdentity {
+            if let saved = try? store.load(), stableRecoveryDigest(saved) == pendingIdentity {
                 for index in session.removals.indices {
                     session.removals[index].state = .needsAttention
                     session.removals[index].failure = error.localizedDescription
