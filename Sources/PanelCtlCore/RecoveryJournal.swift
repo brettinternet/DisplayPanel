@@ -60,6 +60,9 @@ struct RecoveryJournal: Codable {
     var state: RecoveryState
     var trigger: String?
     var failure: String?
+    // A new baseline may supersede an archived previous-boot public journal.
+    // The archived transaction remains unresolved evidence, not a verified restore.
+    var supersedesJournalID: UUID?
     // Diagnostics only; never used to signal or identify a process for recovery.
     var watchdogPID: Int32?
     var reenableAttempted: Bool?
@@ -325,21 +328,54 @@ final class RecoveryStore {
             guard previous.state.resolved else {
                 throw RecoveryError.unsafe("unresolved journal \(previous.id); verify or restore it before capturing again")
             }
-            let archive = url.deletingLastPathComponent().appendingPathComponent("recovery-\(previous.id.uuidString).json")
-            // Preserve the previous evidence before replacing current.json.
-            if FileManager.default.fileExists(atPath: archive.path) {
-                // A previous create may have archived successfully but failed
-                // to replace current.json. Permit only a byte-identical retry.
-                guard try Data(contentsOf: archive) == Data(contentsOf: url) else {
-                    throw RecoveryError.unsafe("conflicting recovery archive; preserve both files for inspection")
-                }
-            } else {
-                try FileManager.default.copyItem(at: url, to: archive)
-            }
+            try archive(previous)
         } else if errno != ENOENT {
             throw RecoveryError.unsafe("cannot inspect existing journal")
         }
         try save(journal)
+    }
+
+    /// Only the guarded public recovery path may replace unresolved evidence.
+    /// Archive durability precedes replacement; failure leaves current intact.
+    func supersedePublicMirror(_ previous: RecoveryJournal, with journal: RecoveryJournal,
+                               revalidate: () throws -> Void) throws {
+        guard lockFD != nil, previous.isPublicMirrorOnly, !previous.state.resolved,
+              previous.snapshot.bootSession != journal.snapshot.bootSession,
+              journal.supersedesJournalID == previous.id,
+              stableRecoveryDigest(try load()) == stableRecoveryDigest(previous) else {
+            throw RecoveryError.unsafe("journal cannot be superseded; keep recovery evidence")
+        }
+        try journal.validate()
+        try archive(previous)
+        try revalidate()
+        try save(journal)
+    }
+
+    private func archive(_ previous: RecoveryJournal) throws {
+        let archive = url.deletingLastPathComponent().appendingPathComponent("recovery-\(previous.id.uuidString).json")
+        let data = try Data(contentsOf: url)
+        let created = open(archive.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        if created >= 0 {
+            let file = FileHandle(fileDescriptor: created, closeOnDealloc: true)
+            try file.write(contentsOf: data)
+            guard fsync(created) == 0 else { throw RecoveryError.unsafe("cannot synchronize recovery archive") }
+        } else {
+            guard errno == EEXIST else { throw RecoveryError.unsafe("cannot create recovery archive") }
+            let fd = open(archive.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+            guard fd >= 0 else { throw RecoveryError.unsafe("unsafe recovery archive") }
+            let file = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+            var info = stat()
+            guard fstat(fd, &info) == 0, info.st_uid == getuid(),
+                  info.st_mode & S_IFMT == S_IFREG, info.st_mode & 0o077 == 0,
+                  info.st_size == data.count, try file.readToEnd() == data else {
+                throw RecoveryError.unsafe("conflicting recovery archive; preserve both files for inspection")
+            }
+            guard fsync(fd) == 0 else { throw RecoveryError.unsafe("cannot synchronize recovery archive") }
+        }
+        let directory = open(url.deletingLastPathComponent().path, O_RDONLY | O_CLOEXEC)
+        guard directory >= 0 else { throw RecoveryError.unsafe("cannot open archive directory") }
+        defer { close(directory) }
+        guard fsync(directory) == 0 else { throw RecoveryError.unsafe("cannot synchronize archive directory") }
     }
 
     func save(_ journal: RecoveryJournal) throws {

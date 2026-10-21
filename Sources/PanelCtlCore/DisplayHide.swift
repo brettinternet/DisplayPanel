@@ -130,6 +130,7 @@ public struct DisplayHideJournalSummary: Equatable {
 }
 
 public struct DisplayHideStatus: Equatable {
+    public var sessionRecovery: DisplaySessionRecovery?
     public let journalPath: String
     public let observations: [DisplayHideObservation]
     public let journal: DisplayHideJournalSummary?
@@ -193,11 +194,29 @@ public struct DisplayHideController {
 
         let records = try mirror.records()
         let current = try mirror.engine.capture()
+        guard Set(current.displays.map(\.uuid)).count == current.displays.count,
+              Set(current.displays.map(\.id)).count == current.displays.count,
+              Set(records.compactMap { $0.uuid?.lowercased() }).count == records.count,
+              Set(records.map(\.id)).count == records.count else {
+            throw RecoveryError.unsafe("display identities are ambiguous; keep recovery and reconnect the captured displays")
+        }
         guard try store.exists() else {
             return statusWithoutJournal(records: records, current: current)
         }
 
         var journal = try store.load()
+        if let recovery = mirror.sessionRecovery(journal: journal, current: current, available: records) {
+            if !preservingMirrorIntent, recovery.canAutomaticallyKeepShown {
+                try mirror.recoverCurrentDesktopLocked(recovery, hideAgain: false, automatic: true, store: store)
+                return statusWithoutJournal(records: records, current: current)
+            }
+            // Do not rewrite previous-session evidence merely by inspecting it.
+            var status = journal.publicMirrorSession != nil
+                ? statusForMirrorSession(journal, records: records, current: current)
+                : statusForMirrorJournal(journal, records: records, current: current)
+            status.sessionRecovery = recovery
+            return status
+        }
         if journal.publicMirrorSession != nil {
             if !preservingMirrorIntent { mirror.reconcileSession(&journal, current: current, store: store) }
             return statusForMirrorSession(journal, records: records, current: current)
@@ -216,6 +235,11 @@ public struct DisplayHideController {
             return statusForUnsupportedJournal(journal, records: records, current: current)
         }
         return statusForMirrorJournal(journal, records: records, current: current)
+    }
+
+    /// Explicit recovery of the entire previous-session Hide set. No DDC.
+    public func recoverSession(_ confirmation: DisplaySessionRecovery, hideAgain: Bool) throws {
+        try mirror.recoverCurrentDesktop(confirmation, hideAgain: hideAgain, store: store)
     }
 
     @discardableResult

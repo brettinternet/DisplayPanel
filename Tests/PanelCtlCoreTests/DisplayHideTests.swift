@@ -974,6 +974,180 @@ final class DisplayHideTests: XCTestCase {
         )
     }
 
+    func testPreviousBootDesktopIsAcceptedWithoutReplayingNumericIDs() throws {
+        let old = try previousBootJournal()
+        let originalBytes = try Data(contentsOf: store.url)
+        topology.snapshot = try snapshot(boot: "new-boot") { displays in
+            displays[0]["id"] = 8 // The old target ID now belongs to the source.
+            displays[1]["id"] = 7
+            var mode = displays[1]["mode"] as! [String: Any]
+            mode["id"] = 200
+            displays[1]["mode"] = mode
+        }
+        XCTAssertThrowsError(try old.snapshot.validateRestoration(to: topology.snapshot))
+        let preserved = try controller().inspect(preservingMirrorIntent: true)
+        XCTAssertTrue(try XCTUnwrap(preserved.sessionRecovery).canAutomaticallyKeepShown)
+        XCTAssertEqual(try Data(contentsOf: store.url), originalBytes)
+
+        XCTAssertFalse(try controller().inspect().hasUnresolvedRecovery)
+        let fresh = try store.load()
+        XCTAssertEqual(fresh.supersedesJournalID, old.id)
+        XCTAssertEqual(fresh.state, .verified)
+        XCTAssertEqual(fresh.snapshot, topology.snapshot)
+        XCTAssertNil(fresh.publicMirrorSession)
+        XCTAssertEqual(try Data(contentsOf: archiveURL(old)), originalBytes)
+        XCTAssertEqual(writerCount, 0)
+    }
+
+    func testPreviousBootReducedModeRequiresExplicitKeepShownAndPreservesEvidence() throws {
+        let old = try previousBootJournal()
+        let originalBytes = try Data(contentsOf: store.url)
+        topology.snapshot = try snapshot(boot: "new-boot") { displays in
+            var mode = displays[1]["mode"] as! [String: Any]
+            mode["refreshRate"] = 30
+            displays[1]["mode"] = mode
+        }
+        let status = try controller().inspect()
+        let confirmation = try XCTUnwrap(status.sessionRecovery)
+        XCTAssertTrue(confirmation.canRecover)
+        XCTAssertFalse(confirmation.canAutomaticallyKeepShown)
+        XCTAssertTrue(status.hasUnresolvedRecovery)
+        try controller().recoverSession(confirmation, hideAgain: false)
+        XCTAssertFalse(try controller().inspect().hasUnresolvedRecovery)
+        XCTAssertEqual(try store.load().snapshot.displays[1].mode.refreshRate, 30)
+        XCTAssertEqual(try Data(contentsOf: archiveURL(old)), originalBytes)
+        XCTAssertEqual(writerCount, 0)
+        XCTAssertThrowsError(try controller().recoverSession(confirmation, hideAgain: false), "confirmation is single use")
+    }
+
+    func testPreviousBootHideAgainUsesOneFreshMultiDisplayTransaction() throws {
+        let old = try previousBootJournal()
+        topology.snapshot = try snapshot(boot: "new-boot") { displays in
+            displays[0]["id"] = 80
+            displays[1]["id"] = 70
+            displays[2]["id"] = 90
+        }
+        let baseline = topology.snapshot
+        let confirmation = try XCTUnwrap(controller().inspect(preservingMirrorIntent: true).sessionRecovery)
+        let config = OpaquePointer(bitPattern: 123)!
+        var staged: [(UInt32, UInt32)] = []
+        var commits = 0
+        let transaction = MirrorTransaction(
+            begin: { config },
+            stage: { _, target, source in staged.append((target, source)) },
+            complete: { _, scope in
+                XCTAssertEqual(scope, .forSession)
+                commits += 1
+                self.topology.snapshot = try self.snapshot(boot: "new-boot") { displays in
+                    displays[0]["id"] = 80
+                    displays[1]["id"] = 70
+                    displays[2]["id"] = 90
+                    for index in [1, 2] {
+                        displays[index]["active"] = false
+                        displays[index]["mirrorUUID"] = self.sourceUUID
+                    }
+                }
+            },
+            cancel: { _ in XCTFail("successful transaction must not cancel") }
+        )
+        try controller(transaction: transaction).recoverSession(confirmation, hideAgain: true)
+        XCTAssertEqual(staged.map { $0.0 }, [70, 90])
+        XCTAssertEqual(staged.map { $0.1 }, [80, 80])
+        XCTAssertEqual(commits, 1)
+        XCTAssertEqual(writerCount, 0, "no restoration writer")
+        let fresh = try store.load()
+        XCTAssertEqual(fresh.snapshot, baseline)
+        XCTAssertEqual(fresh.supersedesJournalID, old.id)
+        XCTAssertEqual(fresh.state, .mirrored)
+        XCTAssertTrue(try controller().inspect().removals.allSatisfy { $0.canShow && $0.topologyVerified })
+        XCTAssertThrowsError(try controller(transaction: transaction).recoverSession(confirmation, hideAgain: true))
+        XCTAssertEqual(commits, 1)
+    }
+
+    func testPreviousBootRecoveryRefusesUnavailableOrChangedDisplays() throws {
+        let old = try previousBootJournal()
+        let originalBytes = try Data(contentsOf: store.url)
+        for scenario in ["missing", "serial", "mirror", "inactive", "asleep", "duplicate"] {
+            topology.asleepDisplayIDs = scenario == "asleep" ? [targetID] : []
+            topology.snapshot = try snapshot(boot: "new-boot") { displays in
+                switch scenario {
+                case "missing": displays.removeLast()
+                case "serial": displays[1]["serial"] = 999
+                case "mirror": displays[1]["mirrorUUID"] = self.sourceUUID
+                case "inactive": displays[1]["active"] = false
+                case "duplicate": displays[2]["uuid"] = self.targetUUID
+                default: break
+                }
+            }
+            if scenario == "duplicate" {
+                XCTAssertThrowsError(try controller().inspect())
+            } else {
+                let assessment = try XCTUnwrap(controller().inspect().sessionRecovery, scenario)
+                XCTAssertFalse(assessment.canRecover, scenario)
+                XCTAssertThrowsError(try controller().recoverSession(assessment, hideAgain: true), scenario)
+            }
+            XCTAssertEqual(try Data(contentsOf: store.url), originalBytes, scenario)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: archiveURL(old).path))
+        XCTAssertEqual(writerCount, 0)
+    }
+
+    func testPreviousBootRecoveryRejectsConfirmationRacesAndConflictingArchive() throws {
+        let old = try previousBootJournal()
+        topology.snapshot = try snapshot(boot: "new-boot")
+        let confirmation = try XCTUnwrap(controller().inspect(preservingMirrorIntent: true).sessionRecovery)
+        topology.snapshot = try snapshot(boot: "new-boot") { $0[1]["x"] = 2000 }
+        XCTAssertThrowsError(try controller().recoverSession(confirmation, hideAgain: false))
+        topology.snapshot = try snapshot(boot: "new-boot")
+        try Data("conflicting evidence".utf8).write(to: archiveURL(old))
+        XCTAssertThrowsError(try controller().recoverSession(confirmation, hideAgain: false))
+        XCTAssertEqual(try store.load().id, old.id)
+        // A completed archive with an interrupted replacement can resume, but
+        // only with byte-identical evidence.
+        try Data(contentsOf: store.url).write(to: archiveURL(old))
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: archiveURL(old).path)
+        try controller().recoverSession(confirmation, hideAgain: false)
+        XCTAssertEqual(try store.load().supersedesJournalID, old.id)
+        XCTAssertEqual(writerCount, 0)
+    }
+
+    func testPreviousBootHideFailureKeepsNewAndOldJournalsWithoutRetry() throws {
+        let old = try previousBootJournal()
+        topology.snapshot = try snapshot(boot: "new-boot")
+        let confirmation = try XCTUnwrap(controller().inspect(preservingMirrorIntent: true).sessionRecovery)
+        var commits = 0
+        let transaction = MirrorTransaction(
+            begin: { OpaquePointer(bitPattern: 123)! }, stage: { _, _, _ in },
+            complete: { _, _ in commits += 1; throw RecoveryError.unsafe("driver failed") },
+            cancel: { _ in XCTFail("completion consumes the transaction") }
+        )
+        XCTAssertThrowsError(try controller(transaction: transaction).recoverSession(confirmation, hideAgain: true))
+        let fresh = try store.load()
+        XCTAssertEqual(fresh.state, .needsAttention)
+        XCTAssertEqual(fresh.supersedesJournalID, old.id)
+        XCTAssertTrue(fresh.publicMirrorSession!.removals.allSatisfy { $0.state == .needsAttention })
+        XCTAssertTrue(FileManager.default.fileExists(atPath: archiveURL(old).path))
+        XCTAssertThrowsError(try controller(transaction: transaction).recoverSession(confirmation, hideAgain: true))
+        XCTAssertEqual(commits, 1)
+    }
+
+    private func previousBootJournal() throws -> RecoveryJournal {
+        let baseline = topology.snapshot
+        let removals = [1, 2].map {
+            PublicMirrorRemoval(target: baseline.displays[$0], source: baseline.displays[0],
+                                beforeOperation: baseline, state: .mirrored)
+        }
+        var journal = RecoveryJournal(snapshot: baseline,
+                                      publicMirrorSession: PublicMirrorSession(baseline: baseline, removals: removals))
+        journal.state = .mirrored
+        try save(journal)
+        return journal
+    }
+
+    private func archiveURL(_ journal: RecoveryJournal) -> URL {
+        directory.appendingPathComponent("recovery-\(journal.id.uuidString).json")
+    }
+
     private func controller(transaction: MirrorTransaction = MirrorTransaction(),
                              restore: ((RecoverySnapshot) throws -> Void)? = nil) -> DisplayHideController {
         let mirror = MirrorController(
@@ -1039,6 +1213,7 @@ final class DisplayHideTests: XCTestCase {
     }
 
     private func snapshot(
+        boot: String = "test-boot",
         _ modify: (inout [[String: Any]]) -> Void = { _ in }
     ) throws -> RecoverySnapshot {
         var displays: [[String: Any]] = [
@@ -1057,7 +1232,7 @@ final class DisplayHideTests: XCTestCase {
         ]
         modify(&displays)
         let value: [String: Any] = [
-            "bootSession": "test-boot",
+            "bootSession": boot,
             "osBuild": "test-build",
             "userID": getuid(),
             "displays": displays
