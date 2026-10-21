@@ -46,11 +46,6 @@ struct DisplaySettingsView: View {
                     hideSection(selected, tiles: tiles)
                     keepWindowsOffSection(selected)
                     ModeProtectionSettings(model: model, tile: selected)
-                    if pageProblem == nil, isJournalTarget(selected), let status = model.handoffStatus {
-                        Section {
-                            recoveryDetails(status, targetUUID: selected.uuid)
-                        }
-                    }
                     scriptSection(selected)
                 } else {
                     Section {
@@ -126,6 +121,9 @@ struct DisplaySettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if model.pageRecoveryProblem == nil, isJournalTarget(tile), let status = model.handoffStatus {
+                recoveryDetails(status, targetUUID: tile.uuid)
             }
         }
     }
