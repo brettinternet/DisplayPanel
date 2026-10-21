@@ -4147,6 +4147,8 @@ final class DisplayHideAppTests: XCTestCase {
             )
             try await waitUntil { !model.protectionQuiescencePending }
             XCTAssertTrue(model.displayTiles.contains { $0.status == .needsRecovery })
+            XCTAssertTrue(model.displayTiles.filter { $0.status == .needsRecovery }.allSatisfy { $0.action == nil },
+                          "old Restore must not be offered even when numeric IDs happen to match after reboot")
             XCTAssertNil(model.sessionRecoveryBlocker)
             model.recoverPreviousSession(confirmation, hideAgain: hideAgain)
             XCTAssertTrue(model.hideOperation.isBusy)

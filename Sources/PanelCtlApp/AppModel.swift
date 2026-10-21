@@ -6057,6 +6057,7 @@ final class AppModel: ObservableObject {
 
     private func canAttemptGuardedRecoveryShow(_ removal: DisplayHandoffRemoval) -> Bool {
         guard let status = handoffStatus, status.state == .recovery,
+              status.sessionRecovery == nil,
               status.inspectionFailure == nil, status.journalID != nil,
               status.removals.contains(where: { $0.id == removal.id && $0.isUnresolved }),
               matchesPresentDisplay(removal.target), matchesPresentDisplay(removal.source),

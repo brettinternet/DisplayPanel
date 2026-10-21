@@ -2024,6 +2024,7 @@ final class SettingsWindowTests: XCTestCase {
             },
             hideDisplay: hideDisplay,
             showDisplay: showDisplay,
+            recoverDisplaySession: { _, _ in XCTFail("Settings snapshots never recover a real session") },
             checkDDCInput: checkDDCInput,
             // Black out never draws over a real screen in tests.
             coverDisplays: { _ in [] },
