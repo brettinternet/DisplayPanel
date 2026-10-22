@@ -11,9 +11,6 @@ public struct DisplaySessionRecovery: Equatable {
     public let canAutomaticallyKeepShown: Bool
 
     public var canRecover: Bool { blocker == nil }
-    public var confirmation: String {
-        "Applies to \(displayNames.joined(separator: ", ")). The previous session's journal will be archived unchanged. The current arrangement and modes become the new baseline, including any reduced refresh rate exposed while a monitor is on another input. No monitor input will be switched."
-    }
 }
 
 extension RecoveryJournal {

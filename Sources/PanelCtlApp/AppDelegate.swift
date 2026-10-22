@@ -115,7 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "Action in progress"
-            alert.informativeText = "Action “\(runningAction.name)” is running step \(runningAction.currentStep) of \(runningAction.totalSteps). Wait for it to finish before quitting."
+            alert.informativeText = "Action “\(runningAction.name)” is on step \(runningAction.currentStep) of \(runningAction.totalSteps). Wait for it to finish."
             alert.addButton(withTitle: "OK")
             alert.runModal()
             return .terminateCancel
@@ -140,7 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 alert.messageText = status?.state == .hidden && canShow
                     ? (removalCount > 1 ? "\(removalCount) displays are still removed" : "\(target?.name ?? "A display") is still hidden")
                     : "Display recovery isn\u{2019}t finished"
-                alert.informativeText = "PanelCtl won\u{2019}t show removed displays or switch monitor inputs after quitting. Open PanelCtl again to show them."
+                alert.informativeText = "Removed displays stay removed until you open PanelCtl again."
             } else {
                 alert.messageText = "Automation cleanup needs attention"
                 alert.informativeText = "PanelCtl couldn\u{2019}t confirm automation stopped: \(model.protectionQuiescenceFailure ?? "unknown error")"
@@ -381,10 +381,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let message = model.runtimeState.detailMessage {
             menu.addItem(infoItem(message, maxLines: 3))
         }
-        for (uuid, status) in model.keepWindowsOffStatuses.sorted(by: { $0.key < $1.key }) where status.state != .off {
-            let name = model.displayTiles.first(where: { $0.id == uuid })?.name ?? "Display \(uuid.prefix(8))…"
-            menu.addItem(infoItem("\(name): \(status.description)", maxLines: 3))
-        }
 
         menu.addItem(.separator())
         let runRule = NSMenuItem(title: "Run rule", action: nil, keyEquivalent: "")
@@ -397,12 +393,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             entry.representedObject = rule.id
             let blocker = model.protectionRuleRunBlocker(id: rule.id)
             entry.isEnabled = blocker == nil
-            entry.toolTip = blocker ?? "Run just this rule once without changing its automatic trigger."
+            entry.toolTip = blocker
             rulesMenu.addItem(entry)
         }
         runRule.submenu = rulesMenu
         runRule.isEnabled = !model.automationPreferences.rules.isEmpty
-        runRule.toolTip = runRule.isEnabled ? "Run one saved Automation rule once." : "Create a rule in Settings → Automations."
+        runRule.toolTip = runRule.isEnabled ? nil : "Create a rule in Settings → Automations."
         menu.addItem(runRule)
         if model.controlRunningRule != nil || !model.blackedOutDisplayIDs.isEmpty {
             menu.addItem(restoreMenuItem())
@@ -501,8 +497,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 display.title += " — \(subtitle)"
             }
             items.append(display)
-            if let enforcement {
-                let line = infoItem(enforcement.description, maxLines: 3)
+            if let detail = enforcement?.detail {
+                let line = infoItem(detail, maxLines: 3)
                 line.indentationLevel = 1
                 items.append(line)
             }
@@ -547,7 +543,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let restore = item("Restore", action: #selector(restoreNow))
         restore.toolTip = model.runningDisplayAction?.id != nil
             ? model.displayActionBusyMessage
-            : "Ends blackout or dimming from every rule. Hidden displays stay hidden."
+            : "Ends automation blackout and dimming. Hidden displays stay hidden."
         restore.isEnabled = model.runningDisplayAction == nil
         return restore
     }

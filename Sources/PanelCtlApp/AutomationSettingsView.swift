@@ -59,7 +59,7 @@ struct AutomationSettingsView: View {
             } header: {
                 Text("Rules")
             } footer: {
-                SectionFooter("Rules run on their own when you’re idle. Run now runs a rule once, even when it’s off or paused. Each display can be in only one rule that’s on.")
+                SectionFooter("Rules run when you’re idle. Run now works even when a rule is off or paused. A display can be in only one rule that’s on.")
             }
 
             Section {
@@ -95,7 +95,7 @@ struct AutomationSettingsView: View {
             } header: {
                 Text("Actions")
             } footer: {
-                SectionFooter("Actions run only when requested, here or from scripts and other apps. Steps run in order; if one stops, earlier changes stay in place.")
+                SectionFooter("Actions run only on request, here or from scripts. A failed step doesn’t undo earlier ones.")
             }
 
             if model.automationPreferences.rules.contains(where: { $0.settings.followUpAction == .sleepDisplays }) {
@@ -105,7 +105,7 @@ struct AutomationSettingsView: View {
                         set: model.setKeepDisplaysAwake
                     )) {
                         Text("Use PanelCtl’s display sleep timer")
-                        Text("Keeps all displays awake until PanelCtl sleeps them while your screen is unlocked. macOS may still sleep the Mac sooner.")
+                        Text("Keeps displays awake until a rule sleeps them. macOS may still sleep the Mac sooner.")
                     }
                 }
             }
@@ -324,7 +324,7 @@ struct AutomationSettingsView: View {
     private func desktopStateText(for step: AppControlActionStepResult) -> String {
         switch step.outcome {
         case .done: return "Done"
-        case .noOp: return "Already in state"
+        case .noOp: return "No change"
         case .notRun: return "Not run"
         case .skipped: return "Skipped"
         case .partial where step.inputOutcome != nil: return "Done"
@@ -527,7 +527,7 @@ struct DisplayActionEditor: View {
                             .accessibilityLabel("Add step \(draft.steps.count + 1)")
                             .disabled(draft.steps.count >= 8)
                         if draft.steps.count >= 8 {
-                            Text("An Action can have at most 8 steps.")
+                            Text("Up to 8 steps.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -535,20 +535,20 @@ struct DisplayActionEditor: View {
                 } header: {
                     Text("Steps")
                 } footer: {
-                    SectionFooter("Move windows can share a display with another effect. Steps run in order; stopping does not undo earlier steps.")
+                    SectionFooter("Steps run in order. A failed step doesn’t undo earlier ones.")
                 }
 
                 Section {
                     if let commandLine {
                         CommandCopyRow(command: commandLine, accessibilityLabel: "Copy action command")
                     } else {
-                        Text("The bundled panelctl command is unavailable in this build.")
+                        Text("Unavailable in this build.")
                             .foregroundStyle(.secondary)
                     }
                 } header: {
                     Text("Command")
                 } footer: {
-                    SectionFooter("Requires PanelCtl to be open. Save changes before running.")
+                    SectionFooter("PanelCtl must be open. Runs the saved Action.")
                 }
             }
             .formStyle(.grouped)
@@ -589,7 +589,7 @@ struct DisplayActionEditor: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Scripts that run its command will stop working. The displays’ current state and recovery evidence don’t change.")
+            Text("Scripts that run it will stop working. Displays aren’t changed.")
         }
     }
 
@@ -640,13 +640,13 @@ struct DisplayActionEditor: View {
         .accessibilityLabel("Step \(number) effect")
 
         if step.effect == .restoreArrangement {
-            Text("Restores the remembered arrangement for the current visible set, or the preferred main display. Recovery and identity checks still apply.")
+            Text("Restores the remembered arrangement or preferred main display.")
                 .font(.caption).foregroundStyle(.secondary)
         } else if step.effect == .removeFromDesktop {
             removalDetails(step, index: index)
         } else if step.effect == .moveWindows {
             moveDestinationPicker(step, index: index, configuration: \.moveWindows)
-            Text("Moves supported windows on the desktop currently showing on this display, once, without hiding it. Other desktops are left unchanged. Automatic prefers the main display; hidden or unavailable displays are excluded.")
+            Text("Moves windows on the current desktop once, without hiding the display. Automatic prefers the main display.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         } else if step.effect == .blackOut {
@@ -759,7 +759,7 @@ struct DisplayActionEditor: View {
             }
         )) {
             Text("Keep windows off while hidden")
-            Text("Moves new and returning windows to another display until you show it. Showing it won’t move them back.")
+            Text("Move windows to another display while hidden.")
         }
         .accessibilityLabel("Step \(index + 1) keep windows off while hidden")
         if step.keepWindowsOff != nil {
@@ -888,7 +888,7 @@ struct ProtectionRuleEditor: View {
                     durationPicker("Start after", selection: setting(\.idleSeconds), options: Self.idleOptions)
                     Toggle(isOn: setting(\.blackoutEmptyDisplays)) {
                         Text("Also black out empty displays")
-                        Text("A selected display with no windows goes black after 1 second and comes back when a window or the pointer arrives.")
+                        Text("After 1 second without windows, until a window or the pointer arrives.")
                     }
                 }
 
@@ -939,14 +939,14 @@ struct ProtectionRuleEditor: View {
                     if draft.settings.mode == .blocking {
                         Toggle(isOn: setting(\.keepBlackoutOnInput)) {
                             Text("Keep displays black during activity")
-                            Text("Activity on another display restarts the Afterward timer instead of restoring. Press Escape with the pointer on a black display to restore it.")
+                            Text("Activity restarts the Afterward timer. Press Esc on a black display to restore it.")
                         }
                     }
                 } header: {
                     Text("Afterward")
                 } footer: {
                     if draft.settings.followUpAction == .sleepDisplays {
-                        SectionFooter("Sleeps every display, including displays in other rules.")
+                        SectionFooter("Sleeps every display, including those in other rules.")
                     }
                 }
 
@@ -957,14 +957,14 @@ struct ProtectionRuleEditor: View {
                     }
                     Toggle(isOn: setting(\.deferBlackoutWhileCameraInUse)) {
                         Text("A camera is in use")
-                        Text("For calls in apps that don’t keep the display awake. PanelCtl never accesses video.")
+                        Text("For calls. PanelCtl never accesses video.")
                     }
                 }
 
                 Section("Advanced") {
                     Toggle(isOn: setting(\.hardwareDimmingEnabled)) {
                         Text("Lower hardware brightness")
-                        Text("Experimental. Uses DDC, which not every monitor supports, and restores the captured brightness. Applies to idle and one-shot Rule runs, not empty displays.")
+                        Text("Experimental. Uses DDC, which not every monitor supports. Not applied to empty displays.")
                     }
                     if draft.settings.hardwareDimmingEnabled {
                         percentStepper("Brightness", selection: setting(\.hardwareBrightnessPercent), range: 0...100)
@@ -975,13 +975,13 @@ struct ProtectionRuleEditor: View {
                     if let commandLine {
                         CommandCopyRow(command: commandLine, accessibilityLabel: "Copy rule command")
                     } else {
-                        Text("The bundled panelctl command is unavailable in this build.")
+                        Text("Unavailable in this build.")
                             .foregroundStyle(.secondary)
                     }
                 } header: {
                     Text("Command")
                 } footer: {
-                    SectionFooter("Requires PanelCtl to be open. Runs the saved rule once; save changes first.")
+                    SectionFooter("PanelCtl must be open. Runs the saved rule once.")
                 }
             }
             .formStyle(.grouped)
@@ -1031,7 +1031,7 @@ struct ProtectionRuleEditor: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Any blackout or dimming from this rule ends. Hidden displays stay hidden.")
+            Text("Its blackout or dimming ends.")
         }
         .onAppear {
             guard isNew else { return }
@@ -1103,7 +1103,7 @@ struct ProtectionRuleEditor: View {
             }
         )) {
             Text("Unavailable display")
-            Text("\(String(uuid.prefix(8)))… · reconnect it, or turn off to forget it")
+            Text("\(String(uuid.prefix(8)))… · turn off to forget")
         }
         .accessibilityLabel("Forget unavailable display \(String(uuid.prefix(8)))")
     }

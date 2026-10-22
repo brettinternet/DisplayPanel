@@ -70,7 +70,7 @@ enum ProtectionConfigurationError: Error, Equatable, LocalizedError {
         case .invalidRuleName:
             return "Enter a non-empty rule name."
         case .duplicateRuleIdentity:
-            return "This rule has a duplicate ID. Remove the duplicate before enabling protection."
+            return "This rule has a duplicate ID."
         case .noEnabledRules:
             return "No rules are on. Turn one on in Settings → Automations."
         }

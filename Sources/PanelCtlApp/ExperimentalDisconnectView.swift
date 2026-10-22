@@ -20,7 +20,7 @@ struct ExperimentalDisconnectPresentation: Equatable {
         let failure: String?
     }
 
-    static let summary = "Automation pauses without changing preferences or snooze. Uses a private macOS API; recovery must be verified before automation resumes."
+    static let summary = "Uses a private macOS API. Automation pauses until the reconnect is verified."
     static let docsURL = URL(string: "https://github.com/brettinternet/panelctl/blob/main/docs/display-disable.md#app-controls")!
 
     let syntheticSession: SyntheticSession?
@@ -56,14 +56,14 @@ struct ExperimentalDisconnectPresentation: Equatable {
         guard leaseIsValid else { return "Refused: the lease must be 1–60 seconds." }
         switch session.phase {
         case .consent:
-            return "One \(session.leaseSeconds)-second disconnect of this display while another screen stays usable. Automation pauses; cancel resumes with a fresh countdown."
+            return "Disconnects this display for \(session.leaseSeconds) seconds while another screen stays on."
         case .leased:
             if remainingSeconds == 0 {
-                return "Time\u{2019}s up. Automation stays paused while PanelCtl waits for the helper to verify recovery."
+                return "Waiting for the helper to verify the reconnect."
             }
-            return "Reconnects automatically in \(remainingSeconds ?? 0) seconds. Automation resumes only after recovery is verified."
+            return "Reconnects in \(remainingSeconds ?? 0) seconds."
         case .refused:
-            return "The display\u{2019}s identity is ambiguous, so PanelCtl won\u{2019}t guess which display to use."
+            return "The display\u{2019}s identity is ambiguous, so PanelCtl won\u{2019}t guess."
         case .helperFailed:
             return "Reconnect, or check recovery details. The recovery journal is kept."
         case .watchdogRecovery:

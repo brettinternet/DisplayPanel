@@ -405,7 +405,7 @@ final class DisplayHideAppTests: XCTestCase {
         )
         try await waitUntil { model.runtimeState == .waitingForPlayback }
         XCTAssertTrue(model.hiddenMirrorProtectionSummary.contains("automation paused"))
-        XCTAssertTrue(model.hiddenMirrorProtectionSummary.contains("media or camera activity"))
+        XCTAssertTrue(model.hiddenMirrorProtectionSummary.contains("media or camera on"))
 
         let stopped = expectation(description: "paused overlay service shut down")
         model.shutdown { stopped.fulfill() }
@@ -503,7 +503,7 @@ final class DisplayHideAppTests: XCTestCase {
         try await waitUntil { !unselected.protectionQuiescencePending }
         XCTAssertNil(unselected.selectedHiddenMirrorSource)
         XCTAssertFalse(unselected.hiddenMirrorOverlayPolicyEligible)
-        XCTAssertTrue(unselected.hiddenMirrorProtectionSummary.contains("not in the idle display list"))
+        XCTAssertTrue(unselected.hiddenMirrorProtectionSummary.contains("isn\u{2019}t in a rule"))
 
         for state in [DisplayHandoffStatus.State.recovery, .busy, .unsupported, .none] {
             let status = handoffStatus(
@@ -1321,7 +1321,7 @@ final class DisplayHideAppTests: XCTestCase {
                 ? "panelctl ddc-input --display '\(Self.targetUUID)' --set 0x0F" : nil)
             XCTAssertEqual(result.inputMessage, state == .skipped
                 ? "Couldn\u{2019}t switch the monitor input. \(detail). Use the monitor\u{2019}s buttons."
-                : "Asked the monitor to switch to HDMI 1 but couldn\u{2019}t confirm it. Check the monitor and use its buttons if needed.")
+                : "Couldn\u{2019}t confirm the monitor switched to HDMI 1. If it didn\u{2019}t, use its buttons.")
             XCTAssertEqual(model.controlDisplayOutcome, .partial)
         }
     }
@@ -1421,7 +1421,7 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(saved.target.name, "Target")
         XCTAssertTrue(saved.enabled)
         XCTAssertFalse(reloaded.identityIsCurrent(saved.target))
-        XCTAssertTrue(reloaded.hideReadinessMessage(for: saved)?.contains("won\u{2019}t apply its settings to a different display") == true)
+        XCTAssertTrue(reloaded.hideReadinessMessage(for: saved)?.contains("is missing") == true)
         XCTAssertThrowsError(try reloaded.makeHideRequest(targetUUID: Self.targetUUID))
         XCTAssertNil(reloaded.hidePreferences[Self.replacementUUID])
     }
@@ -1493,7 +1493,7 @@ final class DisplayHideAppTests: XCTestCase {
             XCTAssertEqual(hideCalls, 0, "cleanup \(cleanupResult) retained after ordinary disable must block Hide")
             XCTAssertTrue(model.protectionQuiescenceFailure?.localizedCaseInsensitiveContains("cleanup") == true)
             XCTAssertFalse(result.succeeded)
-            XCTAssertTrue(result.message.contains("didn\u{2019}t change the display"), result.message)
+            XCTAssertTrue(result.message.contains("automation didn\u{2019}t confirm it stopped"), result.message)
         }
     }
 
@@ -1855,7 +1855,7 @@ final class DisplayHideAppTests: XCTestCase {
         model.hide(targetUUID: Self.sourceUUID)
         XCTAssertTrue(model.isBlackoutHidden(Self.sourceUUID), "another display can still be blacked out")
         XCTAssertEqual(model.blackoutReadiness(for: displays[0])?.localizedDescription,
-                       "PanelCtl keeps at least one display visible, so it won\u{2019}t hide this one.")
+                       "PanelCtl won\u{2019}t hide the last visible display.")
     }
 
     func testShowUsesConfirmedJournalAndRetainsFailureWithoutFalseSuccess() async throws {
@@ -2594,7 +2594,7 @@ final class DisplayHideAppTests: XCTestCase {
         try await waitUntil { !model.displayLifecycleTransitioning }
 
         XCTAssertEqual(hideCalls, 0)
-        XCTAssertTrue(model.displayResults[Self.targetKey]?.message.contains("exact journal") == true)
+        XCTAssertTrue(model.displayResults[Self.targetKey]?.message.contains("recovery journal") == true)
         XCTAssertTrue(model.displayResults[Self.targetKey]?.inputNeedsAttention == true)
     }
 
@@ -3993,7 +3993,7 @@ final class DisplayHideAppTests: XCTestCase {
         let last = await send(.hide, Self.mainUUID)
         XCTAssertEqual(last.outcome, .refused)
         XCTAssertEqual(last.exitCode, 1)
-        XCTAssertEqual(last.summary, "PanelCtl keeps at least one display visible, so it won\u{2019}t hide this one.")
+        XCTAssertEqual(last.summary, "PanelCtl won\u{2019}t hide the last visible display.")
         XCTAssertFalse(model.isBlackoutHidden(Self.mainUUID))
 
         // Hides never start from wake or startup.

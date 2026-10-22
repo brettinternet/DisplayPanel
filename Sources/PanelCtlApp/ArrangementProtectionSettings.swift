@@ -32,10 +32,10 @@ struct ArrangementStatusRow: View {
         guard model.arrangementPreferences.enabled else { return ("Arrangement protection is off", false) }
         switch status.state {
         case "remembered":
-            return (status.differs ? "Arrangement protected · current layout differs" : "Arrangement protected", true)
+            return (status.differs ? "Arrangement protected · layout differs" : "Arrangement protected", true)
         case "preferred-main": return ("Main display protected", true)
         case "suspended": return ("Arrangement protection paused", false)
-        default: return ("These displays have no remembered arrangement", false)
+        default: return ("No remembered arrangement", false)
         }
     }
 }
@@ -55,7 +55,7 @@ struct ArrangementProtectionSettings: View {
                         set: model.setArrangementProtectionEnabled
                     )) {
                         Text("Protect remembered arrangements")
-                        Text("Applies once after a reconnect or wake, not after your own layout changes.")
+                        Text("Applies after a reconnect or wake, not after your own changes.")
                     }
                     Toggle("Also apply on launch", isOn: Binding(
                         get: { model.arrangementPreferences.applyOnLaunch },
@@ -66,7 +66,7 @@ struct ArrangementProtectionSettings: View {
                 } header: {
                     Text("Arrangement protection")
                 } footer: {
-                    SectionFooter("A remembered arrangement for the connected displays takes precedence over the preferred main display. Changes are session-only.",
+                    SectionFooter("A remembered arrangement overrides the preferred main display.",
                                   learnMore: AppModel.arrangementDocsURL)
                 }
 
@@ -74,7 +74,7 @@ struct ArrangementProtectionSettings: View {
                     Text(status.reason)
                         .fixedSize(horizontal: false, vertical: true)
                     if status.differs {
-                        Text("The current arrangement differs from the remembered one. Remember it to replace the saved one.")
+                        Text("The current layout differs. Remember it to replace the saved one.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

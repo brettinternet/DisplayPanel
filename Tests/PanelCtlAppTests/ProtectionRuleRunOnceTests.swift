@@ -164,7 +164,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
             XCTAssertEqual(model.controlRunningRule?.id, selected.id)
             XCTAssertEqual(model.protectionRuleRunStatus(id: selected.id), "Running once — Restore ends this run.")
             XCTAssertEqual(model.protectionRuleRunStatus(id: missing), model.protectionRuleRunBlocker(id: missing))
-            XCTAssertTrue(model.protectionRuleRunStatus(id: missing)?.contains("Another one-shot") == true)
+            XCTAssertTrue(model.protectionRuleRunStatus(id: missing)?.contains("Another rule is running once") == true)
             let activeMenu = try XCTUnwrap(delegate.makeMenu().items.first { $0.title == "Run rule" }?.submenu)
             XCTAssertEqual(activeMenu.items.last?.title, "Selected (Off) — Running once")
             XCTAssertFalse(try XCTUnwrap(activeMenu.items.last).isEnabled)

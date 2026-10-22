@@ -60,7 +60,7 @@ enum ProtectionRuntimeState: Equatable {
         switch self {
         case .waitingForDisplays(let message), .failed(let message): return message
         case .waitingForPlayback: return "The idle countdown restarts when it ends."
-        case .disconnectPaused: return "Automation resumes with a fresh countdown only after cancellation or verified recovery. Preferences and snooze stay unchanged."
+        case .disconnectPaused: return "Resumes after the reconnect is verified."
         case .snoozed(let until):
             return "Resumes \(until.formatted(date: .abbreviated, time: .shortened))"
         default: return nil

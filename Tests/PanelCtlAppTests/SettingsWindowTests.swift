@@ -553,7 +553,10 @@ final class SettingsWindowTests: XCTestCase {
         let delegate = AppDelegate()
         delegate.model = model
         let menu = delegate.makeMenu()
-        XCTAssertTrue(menu.items.contains { $0.attributedTitle?.string.contains("Keep windows off: Armed") == true })
+        XCTAssertTrue(menu.items.contains { item in
+            if #available(macOS 14.4, *) { return item.subtitle?.contains("Keep windows Armed") == true }
+            return item.title.contains("Keep windows Armed")
+        })
         XCTAssertTrue(model.displayActionResults.isEmpty)
         XCTAssertFalse(model.isBlackoutHidden(Self.sideUUID))
         spin { content.layoutSubtreeIfNeeded(); return keepOffSwitch()?.state == .on }

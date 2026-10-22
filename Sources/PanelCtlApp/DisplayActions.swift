@@ -316,7 +316,7 @@ struct DisplayActionSet: Codable, Equatable {
                 let fields = raw.object ?? [:]
                 let parsedID = fields["id"]?.string.flatMap(UUID.init(uuidString:))?.uuidString ?? "unsupported-\(offset + 1)"
                 let name = fields["name"]?.string ?? "Unsupported Action \(offset + 1)"
-                let reason = "This Action uses an unsupported effect or invalid saved data and is preserved but unavailable. (\(error.localizedDescription))"
+                let reason = "Unsupported or invalid; kept but unavailable. (\(error.localizedDescription))"
                 unsupportedActions.append(UnsupportedDisplayAction(id: parsedID, name: name, reason: reason, raw: raw))
                 storedRows.append(StoredDisplayActionRow(id: nil, raw: raw, reason: reason))
             }
@@ -397,7 +397,7 @@ enum DisplayActionValidationError: Error, Equatable, LocalizedError {
         case .invalidStepCount:
             return "An Action needs 1–8 steps."
         case .duplicateDisplay(let name):
-            return "“\(name)” can appear only once in the same Action effect class."
+            return "“\(name)” is already in another step."
         case .duplicateStepIdentity:
             return "Every Action step must have a unique stable identity."
         case .invalidMoveConfiguration(let index):
@@ -413,7 +413,7 @@ enum DisplayActionValidationError: Error, Equatable, LocalizedError {
         case .staticConflict(let index, let reason):
             return "Step \(index): \(reason)"
         case .actionInProgress(let name):
-            return "“\(name)” is running. Wait for it to finish before editing it."
+            return "“\(name)” is running. Wait for it to finish."
         case .storedActionsUnavailable(let reason):
             return reason
         }
@@ -437,7 +437,7 @@ enum DisplayActionPresentation {
         let targetName = step.target.map { displayName(for: $0, displays: displays) } ?? "Choose a display"
         switch step.effect {
         case .restoreArrangement:
-            return ("Restore arrangement", "Current exact visible set or preferred main")
+            return ("Restore arrangement", "Remembered arrangement or preferred main display")
         case .blackOut:
             return ("Hide \(targetName)", "Black out")
         case .show:

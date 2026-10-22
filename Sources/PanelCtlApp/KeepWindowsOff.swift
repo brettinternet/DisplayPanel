@@ -85,11 +85,17 @@ struct KeepWindowsOffStatus: Equatable {
         )
     }
 
+    /// The reason and last pass, without the state label.
+    var detail: String? {
+        var parts = reason.map { [$0] } ?? []
+        if state != .off, lastMoved + lastFailed > 0 {
+            parts.append("Last pass: \(lastMoved) moved, \(lastFailed) failed")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
     var description: String {
-        var value = "Keep windows off: \(label)"
-        if let reason { value += " · \(reason)" }
-        if state != .off { value += " · last pass: \(lastMoved) moved, \(lastFailed) failed" }
-        return value
+        ([label] + (detail.map { [$0] } ?? [])).joined(separator: " · ")
     }
 }
 

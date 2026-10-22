@@ -442,7 +442,7 @@ final class DisplayActionAppTests: XCTestCase {
         let response = await run(model, id: action.id)
         XCTAssertEqual(response.outcome, .partial)
         XCTAssertEqual(response.summary, "Hidden.")
-        XCTAssertTrue(response.detail?.contains("couldn’t confirm") == true)
+        XCTAssertTrue(response.detail?.localizedCaseInsensitiveContains("couldn’t confirm") == true)
         XCTAssertTrue(model.displayResults[targetUUID.lowercased()]?.message.contains("Hidden") == true)
         XCTAssertEqual(model.displayActionResults[action.id]?.outcome, .partial)
     }
@@ -610,7 +610,7 @@ final class DisplayActionAppTests: XCTestCase {
         newerDefaults.set(newerBytes, forKey: AppModel.displayActionsKey)
         newerDefaults.set(legacyJSON, forKey: AppModel.legacyDisplayActionsKey)
         let newerModel = makeModel(defaults: newerDefaults)
-        XCTAssertTrue(newerModel.displayActionStorageFailure?.contains("preserved") == true)
+        XCTAssertTrue(newerModel.displayActionStorageFailure?.contains("kept unchanged") == true)
         XCTAssertThrowsError(try newerModel.saveDisplayAction(DisplayAction(name: "Must not overwrite")))
         XCTAssertEqual(newerDefaults.data(forKey: AppModel.displayActionsKey), newerBytes)
         XCTAssertEqual(newerDefaults.data(forKey: AppModel.legacyDisplayActionsKey), legacyJSON)
@@ -692,7 +692,7 @@ final class DisplayActionAppTests: XCTestCase {
         let duplicate = DisplayAction(name: "Duplicate displays", steps: [
             DisplayActionStep(target: repeated), DisplayActionStep(target: repeated, effect: .show)
         ])
-        XCTAssertTrue(model.displayActionValidation(for: duplicate)?.localizedCaseInsensitiveContains("only once") == true)
+        XCTAssertTrue(model.displayActionValidation(for: duplicate)?.localizedCaseInsensitiveContains("already in another step") == true)
         XCTAssertThrowsError(try model.saveDisplayAction(duplicate))
         let empty = DisplayAction(name: "Empty", steps: [])
         XCTAssertTrue(model.displayActionValidation(for: empty)?.contains("1–8") == true)
@@ -1088,7 +1088,7 @@ final class DisplayActionAppTests: XCTestCase {
         let result = await run(model, id: action.id)
         XCTAssertEqual(result.outcome, .partial)
         XCTAssertEqual(result.steps?.map(\.outcome), [.done, .refused, .notRun])
-        XCTAssertTrue(result.steps?[1].desktopSummary.localizedCaseInsensitiveContains("changed after") == true)
+        XCTAssertTrue(result.steps?[1].desktopSummary.localizedCaseInsensitiveContains("changed. Review") == true)
         XCTAssertEqual(result.displays?.map(\.targetUUID), [targetUUID, sourceUUID, alternateUUID])
         XCTAssertEqual(result.displays?.map(\.observedState), ["hidden-by-panelctl", "unavailable", "separate"])
         XCTAssertEqual(coverRequests, [[202]])
@@ -1279,7 +1279,7 @@ final class DisplayActionAppTests: XCTestCase {
         let result = await run(model, id: action.id)
         XCTAssertEqual(result.outcome, .partial)
         XCTAssertEqual(result.steps?.map(\.outcome), [.done, .refused])
-        XCTAssertTrue(result.steps?.last?.desktopSummary.localizedCaseInsensitiveContains("changed after") == true)
+        XCTAssertTrue(result.steps?.last?.desktopSummary.localizedCaseInsensitiveContains("changed. Review") == true)
         XCTAssertFalse(model.isBlackoutHidden(sourceUUID))
     }
 
@@ -1517,7 +1517,7 @@ final class DisplayActionAppTests: XCTestCase {
         for _ in 0..<100 where result == nil { await Task.yield() }
         let response = try XCTUnwrap(result)
         XCTAssertEqual(response.steps?.map(\.outcome), [.done, .refused])
-        XCTAssertTrue(response.steps?.last?.desktopSummary.contains("state changed") == true)
+        XCTAssertTrue(response.steps?.last?.desktopSummary.contains("Displays changed") == true)
         XCTAssertEqual(hideWrites, 0, "a preflight no-op cannot capture a new mirror-source ID inside the running Action")
     }
 
@@ -1603,7 +1603,7 @@ final class DisplayActionAppTests: XCTestCase {
         let result = await run(model, id: action.id)
         XCTAssertEqual(result.outcome, .partial)
         XCTAssertEqual(result.steps?.map(\.outcome), [.done, .refused])
-        XCTAssertTrue(result.steps?.last?.desktopSummary.localizedCaseInsensitiveContains("changed after this action was prepared") == true)
+        XCTAssertTrue(result.steps?.last?.desktopSummary.localizedCaseInsensitiveContains("The display changed. Review it") == true)
         XCTAssertEqual(coverRequests, [[202]], "the second step never writes to the display's replacement numeric ID")
     }
 
@@ -1804,7 +1804,7 @@ final class DisplayActionAppTests: XCTestCase {
         XCTAssertNotNil(model.displayActionRunBlocker(for: action))
         let lastVisible = await run(model, id: action.id)
         XCTAssertEqual(lastVisible.outcome, .refused)
-        XCTAssertTrue(lastVisible.summary.contains("at least one display visible"))
+        XCTAssertTrue(lastVisible.summary.contains("last visible display"))
         box.value = unreadableStatus()
         model.refreshHandoffStatus()
         let recovery = await run(model, id: action.id)

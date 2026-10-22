@@ -72,9 +72,10 @@ struct DisplaySettingsView: View {
             }
             Button("Cancel", role: .cancel) { pendingSessionRecovery = nil }
         } message: { recovery in
-            Text((recoveryHidesAgain
-                  ? "Remove these displays from the Mac desktop again without showing them or switching inputs first. "
-                  : "Clear the previous session’s recovery requirement without changing any display settings. ") + recovery.confirmation)
+            let names = recovery.displayNames.joined(separator: ", ")
+            Text(recoveryHidesAgain
+                 ? "Removes \(names) from the desktop again. The current arrangement and modes become the new baseline. Inputs aren’t switched."
+                 : "Clears recovery for \(names) without changing display settings.")
         }
     }
 
@@ -108,7 +109,6 @@ struct DisplaySettingsView: View {
                             Spacer(minLength: 0)
                             Button("Dismiss") { model.dismissInputWarning(for: tile.id) }
                                 .accessibilityLabel("Dismiss input warning for \(tile.name)")
-                                .help("Hide this warning without changing the monitor input.")
                         }
                     }
                 }
@@ -134,15 +134,15 @@ struct DisplaySettingsView: View {
             return tile.display.map { "On · \($0.settingsDetail)" } ?? "On"
         case .hidden where model.isBlackoutHidden(tile.uuid):
             if tile.display == nil {
-                return "Disconnected · blacked out again when it reconnects"
+                return "Disconnected · stays black when it reconnects"
             }
             if model.uncoveredHiddenDisplays.contains(tile.id) {
-                return "Hidden, but PanelCtl couldn\u{2019}t cover it. It tries again when displays change."
+                return "Hidden but not covered · retries when displays change"
             }
             return "Blacked out until you show it"
         case .hidden:
             let source = tile.uuid.flatMap { model.handoffStatus?.removal(for: $0)?.source.name }
-            return "Removed from the desktop · mirrored onto \(source ?? "another display")"
+            return "Removed from desktop · mirrored onto \(source ?? "another display")"
         case .hiding:
             return "Removing from the desktop…"
         case .showing:
@@ -242,7 +242,7 @@ struct DisplaySettingsView: View {
                             set: { model.setKeepWindowsOffEnabled($0, for: uuid) }
                         )) {
                             Text("Also keep windows off")
-                            Text("When you hide this display, move new and returning windows to another display.")
+                            Text("Move windows to another display while hidden.")
                         }
                         .disabled(!enabled && (display.map { !$0.active || !$0.online || $0.asleep } ?? true))
                         .accessibilityLabel("Also keep windows off \(tile.name) when hidden")
@@ -278,7 +278,7 @@ struct DisplaySettingsView: View {
                 } header: {
                     Text("Windows")
                 } footer: {
-                    SectionFooter("Moves supported windows on the desktop currently showing on this display; other desktops are left unchanged. Showing the display won’t move windows back. Automation blackouts never move windows.")
+                    SectionFooter("Moves windows on the current desktop only. Show doesn’t move them back.")
                 }
             }
         }
@@ -435,7 +435,7 @@ struct DisplaySettingsView: View {
                 }
             ), prompt: Text("0x1B"))
             if DDCInput.parseValue(text.trimmingCharacters(in: .whitespaces)) == nil {
-                Text("Enter a code from 1 to 255, like 27 or 0x1B. Until then, Hide doesn\u{2019}t switch the input.")
+                Text("Enter 1–255, like 27 or 0x1B. Until then, Hide doesn\u{2019}t switch inputs.")
                     .font(.caption)
                     .foregroundStyle(text.isEmpty ? Color.secondary : Color.orange)
             }
@@ -471,7 +471,7 @@ struct DisplaySettingsView: View {
            model.handoffStatus?.removal(for: configuration?.target.uuid ?? "") != nil {
             return "Show this display to change its removal settings."
         }
-        let mainDisplayNote = "macOS decides where the menu bar, Dock, windows and Spaces go when the main display is mirrored; the main display may stay, move to the source or move elsewhere. Observe the result."
+        let mainDisplayNote = "When the main display is mirrored, macOS decides where the menu bar, Dock and windows go."
         guard let configuration, configuration.enabled else { return isMain ? mainDisplayNote : nil }
         var lines: [String] = []
         if let away = configuration.awayInput {
@@ -523,7 +523,7 @@ struct DisplaySettingsView: View {
 
     private func sessionRecoverySection(_ recovery: DisplaySessionRecovery) -> some View {
         Section {
-            Text("The previous display session ended. Choose what these displays should do now.")
+            Text("The previous session ended with these displays removed.")
             Text(recovery.displayNames.joined(separator: ", "))
                 .font(.caption).foregroundStyle(.secondary)
             HStack {
@@ -543,8 +543,6 @@ struct DisplaySettingsView: View {
             }
         } header: {
             Text("Recover previous session")
-        } footer: {
-            Text("Both choices preserve the old journal. Hide again uses the current modes and arrangement; neither choice switches monitor inputs.")
         }
     }
 
@@ -570,8 +568,8 @@ struct DisplaySettingsView: View {
         DisclosureGroup("Recovery details") {
             if status.state == .recovery {
                 Text(status.sessionRecovery != nil
-                     ? "The previous session cannot be replayed. Use Hide again or Keep displays shown above. If a monitor is unavailable, return it to the Mac input; if it is mirrored, turn off mirroring in System Settings first."
-                     : "If a guarded Restore is refused, keep the journal, correct mirroring and arrangement in System Settings → Displays, then Check Again.")
+                     ? "The previous session can’t be replayed. If a monitor is missing, switch it back to this Mac; if it’s mirrored, turn off mirroring in System Settings."
+                     : "If Restore is refused, fix mirroring and arrangement in System Settings, then Check Again.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

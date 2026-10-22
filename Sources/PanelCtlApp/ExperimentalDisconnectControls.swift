@@ -17,7 +17,7 @@ struct ExperimentalDisconnectControls: View {
     var body: some View {
         Section {
             if let failure = model.disconnectInspectionFailure {
-                Text("Disconnect recovery is unreadable or unavailable. Automation remains paused; no recovery write was attempted.")
+                Text("Can\u{2019}t read disconnect recovery. Automation stays paused.")
                 Text("\(model.disconnectJournalPath)").font(.caption).textSelection(.enabled)
                 Text(failure).foregroundStyle(.orange).textSelection(.enabled)
                 Button("Reconnect…") {}.disabled(true)
@@ -27,13 +27,11 @@ struct ExperimentalDisconnectControls: View {
             }
             if let status = model.disconnectStatus {
                 if status.resolved {
-                    Text("Reconnected. Automation resumes only if enabled and not snoozed, with a fresh countdown. If the screen stays dark, select this Mac’s input on the monitor.")
+                    Text("Reconnected. If the screen stays dark, select this Mac’s input on the monitor.")
                 } else if let presentation = presentation(status) {
-                    Text("Automation is paused without changing preferences or snooze until recovery is verified.")
-                        .font(.caption).foregroundStyle(.secondary)
                     ExperimentalDisconnectView(presentation: presentation)
                 } else {
-                    Text("The helper stopped before recording a display. Automation stays paused. Check recovery status; don\u{2019}t guess a display.")
+                    Text("The helper stopped before recording a display. Automation stays paused; check recovery status.")
                     Text("\(status.journalPath) · \(status.state)").font(.caption).textSelection(.enabled)
                     if let failure = status.failure { Text(failure).foregroundStyle(.orange).textSelection(.enabled) }
                 }
@@ -50,16 +48,14 @@ struct ExperimentalDisconnectControls: View {
             }
             if model.disconnectPreparationPending {
                 HStack(alignment: .center, spacing: 12) {
-                    Text("Stopping automation and verifying cleanup before consent. Preferences and snooze stay unchanged.")
+                    Text("Stopping automation\u{2026}")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
                     Button("Cancel") { model.cancelDisconnect() }
                 }
-            } else if model.disconnectRequest != nil {
-                Text("Automation stays paused until you cancel or recovery is verified.")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else if model.disconnectStatus?.resolved != false,
+            } else if model.disconnectRequest == nil,
+                      model.disconnectStatus?.resolved != false,
                       model.disconnectInspectionFailure == nil,
                       model.experimentalFeaturesEnabled {
                 disconnectRow
@@ -83,7 +79,7 @@ struct ExperimentalDisconnectControls: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("PanelCtl restores the display recorded in its recovery journal. If the screen stays dark, select this Mac’s input on the monitor.")
+            Text("If the screen stays dark, select this Mac’s input on the monitor.")
         }
     }
 
@@ -123,15 +119,15 @@ struct ExperimentalDisconnectControls: View {
               let display = model.displays.first(where: { $0.uuid?.caseInsensitiveCompare(targetUUID) == .orderedSame }) else {
             return "Select a connected display with a stable identity."
         }
-        if display.builtin { return "Built-in displays cannot be disconnected." }
-        if display.main { return "The main display cannot be disconnected. Choose another main display first." }
+        if display.builtin { return "Built-in displays can\u{2019}t be disconnected." }
+        if display.main { return "The main display can\u{2019}t be disconnected." }
         if !display.active || !display.online { return "Select an active, connected display." }
         return nil
     }
 
     /// Consent is one-use and per operation; it confirms what PanelCtl can't read.
     static func consentMessage(_ request: DisplayDisconnectRequest) -> String {
-        "\(request.target.name) disconnects for 15 seconds; \(request.survivor.name) stays on.\n\nAutomation pauses without changing preferences or snooze. Automatic reconnect may fail and require manual recovery. Continue only if you\u{2019}re at this Mac and the other screen is usable. Don’t unplug displays or change inputs during the test."
+        "\(request.target.name) disconnects for 15 seconds; \(request.survivor.name) stays on. Reconnect may fail and need manual recovery.\n\nContinue only if you\u{2019}re at this Mac. Don’t unplug displays or change inputs meanwhile."
     }
 
     private func presentation(_ status: DisplayDisconnectStatus) -> ExperimentalDisconnectPresentation? {

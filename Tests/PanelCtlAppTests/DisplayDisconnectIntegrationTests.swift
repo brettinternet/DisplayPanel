@@ -242,7 +242,7 @@ final class DisplayDisconnectIntegrationTests: XCTestCase {
         app.refreshDisplays()
         let survivor = try XCTUnwrap(app.displays.first { $0.main })
         XCTAssertEqual(app.blackoutReadiness(for: survivor)?.localizedDescription,
-                       "Full disconnect is pausing automation or awaiting verified recovery.")
+                       "Finish Full disconnect recovery first.")
         var result: DisplayOperationResult?
         app.hide(targetUUID: try XCTUnwrap(survivor.uuid)) { result = $0 }
         XCTAssertEqual(result?.succeeded, false)
@@ -258,7 +258,7 @@ final class DisplayDisconnectIntegrationTests: XCTestCase {
         XCTAssertEqual(request.timeout, 15)
         let consent = ExperimentalDisconnectControls.consentMessage(request)
         for phrase in [request.target.name, "Synthetic survivor", "at this Mac", "manual recovery", "15 seconds",
-                       "Automatic reconnect may fail", "other screen is usable", "Don’t unplug displays or change inputs"] {
+                       "Reconnect may fail", "Don’t unplug displays or change inputs"] {
             XCTAssertTrue(consent.contains(phrase), phrase)
         }
         XCTAssertLessThanOrEqual(consent.split(whereSeparator: { $0.isWhitespace }).count, 55)
@@ -740,7 +740,7 @@ final class DisplayDisconnectIntegrationTests: XCTestCase {
         failedApp.reconnectDisconnect()
         XCTAssertEqual(failedApp.disconnectStatus?.state, "needsAttention")
         XCTAssertTrue(defaults.bool(forKey: "disconnectRecoveryBlocked"))
-        XCTAssertTrue(failedApp.statusSummary.contains("waiting for verified disconnect recovery"))
+        XCTAssertTrue(failedApp.statusSummary.contains("waiting for reconnect"))
         XCTAssertEqual(launchLines(at: failureLog).filter { $0.hasPrefix("watch") }.count, 1,
                        "failed recovery must not rearm the existing helper")
 

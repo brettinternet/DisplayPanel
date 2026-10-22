@@ -417,7 +417,7 @@ final class ArrangementProtectionTests: XCTestCase {
                 state.modeFailure = outcome == "verification-failure"
                 state.modeOffered = true
                 try await waitFor { state.modeWrites == 1 }
-                XCTAssertTrue(model.modeResults[uuid]?.contains(state.modeFailure ? "did not verify" : "Restored and verified") == true)
+                XCTAssertTrue(model.modeResults[uuid]?.contains(state.modeFailure ? "did not verify" : "Restored the saved mode") == true)
                 if !state.modeFailure { XCTAssertEqual(state.modes[uuid]?.refreshRate, 240) }
                 model.displayParametersChanged()
                 try await Task.sleep(nanoseconds: 50_000_000)

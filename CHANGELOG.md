@@ -4,6 +4,7 @@
 
 - Let Show wait for an in-progress monitor input switch before restoring displays, without retrying failed writes.
 - Resume enabled automation after display wake or configuration changes without requiring a manual refresh.
+- Shorten Settings, menu, dialog and error copy, and show each display's Keep windows off status once in the menu.
 
 ## 0.8.1
 

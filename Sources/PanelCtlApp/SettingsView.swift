@@ -170,8 +170,7 @@ struct WindowMovePermissionRow: View {
                 .disabled(model.windowMovePermissionState == .granted)
         } label: {
             Text("Accessibility: \(status)")
-            Text("Required to move windows. Never requested automatically.")
-                .fixedSize(horizontal: false, vertical: true)
+            Text("Required to move windows.")
         }
     }
 }

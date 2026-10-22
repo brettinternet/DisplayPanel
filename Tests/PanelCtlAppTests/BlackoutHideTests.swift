@@ -57,7 +57,7 @@ final class BlackoutHideTests: XCTestCase {
         XCTAssertEqual(coverRequests.last, [202, 303], "several displays can be blacked out at once")
 
         // The last visible display stays visible.
-        let blocker = "PanelCtl keeps at least one display visible, so it won\u{2019}t hide this one."
+        let blocker = "PanelCtl won\u{2019}t hide the last visible display."
         XCTAssertEqual(tile(Self.mainUUID, model).actionBlocker, blocker)
         let hideMain = try XCTUnwrap(delegate.makeMenu().items.first { $0.title == "Hide Main" })
         XCTAssertFalse(hideMain.isEnabled, "a Hide that can't run is dimmed")
@@ -134,7 +134,7 @@ final class BlackoutHideTests: XCTestCase {
             XCTAssertEqual(showSource.subtitle, "Hidden")
         }
 
-        let lastVisible = "PanelCtl keeps at least one display visible, so it won\u{2019}t hide this one."
+        let lastVisible = "PanelCtl won\u{2019}t hide the last visible display."
         XCTAssertEqual(tile(Self.thirdUUID, model).actionBlocker, lastVisible,
                        "the removed target and blacked-out source do not count as visible")
         XCTAssertFalse(model.isBlackoutHidden(Self.thirdUUID))
@@ -291,7 +291,7 @@ final class BlackoutHideTests: XCTestCase {
 
         XCTAssertEqual(tile(Self.sideUUID, model).actionBlocker, "Wake this display to hide it.")
         XCTAssertEqual(hide(Self.mainUUID, model)?.message,
-                       "Couldn\u{2019}t hide. PanelCtl keeps at least one display visible, so it won\u{2019}t hide this one.",
+                       "Couldn\u{2019}t hide. PanelCtl won\u{2019}t hide the last visible display.",
                        "an asleep display doesn't count as visible")
 
         current = displays

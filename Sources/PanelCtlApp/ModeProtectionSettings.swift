@@ -45,7 +45,7 @@ struct ModeProtectionSettings: View {
             } header: {
                 Text("Display mode")
             } footer: {
-                SectionFooter("Restores this exact resolution, refresh rate and scale once after a reconnect or wake. Changes you make in System Settings stand.",
+                SectionFooter("Restores the saved resolution, refresh rate and scale after a reconnect or wake, not after your own changes.",
                               learnMore: AppModel.modeProtectionDocsURL)
             }
         }

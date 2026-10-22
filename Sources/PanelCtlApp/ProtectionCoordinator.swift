@@ -147,27 +147,27 @@ final class ProtectionCoordinator {
 
     func oneShotReadiness(for id: UUID) -> String? {
         if isShuttingDown {
-            return "PanelCtl is shutting down; the rule cannot be started."
+            return "PanelCtl is shutting down."
         }
         if retryInProgress || reconciliationInProgress {
-            return "Automation is starting, stopping or awaiting a display operation. Try again when it settles."
+            return "Automation is busy. Try again in a moment."
         }
         if oneShotRuleIDs.contains(id) {
-            return "This Automation rule is already running once. Try again when it finishes."
+            return "This rule is already running once."
         }
         if hasRunningOneShot {
-            return "Another one-shot Automation rule is running. Try again when it finishes."
+            return "Another rule is running once. Try again when it finishes."
         }
         if let service = services[id], !service.canStartOneShot {
             if service.hasActiveEffect {
-                return "This rule is already active. Restore it and wait for it to finish before running it once."
+                return "This rule is already active. Restore it first."
             }
-            return "This rule is starting, stopping or needs cleanup. Try again after it settles."
+            return "This rule is busy. Try again in a moment."
         }
         if let selectedRule = rules[id] {
             for (otherID, service) in services where otherID != id && service.hasActiveEffect {
                 guard let otherRule = rules[otherID], Self.rulesOverlap(selectedRule, otherRule) else { continue }
-                return "Another Automation rule is active on this rule’s selected displays. Restore it and wait for it to finish."
+                return "Another rule is active on these displays. Restore it first."
             }
         }
         return nil

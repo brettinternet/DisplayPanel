@@ -28,7 +28,7 @@ final class ExperimentalDisconnectTests: XCTestCase {
         XCTAssertFalse(production.canDisconnect)
         XCTAssertFalse(production.canReconnect)
         XCTAssertTrue(production.detail.contains("private macOS API"))
-        XCTAssertTrue(production.detail.contains("recovery must be verified before automation resumes"))
+        XCTAssertTrue(production.detail.contains("until the reconnect is verified"))
         for command in ["disconnect", "reconnect", "experimental-disconnect"] {
             let payload = Data("{\"protocol\":1,\"command\":\"\(command)\"}".utf8)
             XCTAssertThrowsError(try JSONDecoder().decode(AppControlRequest.self, from: payload))
@@ -48,7 +48,7 @@ final class ExperimentalDisconnectTests: XCTestCase {
             XCTAssertTrue(evidence.contains("/synthetic/recovery/current.json"))
         }
         let consent = presentation(.consent).detail
-        for scope in ["15-second", "another screen stays usable", "Automation pauses", "cancel resumes with a fresh countdown"] {
+        for scope in ["15 seconds", "another screen stays on"] {
             XCTAssertTrue(consent.contains(scope))
         }
         XCTAssertTrue(presentation(.refused).detail.contains("won\u{2019}t guess"))
@@ -63,8 +63,8 @@ final class ExperimentalDisconnectTests: XCTestCase {
         for elapsed in [15, 16, Int.max] {
             let value = presentation(.leased, elapsed: elapsed)
             XCTAssertEqual(value.remainingSeconds, 0)
-            XCTAssertTrue(value.detail.contains("Time\u{2019}s up"))
-            XCTAssertTrue(value.detail.contains("verify recovery"))
+            XCTAssertTrue(value.detail.contains("helper"))
+            XCTAssertTrue(value.detail.contains("verify the reconnect"))
         }
         for seconds in [Int.min, 0, 61, Int.max] {
             let value = presentation(.leased, seconds: seconds)

@@ -5,7 +5,7 @@ struct GeneralSettingsView: View {
     @ObservedObject var model: AppModel
 
     static let experimentalConsentTitle = "Turn on experimental features?"
-    static let experimentalConsentMessage = "Hide can then remove a display from the desktop by mirroring it, and switch the monitor\u{2019}s input. Windows move and resolution, refresh rate or HDR can change until Show. Show stays available if you turn this off."
+    static let experimentalConsentMessage = "Hide can remove a display from the desktop by mirroring it and switch the monitor\u{2019}s input. Windows, resolution, refresh rate and HDR may change until Show."
 
     var body: some View {
         Form {
@@ -19,7 +19,7 @@ struct GeneralSettingsView: View {
                     set: model.setShowMenuBarIcon
                 ))
             } footer: {
-                SectionFooter("With the menu bar icon hidden, open PanelCtl again to return here.")
+                SectionFooter("With the icon hidden, open PanelCtl again to return here.")
             }
 
             Section {
@@ -28,7 +28,7 @@ struct GeneralSettingsView: View {
                     set: model.setExperimentalFeaturesEnabled
                 )) {
                     Text("Experimental features")
-                    Text("Remove from desktop, input switching and private disconnect.")
+                    Text("Remove from desktop, input switching and Full disconnect.")
                 }
                 Link("Learn more", destination: AppModel.experimentalDocsURL)
             }
