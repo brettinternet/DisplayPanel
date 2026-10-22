@@ -97,6 +97,31 @@ final class TargetRestoreTransactionTests: XCTestCase {
         }
     }
 
+    func testFinalUnmirrorAnchorsMatchingSurvivorsAndMainLast() throws {
+        let baseline = try fixture("baseline")
+        // Only the last hidden target differs. The already-shown follower and
+        // saved main match, but macOS can move both when the mirror is cleared.
+        let before = try change(baseline, uuid: targetUUID) {
+            $0["mirrorUUID"] = sourceUUID
+            $0["active"] = false
+            $0["x"] = 0
+            $0["y"] = 0
+        }
+        var staged: [RecoveryDisplay] = []
+        RecoveryConfiguration.stageRestoreOrigins(baseline, before: before) { staged.append($0) }
+        XCTAssertEqual(Set(staged.map(\.uuid)), Set(baseline.displays.map(\.uuid)))
+        XCTAssertEqual(staged.count, baseline.displays.count)
+        XCTAssertEqual(staged.last?.uuid, sourceUUID, "explicitly reassert the original main last")
+        XCTAssertTrue(staged.allSatisfy { baseline.displays.contains($0) }, "request exact saved origins")
+
+        staged = []
+        RecoveryConfiguration.stageRestoreOrigins(baseline, before: baseline) { staged.append($0) }
+        XCTAssertTrue(staged.isEmpty, "unchanged topology and layout need no origin writes")
+        let shifted = try change(baseline, uuid: followerUUID) { $0["y"] = 0 }
+        RecoveryConfiguration.stageRestoreOrigins(baseline, before: shifted) { staged.append($0) }
+        XCTAssertEqual(staged.map(\.uuid), [followerUUID], "layout-only repair remains minimal")
+    }
+
     func testStagingErrorsDriftAndCompletionConsumptionNeverRetry() throws {
         let baseline = try fixture("baseline")
         let before = try fixture("bothHidden")

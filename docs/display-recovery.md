@@ -63,6 +63,10 @@ panelctl recovery restore --display UUID
 Each removed display has its own entry. Restoring one leaves the others
 removed. While others are removed, macOS may place it slightly off its saved
 position; the last restore verifies the exact original layout and main display.
+When that full restore changes mirroring, it explicitly stages every saved origin,
+with the saved main last: macOS can move even initially matching displays during
+unmirroring. This safeguard has offline regression coverage; live two-monitor
+return validation remains outstanding.
 A display that needs attention blocks new removals until it's fixed.
 
 ## Sleep, wake and reboot

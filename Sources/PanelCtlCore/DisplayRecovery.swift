@@ -292,13 +292,8 @@ enum RecoveryConfiguration {
         for (display, mode) in zip(snapshot.displays, modes) where current[display.uuid]!.mode != display.mode {
             try checked(CGConfigureDisplayWithDisplayMode(config, display.id, mode, nil), "restore mode")
         }
-        // Avoid resetting unchanged modes/mirror groups, and restore the main
-        // display's origin last (CoreGraphics uses origin 0,0 to select it).
-        for display in snapshot.displays.sorted(by: { !$0.main && $1.main }) {
-            let now = current[display.uuid]!
-            if display.x != now.x || display.y != now.y || display.main != now.main {
-                try checked(CGConfigureDisplayOrigin(config, display.id, display.x, display.y), "restore origin")
-            }
+        try stageRestoreOrigins(snapshot, before: before) { display in
+            try checked(CGConfigureDisplayOrigin(config, display.id, display.x, display.y), "restore origin")
         }
         for display in snapshot.displays where current[display.uuid]!.mirrorUUID != display.mirrorUUID {
             if let mirror = display.mirrorUUID {
@@ -315,6 +310,21 @@ enum RecoveryConfiguration {
         let result = CGCompleteDisplayConfiguration(config, .forSession)
         completed = true
         try checked(result, "commit configuration")
+    }
+
+    /// Unmirroring can move desktops that matched before the transaction.
+    /// Anchor the complete layout on mirror changes, with the saved main last
+    /// (CoreGraphics uses origin 0,0 to select it). Otherwise keep minimal writes.
+    static func stageRestoreOrigins(_ snapshot: RecoverySnapshot, before: RecoverySnapshot,
+                                    origin: (RecoveryDisplay) throws -> Void) rethrows {
+        let current = Dictionary(uniqueKeysWithValues: before.displays.map { ($0.uuid, $0) })
+        let mirrorsChanged = snapshot.displays.contains { current[$0.uuid]!.mirrorUUID != $0.mirrorUUID }
+        for display in snapshot.displays.sorted(by: { !$0.main && $1.main }) {
+            let now = current[display.uuid]!
+            if mirrorsChanged || display.x != now.x || display.y != now.y || display.main != now.main {
+                try origin(display)
+            }
+        }
     }
 
     /// Restore one target, requesting its saved origin. Remaining mirror
