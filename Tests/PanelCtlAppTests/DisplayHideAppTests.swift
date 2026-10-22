@@ -1494,6 +1494,7 @@ final class DisplayHideAppTests: XCTestCase {
             XCTAssertTrue(model.protectionQuiescenceFailure?.localizedCaseInsensitiveContains("cleanup") == true)
             XCTAssertFalse(result.succeeded)
             XCTAssertTrue(result.message.contains("automation didn’t confirm it stopped"), result.message)
+            XCTAssertTrue(result.automationStopUnconfirmed, "rule review relies on this flag, not the message")
         }
     }
 

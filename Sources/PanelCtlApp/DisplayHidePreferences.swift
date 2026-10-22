@@ -193,6 +193,8 @@ struct DisplayOperationResult: Equatable {
     /// Input evidence, also reported to scripts.
     let inputOutcome: DisplayInputOutcome?
     let inputNeedsAttention: Bool
+    /// Hide or Show didn't start because automation didn't confirm it stopped.
+    var automationStopUnconfirmed = false
     /// A wake or re-link re-hide failed and the layout needs fixing in System Settings.
     var offersDisplaysSettings = false
     /// Acknowledges presentation only; input evidence remains available to scripts.
@@ -289,16 +291,23 @@ enum DisplayHideOperation: Equatable {
 enum DisplayHideError: Error, LocalizedError, Equatable {
     case unavailable(String)
     case identityChanged(String)
-    case recoveryBlocksHide(String)
-    case recoveryBlocksAction(String)
+    /// Display recovery must be resolved first; reported as `recovery-needed`.
+    case recoveryRequired(String)
+    /// Another operation or state blocks this one; reported as `refused` or `busy`.
+    case blocked(String)
     case actionInProgress
     case protectionCleanup(String)
     case sleeping
 
+    var needsRecovery: Bool {
+        if case .recoveryRequired = self { return true }
+        return false
+    }
+
     var errorDescription: String? {
         switch self {
         case .unavailable(let message), .identityChanged(let message),
-             .recoveryBlocksHide(let message), .recoveryBlocksAction(let message),
+             .recoveryRequired(let message), .blocked(let message),
              .protectionCleanup(let message):
             return message
         case .actionInProgress:

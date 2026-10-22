@@ -1679,11 +1679,13 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    /// Why an Action step can't run. The window-move reason is decided with the
+    /// Why an Action step can't run. The typed reason is decided with the
     /// blocker, never parsed back out of its message.
     struct DisplayActionStepBlocker {
         let message: String
         var windowMoveReason: AppControlWindowMoveReason = .destinationUnavailable
+        /// Reported as `recovery-needed` rather than `refused`.
+        var needsRecovery: Bool { windowMoveReason == .recoveryRequired }
     }
 
     private func displayActionEnvironmentBlocker(prefix: String, actionLeaseID: UUID?,
@@ -1725,9 +1727,13 @@ final class AppModel: ObservableObject {
         func blocked(_ text: String, _ reason: AppControlWindowMoveReason = .destinationUnavailable) -> DisplayActionStepBlocker {
             DisplayActionStepBlocker(message: prefix + text, windowMoveReason: reason)
         }
+        func blocked(_ error: Error) -> DisplayActionStepBlocker {
+            blocked(error.localizedDescription,
+                    (error as? DisplayHideError)?.needsRecovery == true ? .recoveryRequired : .destinationUnavailable)
+        }
         if step.effect == .restoreArrangement {
             if let projectedRemovals, !projectedRemovals.isEmpty {
-                return blocked("An earlier Remove step leaves an unresolved journal.")
+                return blocked("An earlier Remove step leaves an unresolved journal.", .recoveryRequired)
             }
             if let projectedBlackouts, projectedBlackouts != Set(blackoutHiddenDisplays.keys) {
                 return blocked("An earlier step changes the visible set. Restore arrangement before Hide or Show.")
@@ -1799,36 +1805,36 @@ final class AppModel: ObservableObject {
             if hiddenRemoved.contains(uuid) {
                 if isRemovedDisplay(uuid) {
                     do { _ = try makeShowRequest(targetUUID: target.uuid, actionLeaseID: actionLeaseID, refreshStatus: false) }
-                    catch { return blocked(error.localizedDescription) }
+                    catch { return blocked(error) }
                 } else if projectedRemovals?.contains(uuid) != true {
-                    return blocked("The removed display is not verified for Show. Review it in Displays.")
+                    return blocked("The removed display is not verified for Show. Review it in Displays.", .recoveryRequired)
                 }
                 return nil
             }
             if let problem = displayRecoveryProblem {
-                return blocked(problem)
+                return blocked(problem, .recoveryRequired)
             }
             return nil
         case .blackOut:
             if hiddenRemoved.contains(uuid) { return blocked("Already hidden by Remove from desktop. Show it first.") }
             if let problem = displayRecoveryProblem {
-                return blocked("Display recovery needs attention: \(problem)")
+                return blocked("Display recovery needs attention: \(problem)", .recoveryRequired)
             }
             if let blocker = blackoutReadiness(
                 for: display, projectedBlackouts: hiddenBlackout, projectedRemovals: hiddenRemoved,
                 actionLeaseID: actionLeaseID
             ) {
-                return blocked(blocker.localizedDescription)
+                return blocked(blocker)
             }
             return nil
         case .removeFromDesktop:
             if hiddenBlackout.contains(uuid) { return blocked("Already hidden by Black out. Show it first.") }
             if let problem = displayRecoveryProblem {
-                return blocked("Display recovery needs attention: \(problem)")
+                return blocked("Display recovery needs attention: \(problem)", .recoveryRequired)
             }
             if hiddenRemoved.contains(uuid) {
                 guard isVerifiedRemovedDisplay(target.uuid) else {
-                    return blocked("Display recovery isn’t verified. Review it in Displays.")
+                    return blocked("Display recovery isn’t verified. Review it in Displays.", .recoveryRequired)
                 }
                 guard let configuration = hideConfiguration(for: target.uuid) else {
                     return blocked(Self.removalSetupBlocker)
@@ -1838,7 +1844,7 @@ final class AppModel: ObservableObject {
                     projectedRemovals: hiddenRemoved, projectedSources: projectedSources,
                     actionLeaseID: actionLeaseID, allowVerifiedRemovalNoOp: true
                 ) {
-                    return blocked(blocker.localizedDescription)
+                    return blocked(blocker)
                 }
                 return nil
             }
@@ -1857,7 +1863,7 @@ final class AppModel: ObservableObject {
                 projectedSources: projectedSources,
                 actionLeaseID: actionLeaseID
             ) {
-                return blocked(blocker.localizedDescription)
+                return blocked(blocker)
             }
             return nil
         }
@@ -2094,14 +2100,10 @@ final class AppModel: ObservableObject {
         if displayRecoveryProblem != nil { return true }
         for uuid in rule.settings.selectedDisplayUUIDs {
             if isRemovedDisplay(uuid) || isBlackoutHidden(uuid) { return true }
-            if displayResults[uuid.lowercased()]?.message.localizedCaseInsensitiveContains(
-                "couldn’t confirm automation stopped"
-            ) == true { return true }
+            if displayResults[uuid.lowercased()]?.automationStopUnconfirmed == true { return true }
         }
         if rule.settings.allDisplays, protectionQuiescenceFailure != nil {
-            return displayResults.values.contains {
-                $0.message.localizedCaseInsensitiveContains("couldn’t confirm automation stopped")
-            }
+            return displayResults.values.contains(where: \.automationStopUnconfirmed)
         }
         return false
     }
@@ -2110,9 +2112,7 @@ final class AppModel: ObservableObject {
         let reviewable = handoffStatus?.removals.filter(\.isUnresolved).map { $0.target.uuid } ?? []
         for uuid in rule.settings.selectedDisplayUUIDs.sorted() {
             if reviewable.contains(where: { $0.caseInsensitiveCompare(uuid) == .orderedSame }) ||
-                isBlackoutHidden(uuid) || displayResults[uuid.lowercased()]?.message.localizedCaseInsensitiveContains(
-                    "couldn’t confirm automation stopped"
-                ) == true {
+                isBlackoutHidden(uuid) || displayResults[uuid.lowercased()]?.automationStopUnconfirmed == true {
                 return uuid
             }
         }
@@ -2272,25 +2272,25 @@ final class AppModel: ObservableObject {
         allowVerifiedRemovalNoOp: Bool = false
     ) -> DisplayHideError? {
         if runningDisplayAction != nil, runningDisplayAction?.id != actionLeaseID {
-            return .recoveryBlocksAction(displayActionBusyMessage)
+            return .blocked(displayActionBusyMessage)
         }
         if controlRunningRule != nil {
-            return .recoveryBlocksAction(protectionRuleBusyMessage)
+            return .blocked(protectionRuleBusyMessage)
         }
         if disconnectAutomationPaused || disconnectInspectionFailure != nil {
-            return .recoveryBlocksAction(Self.fullDisconnectBlocker)
+            return .recoveryRequired(Self.fullDisconnectBlocker)
         }
         if let failure = handoffInspectionFailure {
-            return .recoveryBlocksHide("Couldn’t check display recovery: \(failure)")
+            return .recoveryRequired("Couldn’t check display recovery: \(failure)")
         }
         guard let status = handoffStatus else {
-            return .recoveryBlocksHide("Display recovery status is unknown. Try again in a moment.")
+            return .recoveryRequired("Display recovery status is unknown. Try again in a moment.")
         }
         if status.state == .busy {
-            return .recoveryBlocksHide("Another display operation is running. Try again in a moment.")
+            return .blocked("Another display operation is running. Try again in a moment.")
         }
         if status.hasUnresolvedJournal, status.state != .hidden {
-            return .recoveryBlocksHide("Display recovery needs attention. Resolve it before starting another removal.")
+            return .recoveryRequired("Display recovery needs attention. Resolve it before starting another removal.")
         }
         if !allowingCurrentOperation, hideOperation.isBusy { return .actionInProgress }
         if displayLifecycleTransitioning { return .sleeping }
@@ -2439,15 +2439,15 @@ final class AppModel: ObservableObject {
     ) -> DisplayHideError? {
         if hideOperation.isBusy { return .actionInProgress }
         if runningDisplayAction != nil, runningDisplayAction?.id != actionLeaseID {
-            return .recoveryBlocksAction(displayActionBusyMessage)
+            return .blocked(displayActionBusyMessage)
         }
         if controlRunningRule != nil {
-            return .recoveryBlocksAction(protectionRuleBusyMessage)
+            return .blocked(protectionRuleBusyMessage)
         }
         // Disconnect preparation, consent and recovery exclude other display changes.
         if disconnectAutomationPaused || disconnectInspectionFailure != nil ||
             disconnectLease != nil || disconnectStatus?.resolved == false {
-            return .unavailable(Self.fullDisconnectBlocker)
+            return .recoveryRequired(Self.fullDisconnectBlocker)
         }
         if displayLifecycleTransitioning { return .sleeping }
         guard let uuid = display.uuid, UUID(uuidString: uuid) != nil,
@@ -2462,7 +2462,7 @@ final class AppModel: ObservableObject {
         let verifiedSource = journalVerifiedHiddenMirrorSources.contains { $0.id == display.id }
         if isDisplayMirrored(display.id), !verifiedSource {
             if isMirrorSource(uuid) {
-                return .unavailable("A removed display mirrors onto this one and needs recovery.")
+                return .recoveryRequired("A removed display mirrors onto this one and needs recovery.")
             }
             return .unavailable("macOS is mirroring this display. Turn off mirroring in System Settings → Displays first.")
         }
@@ -2605,7 +2605,7 @@ final class AppModel: ObservableObject {
         completion: ((DisplayOperationResult) -> Void)?
     ) {
         guard runningDisplayAction == nil || runningDisplayAction?.id == actionLeaseID else {
-            refuse(.hide, targetUUID: targetUUID, error: DisplayHideError.recoveryBlocksAction(displayActionBusyMessage), completion: completion)
+            refuse(.hide, targetUUID: targetUUID, error: DisplayHideError.blocked(displayActionBusyMessage), completion: completion)
             return
         }
         // Menu and Settings actions may arrive before a topology notification.
@@ -2843,7 +2843,7 @@ final class AppModel: ObservableObject {
         return "\(finished) finished while this request waited. Check the displays, then try again."
     }
 
-    private static let automationStopping = DisplayHideError.recoveryBlocksAction(
+    private static let automationStopping = DisplayHideError.blocked(
         "PanelCtl is still stopping automation. Try again in a moment."
     )
 
@@ -2851,13 +2851,13 @@ final class AppModel: ObservableObject {
     private func showWait(actionLeaseID: UUID? = nil, allowingInputReturnWait: Bool = false) -> DisplayHideError? {
         if hideOperation.isBusy { return .actionInProgress }
         if runningDisplayAction != nil, runningDisplayAction?.id != actionLeaseID {
-            return .recoveryBlocksAction(displayActionBusyMessage)
+            return .blocked(displayActionBusyMessage)
         }
         if controlRunningRule != nil {
-            return .recoveryBlocksAction(protectionRuleBusyMessage)
+            return .blocked(protectionRuleBusyMessage)
         }
         if disconnectAutomationPaused || disconnectInspectionFailure != nil {
-            return .recoveryBlocksAction(Self.fullDisconnectBlocker)
+            return .recoveryRequired(Self.fullDisconnectBlocker)
         }
         if displayLifecycleTransitioning, !allowingInputReturnWait { return .sleeping }
         if protectionQuiescencePending { return Self.automationStopping }
@@ -4008,7 +4008,7 @@ final class AppModel: ObservableObject {
                 expectedTarget: targetSnapshot
             ) {
                 let outcome: AppControlOutcome = hideOperation.isBusy || handoffStatus?.state == .busy ? .busy
-                    : blocker.message.localizedCaseInsensitiveContains("recovery") || blocker.message.localizedCaseInsensitiveContains("journal") ? .recoveryNeeded : .refused
+                    : blocker.needsRecovery ? .recoveryNeeded : .refused
                 let moveResult = step.effect == .moveWindows
                     ? AppControlWindowMoveResult(refusalReason: blocker.windowMoveReason) : nil
                 refuse(outcome, blocker.message, for: action, atStep: offset, windowMove: moveResult)
@@ -4237,7 +4237,7 @@ final class AppModel: ObservableObject {
                 expectedTarget: expectedTarget
             ) {
                 let outcome: AppControlOutcome = self.displayLifecycleTransitioning ? .refused
-                    : blocker.message.localizedCaseInsensitiveContains("recovery") ? .recoveryNeeded : .refused
+                    : blocker.needsRecovery ? .recoveryNeeded : .refused
                 stepResults.append(AppControlActionStepResult(index: offset + 1, targetUUID: uuid,
                     effect: step.effect.rawValue, outcome: outcome,
                     desktopSummary: action.steps.count > 1 ? Self.boundedActionStepText(blocker.message) : Self.bounded(blocker.message),
@@ -4578,12 +4578,12 @@ final class AppModel: ObservableObject {
                 do {
                     guard succeeded else {
                         self.protectionQuiescenceFailure = message ?? Self.automationCleanupUnverified
-                        throw DisplayHideError.recoveryBlocksAction(self.protectionQuiescenceFailure!)
+                        throw DisplayHideError.protectionCleanup(self.protectionQuiescenceFailure!)
                     }
                     guard !self.isShuttingDown, !self.sessionRecoveryInterrupted,
                           !self.displayLifecycleTransitioning,
                           !self.disconnectAutomationPaused else {
-                        throw DisplayHideError.recoveryBlocksAction("Recovery was cancelled by a lifecycle change. Check Again before trying again.")
+                        throw DisplayHideError.recoveryRequired("Recovery was cancelled by a lifecycle change. Check Again before trying again.")
                     }
                     try self.recoverDisplaySession(confirmation, hideAgain)
                     self.displays = self.displayProvider()
@@ -4593,10 +4593,10 @@ final class AppModel: ObservableObject {
                             let removal = self.handoffStatus?.removal(for: uuid)
                             return removal?.state == "mirrored" && removal?.topologyVerified == true
                         }) else {
-                            throw DisplayHideError.recoveryBlocksAction("The new Hide could not be verified. Inspect recovery before continuing.")
+                            throw DisplayHideError.recoveryRequired("The new Hide could not be verified. Inspect recovery before continuing.")
                         }
                     } else if self.handoffStatus?.hasUnresolvedJournal != false || self.handoffInspectionFailure != nil {
-                        throw DisplayHideError.recoveryBlocksAction("The new desktop could not be verified. Inspect recovery before continuing.")
+                        throw DisplayHideError.recoveryRequired("The new desktop could not be verified. Inspect recovery before continuing.")
                     }
                     self.sessionRecoveryResult = hideAgain
                         ? "Hidden again. Inputs weren’t switched."
@@ -4627,7 +4627,7 @@ final class AppModel: ObservableObject {
             return
         }
         guard runningDisplayAction == nil || runningDisplayAction?.id == actionLeaseID else {
-            refuse(.hide, targetUUID: targetUUID, error: DisplayHideError.recoveryBlocksAction(displayActionBusyMessage), completion: completion)
+            refuse(.hide, targetUUID: targetUUID, error: DisplayHideError.blocked(displayActionBusyMessage), completion: completion)
             return
         }
         cancelPendingSleepHideResume()
@@ -4711,16 +4711,17 @@ final class AppModel: ObservableObject {
         guard handoffInspectionFailure == nil,
               let handoffStatus,
               handoffStatus.state == .hidden || handoffStatus.state == .recovery else {
-            throw DisplayHideError.recoveryBlocksAction(
-                handoffInspectionFailure ?? handoffStatus?.reason ?? "No display is hidden by PanelCtl."
-            )
+            let reason = handoffInspectionFailure ?? handoffStatus?.reason ?? "No display is hidden by PanelCtl."
+            let state = handoffStatus?.state
+            throw state == DisplayHandoffStatus.State.none || state == .busy
+                ? DisplayHideError.blocked(reason) : DisplayHideError.recoveryRequired(reason)
         }
         guard let target = targetUUID ?? handoffStatus.target?.uuid,
               let removal = handoffStatus.removal(for: target) else {
-            throw DisplayHideError.recoveryBlocksAction("This display isn’t hidden by PanelCtl.")
+            throw DisplayHideError.blocked("This display isn’t hidden by PanelCtl.")
         }
         guard removal.canShow || canAttemptGuardedRecoveryShow(removal) else {
-            throw DisplayHideError.recoveryBlocksAction(
+            throw DisplayHideError.recoveryRequired(
                 removal.reason ?? "PanelCtl can’t restore this display right now."
             )
         }
@@ -4757,7 +4758,7 @@ final class AppModel: ObservableObject {
             return
         }
         guard runningDisplayAction == nil || runningDisplayAction?.id == actionLeaseID else {
-            refuse(.show, targetUUID: targetUUID, error: DisplayHideError.recoveryBlocksAction(displayActionBusyMessage), completion: completion)
+            refuse(.show, targetUUID: targetUUID, error: DisplayHideError.blocked(displayActionBusyMessage), completion: completion)
             return
         }
         if canWaitForInputReturnShow([targetUUID]), showWait(allowingInputReturnWait: true) == nil {
@@ -4791,7 +4792,7 @@ final class AppModel: ObservableObject {
                 refreshStatus: actionLeaseID == nil
             )
             guard request.targetUUID.caseInsensitiveCompare(targetUUID) == .orderedSame else {
-                throw DisplayHideError.recoveryBlocksAction("This display isn’t hidden by PanelCtl.")
+                throw DisplayHideError.blocked("This display isn’t hidden by PanelCtl.")
             }
         } catch {
             refuse(.show, targetUUID: targetUUID, error: error, completion: completion)
@@ -5103,7 +5104,7 @@ final class AppModel: ObservableObject {
             if expired {
                 error = .unavailable("Show stopped: displays did not settle within 15 seconds. Try again once they settle.")
             } else if identityChanged || !unchanged {
-                error = .unavailable("Show stopped: the captured display identities or recovery journal changed. Inspect recovery before trying again.")
+                error = .recoveryRequired("Show stopped: the captured display identities or recovery journal changed. Inspect recovery before trying again.")
             } else if !stable || !ready || isShuttingDown || runningActionInterrupted {
                 error = .unavailable("Show was interrupted before displays settled. Try again once they settle.")
             } else {
@@ -6158,7 +6159,8 @@ final class AppModel: ObservableObject {
             reconcileProtection()
             finish(.hide, targetUUID: request.target.uuid, succeeded: false,
                    message: "Couldn’t hide: automation didn’t confirm it stopped. \(failure)",
-                   input: notAttempted, inputWarning: request.awayInputWarning, completion: completion)
+                   input: notAttempted, inputWarning: request.awayInputWarning,
+                   automationStopUnconfirmed: true, completion: completion)
             return
         }
         protectionQuiescenceFailure = nil
@@ -6191,7 +6193,7 @@ final class AppModel: ObservableObject {
             displays = displayProvider()
             refreshHandoffStatus()
             guard handoffStatus?.state == .hidden else {
-                throw DisplayHideError.recoveryBlocksAction(
+                throw DisplayHideError.recoveryRequired(
                     "PanelCtl couldn’t confirm the display is hidden. Check its recovery details."
                 )
             }
@@ -6222,16 +6224,17 @@ final class AppModel: ObservableObject {
             state: request.returnInput == nil ? .notRequested : .notAttempted,
             requestedInput: request.returnInput
         )
-        func notStarted(_ reason: String) {
+        func notStarted(_ reason: String, automationStopUnconfirmed: Bool = false) {
             hideOperation = .idle
             reconcileProtection()
             finish(.show, targetUUID: targetUUID, succeeded: false, message: "Couldn’t show. \(reason)",
-                   input: notAttempted, inputWarning: request.returnInputWarning, completion: completion)
+                   input: notAttempted, inputWarning: request.returnInputWarning,
+                   automationStopUnconfirmed: automationStopUnconfirmed, completion: completion)
         }
         guard cleanupSucceeded else {
             let failure = cleanupFailure ?? Self.automationCleanupUnverified
             protectionQuiescenceFailure = failure
-            notStarted("Couldn’t show: automation didn’t confirm it stopped. \(failure)")
+            notStarted("Automation didn’t confirm it stopped. \(failure)", automationStopUnconfirmed: true)
             return
         }
         protectionQuiescenceFailure = nil
@@ -6265,7 +6268,7 @@ final class AppModel: ObservableObject {
             displays = displayProvider()
             refreshHandoffStatus()
             guard let currentStatus = handoffStatus, handoffInspectionFailure == nil else {
-                throw DisplayHideError.recoveryBlocksAction(
+                throw DisplayHideError.recoveryRequired(
                     handoffInspectionFailure ?? "PanelCtl couldn’t confirm this display is back. Check its recovery details."
                 )
             }
@@ -6277,7 +6280,7 @@ final class AppModel: ObservableObject {
             let sameSession = currentStatus.journalID == request.status.journalID || !currentStatus.hasUnresolvedJournal
             guard !selectedStillRemoved, sameSession,
                   (!currentStatus.hasUnresolvedJournal || selectedRestored) else {
-                throw DisplayHideError.recoveryBlocksAction(
+                throw DisplayHideError.recoveryRequired(
                     currentStatus.reason ?? "PanelCtl couldn’t confirm this display is back. Check its recovery details."
                 )
             }
@@ -6303,6 +6306,7 @@ final class AppModel: ObservableObject {
         message: String,
         input: DisplayInputOutcome,
         inputWarning: String?,
+        automationStopUnconfirmed: Bool = false,
         completion: ((DisplayOperationResult) -> Void)?
     ) {
         let line = inputResultLine(input, warning: inputWarning)
@@ -6312,7 +6316,8 @@ final class AppModel: ObservableObject {
             message: message,
             inputMessage: line?.text,
             inputOutcome: input,
-            inputNeedsAttention: line?.needsAttention ?? false
+            inputNeedsAttention: line?.needsAttention ?? false,
+            automationStopUnconfirmed: automationStopUnconfirmed
         )
         displayResults[targetUUID.lowercased()] = result
         lastHideOrShowFinished = .now
