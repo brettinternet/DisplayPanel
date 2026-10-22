@@ -17,7 +17,7 @@ struct ExperimentalDisconnectControls: View {
     var body: some View {
         Section {
             if let failure = model.disconnectInspectionFailure {
-                Text("Can\u{2019}t read disconnect recovery. Automation stays paused.")
+                Text("Can’t read disconnect recovery. Automation stays paused.")
                 Text("\(model.disconnectJournalPath)").font(.caption).textSelection(.enabled)
                 Text(failure).foregroundStyle(.orange).textSelection(.enabled)
                 Button("Reconnect…") {}.disabled(true)
@@ -48,7 +48,7 @@ struct ExperimentalDisconnectControls: View {
             }
             if model.disconnectPreparationPending {
                 HStack(alignment: .center, spacing: 12) {
-                    Text("Stopping automation\u{2026}")
+                    Text("Stopping automation…")
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
@@ -119,15 +119,15 @@ struct ExperimentalDisconnectControls: View {
               let display = model.displays.first(where: { $0.uuid?.caseInsensitiveCompare(targetUUID) == .orderedSame }) else {
             return "Select a connected display with a stable identity."
         }
-        if display.builtin { return "Built-in displays can\u{2019}t be disconnected." }
-        if display.main { return "The main display can\u{2019}t be disconnected." }
+        if display.builtin { return "Built-in displays can’t be disconnected." }
+        if display.main { return "The main display can’t be disconnected." }
         if !display.active || !display.online { return "Select an active, connected display." }
         return nil
     }
 
     /// Consent is one-use and per operation; it confirms what PanelCtl can't read.
     static func consentMessage(_ request: DisplayDisconnectRequest) -> String {
-        "\(request.target.name) disconnects for 15 seconds; \(request.survivor.name) stays on. Reconnect may fail and need manual recovery.\n\nContinue only if you\u{2019}re at this Mac. Don’t unplug displays or change inputs meanwhile."
+        "\(request.target.name) disconnects for 15 seconds; \(request.survivor.name) stays on. Reconnect may fail and need manual recovery.\n\nContinue only if you’re at this Mac. Don’t unplug displays or change inputs meanwhile."
     }
 
     private func presentation(_ status: DisplayDisconnectStatus) -> ExperimentalDisconnectPresentation? {

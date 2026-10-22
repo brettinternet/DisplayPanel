@@ -98,7 +98,7 @@ struct DisplaySettingsView: View {
             if let result = model.displayResults[tile.id] {
                 if !result.succeeded {
                     resultLabel(result.message, attention: true)
-                    if result.message.hasPrefix("PanelCtl didn’t re-hide this display after waking.") {
+                    if result.offersDisplaysSettings {
                         Button("Open Displays Settings") { openDisplaysSettings() }
                     }
                 }
@@ -435,7 +435,7 @@ struct DisplaySettingsView: View {
                 }
             ), prompt: Text("0x1B"))
             if DDCInput.parseValue(text.trimmingCharacters(in: .whitespaces)) == nil {
-                Text("Enter 1–255, like 27 or 0x1B. Until then, Hide doesn\u{2019}t switch inputs.")
+                Text("Enter 1–255, like 27 or 0x1B. Until then, Hide doesn’t switch inputs.")
                     .font(.caption)
                     .foregroundStyle(text.isEmpty ? Color.secondary : Color.orange)
             }
@@ -495,7 +495,7 @@ struct DisplaySettingsView: View {
         if isMain {
             lines.append(mainDisplayNote)
         } else {
-            lines.append("Windows move off this display while it\u{2019}s hidden.")
+            lines.append("Windows move off this display while it’s hidden.")
         }
         return lines.joined(separator: " ")
     }

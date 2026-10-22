@@ -5,6 +5,7 @@
 - Let Show wait for an in-progress monitor input switch before restoring displays, without retrying failed writes.
 - Resume enabled automation after display wake or configuration changes without requiring a manual refresh.
 - Shorten Settings, menu, dialog and error copy, and show each display's Keep windows off status once in the menu.
+- Fix Move windows refusal reasons reported to scripts, and offer Open Displays Settings after a failed re-hide on monitor re-link.
 
 ## 0.8.1
 

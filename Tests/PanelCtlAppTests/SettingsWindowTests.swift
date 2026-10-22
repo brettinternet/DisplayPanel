@@ -1141,7 +1141,7 @@ final class SettingsWindowTests: XCTestCase {
         let long = String(repeating: "Display recovery needs attention before automation resumes. ", count: 6)
         let lines = AppDelegate.wrap(long, width: 240, font: font, maxLines: 3)
         XCTAssertEqual(lines.count, 3)
-        XCTAssertTrue(lines[2].hasSuffix("\u{2026}"))
+        XCTAssertTrue(lines[2].hasSuffix("…"))
         XCTAssertTrue(lines.allSatisfy { ($0 as NSString).size(withAttributes: [.font: font]).width <= 240 })
         XCTAssertEqual(AppDelegate.wrap("Short", width: 240, font: font, maxLines: 3), ["Short"])
 
@@ -1571,7 +1571,7 @@ final class SettingsWindowTests: XCTestCase {
             source: hiddenStatus().source,
             journalPath: Self.journalPath,
             journalID: "settings-fixture",
-            reason: "The display\u{2019}s mode changed since it was hidden. Reconnect it as it was, then try again.",
+            reason: "The display’s mode changed since it was hidden. Reconnect it as it was, then try again.",
             recoveryCommand: "panelctl recovery enable --journal \(Self.journalPath)"
         )
         // A `recovery capture` journal names no display, so Displays shows it above them.
@@ -1666,7 +1666,7 @@ final class SettingsWindowTests: XCTestCase {
                             state: .verified, requestedInput: input, observedInput: input,
                             recoveryCommand: "panelctl ddc-input --display '\(Self.sideUUID)' --set 0x0F"
                         ),
-                        message: "Mirroring failed, so the display layout wasn\u{2019}t changed."
+                        message: "Mirroring failed, so the display layout wasn’t changed."
                     )
                 },
                 checkDDCInput: {

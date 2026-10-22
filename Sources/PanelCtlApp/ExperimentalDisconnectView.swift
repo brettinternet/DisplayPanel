@@ -63,13 +63,13 @@ struct ExperimentalDisconnectPresentation: Equatable {
             }
             return "Reconnects in \(remainingSeconds ?? 0) seconds."
         case .refused:
-            return "The display\u{2019}s identity is ambiguous, so PanelCtl won\u{2019}t guess."
+            return "The display’s identity is ambiguous, so PanelCtl won’t guess."
         case .helperFailed:
             return "Reconnect, or check recovery details. The recovery journal is kept."
         case .watchdogRecovery:
             return "Reconnect requested. Not verified yet."
         case .reconnectFailed:
-            return "PanelCtl couldn\u{2019}t verify the reconnect. The recovery journal is kept."
+            return "PanelCtl couldn’t verify the reconnect. The recovery journal is kept."
         }
     }
 

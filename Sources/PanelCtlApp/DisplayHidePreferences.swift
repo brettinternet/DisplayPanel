@@ -193,6 +193,8 @@ struct DisplayOperationResult: Equatable {
     /// Input evidence, also reported to scripts.
     let inputOutcome: DisplayInputOutcome?
     let inputNeedsAttention: Bool
+    /// A wake or re-link re-hide failed and the layout needs fixing in System Settings.
+    var offersDisplaysSettings = false
     /// Acknowledges presentation only; input evidence remains available to scripts.
     var inputWarningDismissed = false
 

@@ -136,7 +136,7 @@ final class ProtectionService {
     private let cleanupRuleID: UUID?
     private var cleanupRetryCompletion: ((Bool, String?) -> Void)?
     private var cleanupOnly = false
-    private static let unknownCleanup = "Automation cleanup couldn\u{2019}t confirm brightness was restored."
+    private static let unknownCleanup = "Automation cleanup couldn’t confirm brightness was restored."
     private var shutdownStartedAt: TimeInterval?
 
     init(
@@ -286,7 +286,7 @@ final class ProtectionService {
     ) {
         guard let process, process.isRunning, canReceiveControl, state != .stopping,
               let lifetimeWriteHandle else {
-            completion(false, "The managed blackout helper is not ready to acknowledge window relocation suppression.")
+            completion(false, "An automation blackout isn’t ready yet.")
             return
         }
         pendingRelocationAcknowledgements[control.token] = completion
@@ -735,7 +735,7 @@ final class ProtectionService {
         blackedOutDisplayIDs = []
         let relocationWaiters = Array(pendingRelocationAcknowledgements.values)
         pendingRelocationAcknowledgements.removeAll()
-        relocationWaiters.forEach { $0(false, "The managed blackout helper stopped before acknowledging relocation suppression.") }
+        relocationWaiters.forEach { $0(false, "An automation blackout stopped during the move.") }
         let windowOnlyOverlay = Self.isHardwareFreeHiddenMirrorOverlay(arguments: terminatedArguments)
         if cleanupOnly {
             let succeeded = cleanupResultObserved == true &&

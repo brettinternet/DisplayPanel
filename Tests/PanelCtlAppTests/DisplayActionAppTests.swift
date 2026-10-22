@@ -1364,7 +1364,7 @@ final class DisplayActionAppTests: XCTestCase {
         let show = DisplayActionStep(target: source, effect: .show)
         let parts = DisplayActionPresentation.stepParts(for: remove, displays: displays)
         XCTAssertEqual(parts.title, "Hide \(targetName)")
-        XCTAssertEqual(parts.detail, "Remove from desktop \u{00B7} Mirror onto \(sourceName) \u{00B7} Switch to HDMI 1")
+        XCTAssertEqual(parts.detail, "Remove from desktop · Mirror onto \(sourceName) · Switch to HDMI 1")
         XCTAssertNil(DisplayActionPresentation.stepParts(for: show, displays: displays).detail)
 
         let action = DisplayAction(name: "Hand off", steps: [remove, show])

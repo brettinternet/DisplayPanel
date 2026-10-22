@@ -52,7 +52,7 @@ enum ProtectionConfigurationError: Error, Equatable, LocalizedError {
         case .selectedDisplaysHidden:
             return "The displays automation covers are hidden. Show one to resume."
         case .selectionWouldCoverEveryShownDisplay:
-            return "Automation would cover every display that isn\u{2019}t hidden. Show a display, or choose Restore or Sleep under Afterward."
+            return "Automation would cover every display that isn’t hidden. Show a display, or choose Restore or Sleep under Afterward."
         case .persistentDimming:
             return "Use Dim, or turn off hardware brightness, to keep displays black during activity."
         case .invalidOverlayOpacityPercent:

@@ -16,12 +16,11 @@ Neither style turns the monitor off or cuts its signal.
 ### Black out
 
 The cover stays until Show, or Escape with the pointer on that display. Input
-doesn't remove it. `app hide` and `app toggle-hide` accept `--style black-out`
-to force this cover for one request even when that display is configured for
-**Remove from desktop**. It does not edit the saved Hide settings. You can black
-out several displays, but never the last visible one. Covers survive sleep, wake
-and reconnects, and end on quit. Automation skips blacked-out displays, and
-**Restore** doesn't show them.
+doesn't remove it. `--style black-out` forces this cover for one request, even
+on a display set to **Remove from desktop**, without changing its settings. You
+can black out several displays, but never the last visible one. Covers survive
+sleep, wake and reconnects, and end on quit. Automation skips blacked-out
+displays, and **Restore** doesn't show them.
 
 ### Keep windows off while hidden
 
@@ -32,58 +31,34 @@ and reconnects, and end on quit. Automation skips blacked-out displays, and
 | Keep a blacked-out display clear | **Hide** with keep windows off |
 | Stop using the display as desktop space | **Remove from desktop** (experimental) |
 
-Keep windows off belongs to one blackout Hide, not to the display. In
-**Settings → Displays → Windows**, **Also keep windows off** (default off) is
-remembered per stable display identity and applies to that display's next manual
-Hide from Settings, the menu or `app hide`. An Action's **Hide (black out)** step
-has its own **Keep windows off while hidden** option and ignores the remembered
-choice. While the display is hidden, the **Keep windows off** switch pauses or
-resumes this Hide only. Show, a failed Hide and quit end it; relaunch never
-restores it. Automation rule blackouts never move windows: they end on input,
-occupancy or time limits, so a display they cover stays **Armed**. Remove from
-desktop doesn't use the option.
+Keep windows off belongs to one blackout Hide, not to the display.
+
+- **Settings → Displays → Windows → Also keep windows off** (default off) is
+  remembered per display and applies to its next Hide from Settings, the menu
+  or `app hide`.
+- An Action's **Hide (black out)** step has its own option and ignores the
+  remembered choice.
+- While hidden, the **Keep windows off** switch pauses or resumes this Hide
+  only. Show, a failed Hide and quit end it; relaunch never restores it.
+- Automation rule blackouts never move windows, so a display they cover stays
+  **Armed**. Remove from desktop doesn't need the option.
 
 Choose **Automatic** (current main display, then stable UUID order) or one exact
 destination. If that destination is asleep, disconnected, covered, mirrored,
-removed, or has an ambiguous identity, movement pauses instead of choosing a
-replacement. Monitor power-off alone is not a PanelCtl blackout.
+removed or ambiguous, movement pauses instead of picking another.
 
-While a Hide that asked for it covers the display, the app rescans once per
-second and moves newly appearing or returning eligible windows off it. A healthy scan considers new windows within
-one tick plus the current pass (up to one second per application and one in-flight
-250 ms Accessibility call); this is a service bound, not a promise that every app
-will accept a move. Refusing, returning, or actively dragged windows back off
-with a bounded 1, 2, 4, 8, 16, then 30 second delay. Armed means remembered on
-but not hidden by PanelCtl; Enforcing means hidden with keep-off and eligible;
-Paused includes the reason, including **Paused for this hide.** The
-Displays settings, menu, and status stream report state and last moved/failed
-counts. Each pass attempts at most 64 windows; remaining windows wait for later
-passes. Before each setter, managed helpers must acknowledge relocation suppression
-within one second, otherwise movement pauses. Helper replacement invalidates the
-old permission to write.
+While the Hide lasts, PanelCtl rescans every second and moves new or returning
+windows off the display, using the same rules as [Move windows](#named-manual-actions).
+Windows that refuse or keep coming back are retried with backoff up to 30
+seconds. The status reads **Armed** (on, not hidden), **Enforcing** (hidden and
+moving windows) or **Paused** with a reason. Displays, the menu and the status
+stream show it with the last moved and failed counts.
 
-Only ordinary movable windows with public, unique on-screen evidence on the
-desktop currently showing on the display can move; other desktops are left
-unchanged. Full-screen, minimized, nonmovable, vanished, or unverified windows
-are skipped; titles and persistent window identifiers are
-not stored. The app checks Accessibility permission in the background and never
-prompts. Use **Allow Accessibility** beside the enabled option in Displays,
-or in **Settings → Automations → Actions**. Coverage ending, sleep/topology changes,
-permission loss, recovery, or pausing cancels pending work. An
-already-dispatched setter may finish. Showing the display won't move windows
-back. Relaunch only
-reevaluates current state and never starts a blackout or replays moves.
-
-This ongoing option reuses the one-shot **Move windows** behavior in [Actions](#named-manual-actions),
-but it continues for as long as that Hide lasts.
-It does not trigger Hide, extend blackout, synthesize input, or count a move as
-user activity. **Remove from desktop** already lets macOS relocate windows, so
-it does not need this option. Keyboard input, pointer restoration and time limits
-still end blackout during a move. If a write's final geometry is uncertain, or a
-helper's 256-window provenance budget overflows, that helper conservatively stops
-using window occupancy to clear empty-display rearm latches for the rest of its
-session. Real pointer occupancy still clears them; moving windows away afterward
-cannot by itself rearm blackout.
+Sleep, display changes, losing permission, recovery or pausing cancel pending
+moves. Show doesn't move windows back. Keep windows off never triggers Hide,
+extends a blackout or counts as activity. See the
+[window relocation contract](window-relocation.md) for timing bounds and
+occupancy details.
 
 ## Experimental features
 
@@ -112,27 +87,17 @@ Show: restore layout → verify → switch input back (optional)
 - You can remove several displays, in any order, onto shared or separate
   sources. A removed display can't be a source, and a source can't be removed
   until its targets are shown.
-- Show returns one display and leaves the others removed. While others are
-  still removed, macOS may place it slightly off its saved position; the last
-  Show restores the exact original layout and main display.
+- Show returns one display and leaves the others removed. macOS may place it
+  slightly off; the last Show restores the exact layout and main display.
 - Hiding the main display lets macOS decide where the menu bar, Dock and
   windows go.
 - Show restores layout and display modes, not HDR, color profiles, windows or
   Spaces.
-- While the app stays running, sleep/wake preserves the hidden set when the
-  same displays return safely. Wake can repair lost mirrors and shifted layout
-  without switching monitor inputs; identity changes or failed verification
-  remain in recovery. See [wake recovery](display-recovery.md#sleep-wake-and-reboot).
-- Outside sleep, a hidden monitor re-linking to the Mac also triggers guarded
-  repair by default when CoreGraphics reports add/remove evidence for it or its
-  mirror source. Within 15 seconds of settled topology, PanelCtl restores the
-  hidden set and saved visible layout/main in one session transaction, without
-  switching inputs or showing a display. Manual unmirror without link evidence
-  keeps its existing behavior. Changed identities/modes/journals, missing displays,
-  interrupted operations or failed verification stop repair and retain recovery;
-  no retry is queued. The actual flags from monitor input return remain an
-  unverified hardware limit. See [input-return recovery](display-recovery.md#monitor-input-return-while-hidden)
-  for attribution limits and passive logging.
+- After sleep, or when a hidden monitor re-links to the Mac, PanelCtl repairs
+  lost mirrors and layout once without switching inputs or showing displays.
+  Changed identities or failed checks leave the display in recovery. See
+  [wake recovery](display-recovery.md#sleep-wake-and-reboot) and
+  [input-return recovery](display-recovery.md#monitor-input-return-while-hidden).
 - With **Don't switch**, Hide and Show send no DDC commands. Use the monitor's
   input button if needed.
 
@@ -145,79 +110,63 @@ consent each time and reconnects automatically after 15 seconds. See
 
 ## Arrangement protection
 
-**Displays → Arrangement…**, under the display tiles, remembers layouts per exact
-visible display set, with an optional preferred main display for unsaved sets. It
-covers every display, so it appears once rather than on each display's page. It
-is off by default and only corrects after reconnect or wake, not ordinary layout
-edits. Remember Current Arrangement, Forget and Restore are explicit controls.
-Recovery suspends it. Each display's own page has a **Display mode** section for
-[protected display modes](display-recovery.md#protected-display-modes).
-See [remembered arrangements](display-recovery.md#remembered-arrangements) for
-identity/size checks, CLI status, Restore, and the unverified hardware limits.
+**Displays → Arrangement…** remembers a layout for each exact set of visible
+displays, plus an optional preferred main display for unsaved sets. It is off by
+default and corrects only after reconnect or wake, not your own layout edits.
+Recovery suspends it. Each display's page also has a **Display mode** section for
+[protected display modes](display-recovery.md#protected-display-modes). See
+[remembered arrangements](display-recovery.md#remembered-arrangements) for
+details.
 
 ## Named manual actions
 
 **Automations → Actions** stores named workflows of 1–8 steps. Each step targets
 a display with **Hide (black out)**, **Hide (remove from desktop)**, **Show** or
-**Move windows**. **Restore arrangement** is a global step with no display target.
-It uses the current exact set or preferred main, with the same recovery and
-verification checks as Displays. Put it before steps that change the visible set.
-A display may appear once in the Hide/Show class and once in
-the separate Move class, so Hide and Move can share a source in either order.
-Hide never moves windows; Move never changes Hide state.
+**Move windows**. **Restore arrangement** has no display target; put it before
+steps that change the visible set. A display can appear once among Hide/Show
+steps and once as a Move step, in either order. Hide never moves windows; Move
+never changes Hide state.
 
 ```sh
 panelctl app run-action --action ACTION_UUID --json
 ```
 
-- Runs only from **Run** or this command, never from rules, login or wake. Action steps keep their saved effects; `--style` applies only to direct Hide and Toggle Hide CLI requests.
-- Before any change, PanelCtl checks every step. A refusal names the step and
-  changes nothing.
-- A Show-only Action for journaled displays can wait for an in-progress monitor
-  input return, within its original 15-second window, then revalidate and run
-  once. Individual Show behaves the same. This replaces background re-hide;
-  it does not retry failed writes. Sleep, unlock, shutdown, identity/journal
-  changes or timeout cancel the wait. Mixed Actions and Toggle do not wait.
-- Steps run in order. Disconnected targets and targets verified hidden by the
-  other Hide style are skipped with a visible reason, without showing them or
-  switching styles. Other failures stop the run; earlier steps stay done.
-- Identity ambiguity, changed metadata, unverified recovery, and last-visible-display
-  safeguards still block. A skipped step never becomes a write during that run.
-- A Remove step saves the display's setup. If that setup changes later, review
-  and save the Action again.
+- Actions run only from **Run** or this command, never from rules, login or
+  wake. `--style` doesn't apply to Actions.
+- PanelCtl checks every step first. A refusal names the step and changes
+  nothing.
+- Steps run in order. Disconnected targets and targets already hidden the other
+  way are skipped with a reason. Other failures stop the run; earlier steps stay
+  done.
+- Ambiguous identities, unverified recovery and the last visible display still
+  block.
+- A Show-only Action can wait out an in-progress monitor input return (up to 15
+  seconds), then check again and run once.
+- A Remove step saves the display's setup. If that setup changes, review and
+  save the Action again.
 - A **Hide (black out)** step can **Keep windows off while hidden** with its own
-  destination. Steps saved before this option keep the display's windows alone.
-- Move windows is a one-shot relocation of ordinary movable windows on the
-  desktop currently showing on the display. It does not activate apps, switch Spaces, or restore windows on
-  Show; windows already off the source stay untouched. Full-screen, minimized,
-  vanished, nonmovable and publicly unverified windows are skipped with reasons.
-- Move windows requires Accessibility permission granted by the explicit
-  **Allow Accessibility** button in **Settings → Automations → Actions**. CLI and
-  background runs report missing or stale permission and never prompt. Results
-  include privacy-safe moved/skipped/failed counts and reason codes; window titles
-  are not stored.
-- `done`: eligible steps finished. Per-step `skipped` results explain unavailable
-  targets. `no-op`: nothing needed to change; when steps were skipped, the summary
-  says “Nothing to do.” `partial`: some steps changed, then the run stopped.
+  destination.
+- **Move windows** moves ordinary windows on the display's current desktop once.
+  It doesn't activate apps, switch Spaces or move windows back on Show.
+  Full-screen, minimized and unmovable windows are skipped with reasons.
+- Moving windows needs Accessibility permission, granted with **Allow
+  Accessibility** in Displays or **Settings → Automations → Actions**. PanelCtl
+  never prompts on its own. Results give moved, skipped and failed counts;
+  window titles aren't stored.
+- Outcomes: `done` (finished, possibly with skipped steps), `no-op` (nothing to
+  change) or `partial` (some steps changed, then the run stopped).
 
 ## Saved display identity
 
-Actions and Remove from desktop settings follow the monitor across reconnects
-and restarts, even when macOS assigns a new numeric display ID. Existing saved
-settings load automatically; you don't need to recreate Actions or input choices.
-PanelCtl requires exactly one matching UUID with the same vendor, model and
-serial values. Names and desktop positions aren't used to choose a replacement.
-Duplicate or changed identities remain blocked with a specific reason. Missing
-Action targets can be skipped only when no outstanding recovery involves them;
-other saved-display operations still refuse missing identities.
+Saved settings follow a monitor across reconnects and restarts, even when macOS
+gives it a new display ID. A match needs exactly one display with the same UUID,
+vendor, model and serial; names and positions are never used. Duplicate or
+changed identities stay blocked with a reason.
 
-Each new operation captures current display IDs. An Action keeps those captured
-identities for its entire run; a connection change stops it instead of choosing
-new IDs mid-run. A step checked as already complete cannot later become a write.
-Recovery journals and pending operations are never rebound to new IDs or a new
-session. After reboot, guarded recovery can archive the old journal unchanged
-and capture a fresh baseline; it never replays the old transaction. Other
-unresolved recovery still needs attention before conflicting work.
+An Action captures display IDs when it starts; a connection change stops it
+rather than picking new ones. Recovery journals are never moved to new IDs or a
+new session. After reboot, recovery can archive the old journal and capture a
+fresh baseline; it never replays the old operation.
 
 ## Rules and hidden displays
 
@@ -241,15 +190,10 @@ Removed displays stay listed even when disconnected. Reconnect the same
 monitor, then **Check Again**. Recovery problems also appear as a banner and in
 the menu as **Review Display Recovery…**.
 
-After reboot, **Recover previous session** offers **Hide again** and **Keep displays
-shown** directly on this page. Both archive the previous journal and accept the
-current modes/layout; Hide again uses a fresh session transaction without Show or
-input switching. These choices apply to the whole previous Hide set. If macOS
-still sees an off-input monitor as active and separate, it can be hidden again
-without returning its input first. Missing/inactive monitors must reconnect;
-existing mirrors must be turned off. A reduced current refresh rate becomes the
-new Show baseline only with explicit confirmation. A fully matching restored
-desktop is recognized automatically with no display writes. See
+After reboot, **Recover previous session** offers **Hide again** or **Keep
+displays shown** for the whole previous Hide set. Both accept the current layout;
+neither shows displays or switches inputs. Missing monitors must reconnect and
+existing mirrors must be turned off first. See
 [previous-session recovery](display-recovery.md#recovering-after-reboot).
 
 If PanelCtl can't confirm that dimmed brightness was restored, automation
@@ -270,10 +214,10 @@ Desktop and input results are reported separately on the selected display:
 | Show: layout fails | Not restored; journal retained | May already have switched; outcome shown |
 | Show: input fails | Restored only if fresh layout/mode checks pass | Failed |
 
-Explicit Show returns the configured Mac input before restoring the desktop,
-then verifies the post-input layout. Online status alone never triggers Show.
-A missing saved mode names the display and mode to recover; switch its input
-manually if DDC is unavailable, then retry Show.
+Show switches the monitor back to the Mac first, then restores and verifies the
+layout. A display coming online never triggers Show by itself. If a saved mode
+is missing, the message names it; switch the input manually if DDC is
+unavailable, then retry Show.
 
 ## Scripting
 
@@ -284,16 +228,12 @@ manually if DDC is unavailable, then retry Show.
 ```
 
 Use `hide` or `show` for a specific state. Add `--style black-out` to `hide` or
-`toggle-hide` when a script needs a black cover instead of a display's configured
-Remove from desktop style; this is per-request and does not edit saved preferences.
-The Scripts copy command remains style-neutral, and Action steps keep their saved
-effects. The app must be running. See [exit codes and status](usage.md#scripted-hide-and-show).
+`toggle-hide` to black out instead of removing, for that request only. The app
+must be running. See [exit codes and status](usage.md#scripted-hide-and-show).
 
-`panelctl app blackout-now` and the menu's Blackout Now item are retired; the
-command exits 2 and older CLIs are refused. They triggered every enabled
-Automation rule at once. Use `app hide --display` for one display,
-`app run-action --action` for a saved Action, or `app run-rule --rule` (or the
-menu's Run rule submenu) to run one saved Automation rule once.
+`app blackout-now` and the menu's Blackout Now item are retired. Use `app hide`
+for one display, `app run-action` for a saved Action, or `app run-rule` (or the
+menu's Run rule submenu) to run one Automation rule once.
 
 ## Keyboard
 

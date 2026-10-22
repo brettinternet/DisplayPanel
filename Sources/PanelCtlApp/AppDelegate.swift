@@ -124,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "Display operation in progress"
-            alert.informativeText = "Wait for Hide or Show to finish. It can\u{2019}t be canceled."
+            alert.informativeText = "Wait for Hide or Show to finish. It can’t be canceled."
             alert.addButton(withTitle: "OK")
             alert.runModal()
             return .terminateCancel
@@ -139,14 +139,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if status?.hasUnresolvedJournal == true {
                 alert.messageText = status?.state == .hidden && canShow
                     ? (removalCount > 1 ? "\(removalCount) displays are still removed" : "\(target?.name ?? "A display") is still hidden")
-                    : "Display recovery isn\u{2019}t finished"
+                    : "Display recovery isn’t finished"
                 alert.informativeText = "Removed displays stay removed until you open PanelCtl again."
             } else {
                 alert.messageText = "Automation cleanup needs attention"
-                alert.informativeText = "PanelCtl couldn\u{2019}t confirm automation stopped: \(model.protectionQuiescenceFailure ?? "unknown error")"
+                alert.informativeText = "PanelCtl couldn’t confirm automation stopped: \(model.protectionQuiescenceFailure ?? "unknown error")"
             }
             alert.addButton(withTitle: "Cancel")
-            alert.addButton(withTitle: canShow ? "Show and Quit" : "Review\u{2026}")
+            alert.addButton(withTitle: canShow ? "Show and Quit" : "Review…")
             alert.addButton(withTitle: "Quit Anyway")
             if let cancel = alert.buttons.first {
                 alert.window.defaultButtonCell = cancel.cell as? NSButtonCell

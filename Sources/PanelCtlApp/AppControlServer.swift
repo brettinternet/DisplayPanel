@@ -261,7 +261,7 @@ final class AppControlServer {
             summary: failsStatus
                 ? "Response exceeded the control message limit; no complete status is available."
                 : String(response.summary.prefix(512)),
-            error: failsStatus ? "Check PanelCtl Settings \u{2192} Displays; do not infer an operation result."
+            error: failsStatus ? "Check PanelCtl Settings → Displays; do not infer an operation result."
                 : response.error.map { String($0.prefix(512)) },
             outcome: failsStatus ? .refused : response.outcome
         )

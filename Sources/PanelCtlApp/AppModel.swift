@@ -375,7 +375,7 @@ final class AppModel: ObservableObject {
                 try saved.validate()
                 modePreferences = saved
             } catch {
-                modeStorageFailure = "Couldn\u{2019}t read saved modes; they\u{2019}re kept unchanged. \(error.localizedDescription)"
+                modeStorageFailure = "Couldn’t read saved modes; they’re kept unchanged. \(error.localizedDescription)"
             }
         }
         if let data = defaults.data(forKey: Self.arrangementPreferencesKey) {
@@ -384,7 +384,7 @@ final class AppModel: ObservableObject {
                 try saved.validate()
                 arrangementPreferences = saved
             } catch {
-                arrangementStorageFailure = "Couldn\u{2019}t read saved arrangements; they\u{2019}re kept unchanged. \(error.localizedDescription)"
+                arrangementStorageFailure = "Couldn’t read saved arrangements; they’re kept unchanged. \(error.localizedDescription)"
             }
         }
         let permissionProvider = windowMovePermission ?? NoWindowMovePermission()
@@ -399,7 +399,7 @@ final class AppModel: ObservableObject {
         self.disconnectRecoveryBlocked = defaults.bool(forKey: Self.disconnectRecoveryBlockedKey)
         if self.disconnectRecoveryBlocked {
             self.disconnectAutomationPaused = true
-            self.disconnectInspectionFailure = "A previous Full disconnect is unresolved. Automation stays paused until it\u{2019}s verified."
+            self.disconnectInspectionFailure = "A previous Full disconnect is unresolved. Automation stays paused until it’s verified."
         }
         self.displayWakeSettleDelay = displayWakeSettleDelay.isFinite ? min(max(0, displayWakeSettleDelay), 10) : 1
         self.displayProvider = displayProvider
@@ -437,7 +437,7 @@ final class AppModel: ObservableObject {
                 }
             } catch {
                 self.displayActions = DisplayActionSet()
-                self.displayActionStorageFailure = "Couldn\u{2019}t read saved Actions; they\u{2019}re kept unchanged. (\(error.localizedDescription))"
+                self.displayActionStorageFailure = "Couldn’t read saved Actions; they’re kept unchanged. (\(error.localizedDescription))"
             }
         } else {
             self.displayActions = DisplayActionSet()
@@ -683,7 +683,7 @@ final class AppModel: ObservableObject {
         if handoffStatus?.hasUnresolvedJournal == true || handoffInspectionFailure != nil {
             return "An unresolved display journal needs recovery first."
         }
-        return displayActionEnvironmentBlocker(prefix: "", actionLeaseID: actionLeaseID)
+        return displayActionEnvironmentBlocker(prefix: "", actionLeaseID: actionLeaseID)?.message
     }
 
     var arrangementStatus: AppControlArrangementStatus {
@@ -713,7 +713,7 @@ final class AppModel: ObservableObject {
             if let preferred = arrangementPreferences.preferredMain,
                try current.preferringMain(preferred) != nil {
                 return status(arrangementPreferences.enabled ? "preferred-main" : "unprotected",
-                    arrangementPreferences.enabled ? "Only the main display is protected; positions aren\u{2019}t remembered." : "Protection is off; the preferred main display is kept.",
+                    arrangementPreferences.enabled ? "Only the main display is protected; positions aren’t remembered." : "Protection is off; the preferred main display is kept.",
                     remember: canRemember, restore: true)
             }
             return status("unprotected", "No remembered arrangement or preferred main display for these displays.", remember: canRemember)
@@ -1174,7 +1174,7 @@ final class AppModel: ObservableObject {
                 return "Automation suspended while hidden · \(name) is blacked out by Hide"
             }
             if preferences.isEnabled && snoozedUntil == nil {
-                return "Automation suspended while hidden · \(name) isn\u{2019}t in a rule"
+                return "Automation suspended while hidden · \(name) isn’t in a rule"
             }
             if snoozedUntil != nil { return "Automation paused while desktop is hidden" }
             return "Automation off while desktop is hidden"
@@ -1429,18 +1429,18 @@ final class AppModel: ObservableObject {
             guard let target = step.target else { return "Step \(offset + 1): Choose a display." }
             if let expectedTarget {
                 guard matches(target, expectedTarget), matchingDisplay(expectedTarget) != nil else {
-                    return "Step \(offset + 1): The display changed. Review it and run the Action again."
+                    return "Step \(offset + 1): \(Self.displayChangedBlocker)"
                 }
             } else if let issue = savedIdentityProblem(target) {
                 return "Step \(offset + 1): \(issue)"
             }
             if step.effect == .removeFromDesktop {
                 guard experimentalFeaturesEnabled else {
-                    return "Step \(offset + 1): Turn on Experimental features in General to remove a display from the desktop."
+                    return "Step \(offset + 1): \(Self.experimentalRemovalBlocker)"
                 }
                 guard step.reviewedRemoval != nil,
                       displayActionReviewChange(for: action, stepIndex: offset) == nil else {
-                    return "Step \(offset + 1): Displays setup changed since review. Save this action to accept the change."
+                    return "Step \(offset + 1): \(Self.setupChangedBlocker)"
                 }
             }
             if step.effect != .show, let problem = displayRecoveryProblem {
@@ -1468,7 +1468,7 @@ final class AppModel: ObservableObject {
             return "Turn on Experimental features in General to choose Remove from desktop."
         }
         guard let configuration = hidePreferences[targetUUID], configuration.enabled else {
-            return "Turn on Remove from desktop for this display in Settings → Displays first."
+            return Self.removalSetupBlocker
         }
         guard configuration.source != nil else {
             return "Choose a mirror source for this display in Settings → Displays first."
@@ -1508,7 +1508,7 @@ final class AppModel: ObservableObject {
         if let displayActionStorageFailure { return displayActionStorageFailure }
         guard (1...8).contains(action.steps.count) else { return DisplayActionValidationError.invalidStepCount.localizedDescription }
         if canWaitForInputReturnShow(action) {
-            return displayActionEnvironmentBlocker(prefix: "", actionLeaseID: nil, allowingInputReturnWait: true)
+            return displayActionEnvironmentBlocker(prefix: "", actionLeaseID: nil, allowingInputReturnWait: true)?.message
         }
         var hiddenBlackouts = Set(blackoutHiddenDisplays.keys)
         let unresolvedRemovals = unresolvedHandoffRemovals
@@ -1543,7 +1543,7 @@ final class AppModel: ObservableObject {
                 }
                 continue
             }
-            return blocker
+            return blocker.message
         }
         return nil
     }
@@ -1569,37 +1569,25 @@ final class AppModel: ObservableObject {
         case .sourceUnavailable: return "The source display is unavailable. Reconnect it."
         case .noDestination: return "No destination available. Connect or show another display."
         case .destinationUnavailable: return "The selected destination is unavailable. Choose another display or Automatic."
-        case .identityAmbiguous: return "The display\u{2019}s identity is ambiguous, so PanelCtl won\u{2019}t guess."
+        case .identityAmbiguous: return "The display’s identity is ambiguous, so PanelCtl won’t guess."
         case .recoveryRequired: return "Display recovery needs attention. Review it in Displays."
         case .permissionMissing: return "Accessibility permission is required. Choose Allow Accessibility."
         case .permissionStale: return "Accessibility permission is stale. Allow PanelCtl again in System Settings → Privacy & Security → Device Control and Data Access."
         case .topologyChanged: return "Displays changed during the move. Run the Action again."
         case .fullscreen: return "Full-screen windows are skipped."
         case .minimized: return "Minimized windows are skipped."
-        case .visibilityUnverified: return "Couldn\u{2019}t verify a window is visible, so it wasn\u{2019}t moved."
+        case .visibilityUnverified: return "Couldn’t verify a window is visible, so it wasn’t moved."
         case .vanished: return "A window closed before it could move."
-        case .nonmovable: return "A window can\u{2019}t be moved."
-        case .unattributed: return "A window couldn\u{2019}t be matched to one display."
-        case .appTimeout: return "An app didn\u{2019}t respond in time."
-        case .enumerationFailed: return "An app’s windows couldn\u{2019}t be listed."
+        case .nonmovable: return "A window can’t be moved."
+        case .unattributed: return "A window couldn’t be matched to one display."
+        case .appTimeout: return "An app didn’t respond in time."
+        case .enumerationFailed: return "An app’s windows couldn’t be listed."
         case .moveFailed: return "An app refused the move."
-        case .moveUnverified: return "An unconfirmed move may have taken effect; it won\u{2019}t be retried."
+        case .moveUnverified: return "An unconfirmed move may have taken effect; it won’t be retried."
         case .cancelled: return "Interrupted; no further windows were moved."
         }
     }
 
-    private func windowMoveRefusalReason(for message: String) -> AppControlWindowMoveReason {
-        let text = message.lowercased()
-        if text.contains("permission is stale") || text.contains("revoked") { return .permissionStale }
-        if text.contains("accessibility permission") { return .permissionMissing }
-        if text.contains("recovery") || text.contains("journal") { return .recoveryRequired }
-        if text.contains("no eligible destination") { return .noDestination }
-        if text.contains("selected destination") { return .destinationUnavailable }
-        if text.contains("identity") || text.contains("ambiguous") { return .identityAmbiguous }
-        if text.contains("source display") { return .sourceUnavailable }
-        if text.contains("topology") || text.contains("displays are sleeping") { return .topologyChanged }
-        return .destinationUnavailable
-    }
 
     private func validateWindowMoveGate(
         _ request: WindowMovePlanRequest,
@@ -1691,22 +1679,34 @@ final class AppModel: ObservableObject {
         return nil
     }
 
+    /// Why an Action step can't run. The window-move reason is decided with the
+    /// blocker, never parsed back out of its message.
+    struct DisplayActionStepBlocker {
+        let message: String
+        var windowMoveReason: AppControlWindowMoveReason = .destinationUnavailable
+    }
+
     private func displayActionEnvironmentBlocker(prefix: String, actionLeaseID: UUID?,
-                                                 allowingInputReturnWait: Bool = false) -> String? {
-        if hideOperation.isBusy { return prefix + DisplayHideError.actionInProgress.localizedDescription }
-        if runningDisplayAction != nil, runningDisplayAction?.id != actionLeaseID {
-            return displayActionBusyMessage
+                                                 allowingInputReturnWait: Bool = false) -> DisplayActionStepBlocker? {
+        func blocked(_ text: String, _ reason: AppControlWindowMoveReason = .destinationUnavailable) -> DisplayActionStepBlocker {
+            DisplayActionStepBlocker(message: prefix + text, windowMoveReason: reason)
         }
-        if controlRunningRule != nil { return protectionRuleBusyMessage }
-        if handoffStatus?.state == .busy { return prefix + DisplayHideError.actionInProgress.localizedDescription }
-        if displayLifecycleTransitioning, !allowingInputReturnWait { return prefix + DisplayHideError.sleeping.localizedDescription }
-        if protectionQuiescencePending { return prefix + Self.automationStopping.localizedDescription }
+        if hideOperation.isBusy { return blocked(DisplayHideError.actionInProgress.localizedDescription) }
+        if runningDisplayAction != nil, runningDisplayAction?.id != actionLeaseID {
+            return DisplayActionStepBlocker(message: displayActionBusyMessage)
+        }
+        if controlRunningRule != nil { return DisplayActionStepBlocker(message: protectionRuleBusyMessage) }
+        if handoffStatus?.state == .busy { return blocked(DisplayHideError.actionInProgress.localizedDescription) }
+        if displayLifecycleTransitioning, !allowingInputReturnWait {
+            return blocked(DisplayHideError.sleeping.localizedDescription, .topologyChanged)
+        }
+        if protectionQuiescencePending { return blocked(Self.automationStopping.localizedDescription) }
         if let failure = protectionQuiescenceFailure {
-            return prefix + "Automation cleanup needs attention. Choose Retry Automation Cleanup, then try again. (\(failure))"
+            return blocked("\(Self.automationCleanupRetryMessage) (\(failure))")
         }
         if disconnectAutomationPaused || disconnectInspectionFailure != nil ||
             disconnectLease != nil || disconnectStatus?.resolved == false {
-            return prefix + "Finish Full disconnect recovery first."
+            return blocked(Self.fullDisconnectBlocker, .recoveryRequired)
         }
         return nil
     }
@@ -1720,37 +1720,44 @@ final class AppModel: ObservableObject {
         projectedSources: [String: String]? = nil,
         actionLeaseID: UUID? = nil,
         expectedTarget: DisplayIdentitySnapshot? = nil
-    ) -> String? {
+    ) -> DisplayActionStepBlocker? {
         let prefix = "Step \(index + 1): "
+        func blocked(_ text: String, _ reason: AppControlWindowMoveReason = .destinationUnavailable) -> DisplayActionStepBlocker {
+            DisplayActionStepBlocker(message: prefix + text, windowMoveReason: reason)
+        }
         if step.effect == .restoreArrangement {
             if let projectedRemovals, !projectedRemovals.isEmpty {
-                return prefix + "An earlier Remove step leaves an unresolved journal."
+                return blocked("An earlier Remove step leaves an unresolved journal.")
             }
             if let projectedBlackouts, projectedBlackouts != Set(blackoutHiddenDisplays.keys) {
-                return prefix + "An earlier step changes the visible set. Restore arrangement before Hide or Show."
+                return blocked("An earlier step changes the visible set. Restore arrangement before Hide or Show.")
             }
             do { _ = try prepareArrangementRestore(actionLeaseID: actionLeaseID); return nil }
-            catch { return prefix + error.localizedDescription }
+            catch { return blocked(error.localizedDescription) }
         }
-        guard let target = step.target else { return prefix + "Choose a display." }
-        guard UUID(uuidString: target.uuid) != nil else { return prefix + "This action has no stable display UUID." }
+        guard let target = step.target else { return blocked("Choose a display.", .sourceUnavailable) }
+        guard UUID(uuidString: target.uuid) != nil else {
+            return blocked("This action has no stable display UUID.", .identityAmbiguous)
+        }
         let display: DisplayRecord
         if let expectedTarget {
             guard matches(target, expectedTarget), let current = matchingDisplay(expectedTarget) else {
-                return prefix + "The display changed. Review it and run the Action again."
+                return blocked(Self.displayChangedBlocker, .topologyChanged)
             }
             display = current
         } else {
             guard let current = matchingSavedDisplay(target) else {
-                return prefix + "Unavailable: \(savedIdentityProblem(target) ?? "The saved display identity is unavailable.")"
+                let problem = savedIdentityProblem(target) ?? "The saved display identity is unavailable."
+                let candidates = displays.filter { $0.uuid?.caseInsensitiveCompare(target.uuid) == .orderedSame }
+                return blocked("Unavailable: \(problem)", candidates.isEmpty ? .sourceUnavailable : .identityAmbiguous)
             }
             display = current
         }
         if step.effect == .removeFromDesktop {
-            guard experimentalFeaturesEnabled else { return prefix + "Turn on Experimental features in General to remove a display from the desktop." }
-            guard step.reviewedRemoval != nil else { return prefix + "Save the current Displays setup before running this step." }
+            guard experimentalFeaturesEnabled else { return blocked(Self.experimentalRemovalBlocker) }
+            guard step.reviewedRemoval != nil else { return blocked("Save the current Displays setup before running this step.") }
             if displayActionReviewChange(for: action, stepIndex: index) != nil {
-                return prefix + "Displays setup changed since review. Save this Action to accept the change."
+                return blocked(Self.setupChangedBlocker)
             }
         }
         if let blocker = displayActionEnvironmentBlocker(prefix: prefix, actionLeaseID: actionLeaseID) {
@@ -1765,17 +1772,17 @@ final class AppModel: ObservableObject {
             return nil // Global step was checked before resolving a per-display target.
         case .moveWindows:
             if handoffInspectionFailure != nil || displayRecoveryProblem != nil || handoffStatus?.hasUnresolvedJournal == true {
-                return prefix + "Display recovery needs attention. Review it in Displays before moving windows."
+                return blocked(windowMoveReasonText(.recoveryRequired), .recoveryRequired)
             }
             guard display.active, display.online, !display.asleep,
                   !isDisplayMirrored(display.id), !isRemovedDisplay(uuid) else {
-                return prefix + "The source display is unavailable. Reconnect or Show that exact display first."
+                return blocked("The source display is unavailable. Reconnect or Show that exact display first.", .sourceUnavailable)
             }
             if let reason = windowMovePermission.state().reason {
-                return prefix + windowMoveReasonText(reason)
+                return blocked(windowMoveReasonText(reason), reason)
             }
             guard let configuration = step.moveWindows else {
-                return prefix + DisplayActionValidationError.invalidMoveConfiguration(index + 1).localizedDescription
+                return blocked(DisplayActionValidationError.invalidMoveConfiguration(index + 1).localizedDescription)
             }
             let request = makeWindowMovePlan(source: DisplayIdentitySnapshot(display), configuration: configuration)
             switch WindowMoveDisplaySelector.select(
@@ -1785,64 +1792,63 @@ final class AppModel: ObservableObject {
                 mirroredDisplayIDs: request.mirroredDisplayIDs
             ) {
             case .success: return nil
-            case .failure(let reason): return prefix + windowMoveReasonText(reason)
+            case .failure(let reason): return blocked(windowMoveReasonText(reason), reason)
             }
         case .show:
             if hiddenBlackout.contains(uuid) { return nil }
             if hiddenRemoved.contains(uuid) {
                 if isRemovedDisplay(uuid) {
                     do { _ = try makeShowRequest(targetUUID: target.uuid, actionLeaseID: actionLeaseID, refreshStatus: false) }
-                    catch { return prefix + error.localizedDescription }
+                    catch { return blocked(error.localizedDescription) }
                 } else if projectedRemovals?.contains(uuid) != true {
-                    return prefix + "The removed display is not verified for Show. Review it in Displays."
+                    return blocked("The removed display is not verified for Show. Review it in Displays.")
                 }
                 return nil
             }
             if let problem = displayRecoveryProblem {
-                return prefix + problem
+                return blocked(problem)
             }
             return nil
         case .blackOut:
-            if hiddenRemoved.contains(uuid) { return prefix + "Already hidden by Remove from desktop. Show it first." }
+            if hiddenRemoved.contains(uuid) { return blocked("Already hidden by Remove from desktop. Show it first.") }
             if let problem = displayRecoveryProblem {
-                return prefix + "Display recovery needs attention: \(problem)"
+                return blocked("Display recovery needs attention: \(problem)")
             }
             if let blocker = blackoutReadiness(
                 for: display, projectedBlackouts: hiddenBlackout, projectedRemovals: hiddenRemoved,
                 actionLeaseID: actionLeaseID
             ) {
-                return prefix + blocker.localizedDescription
+                return blocked(blocker.localizedDescription)
             }
-            if hiddenBlackout.contains(uuid) { return nil }
             return nil
         case .removeFromDesktop:
-            if hiddenBlackout.contains(uuid) { return prefix + "Already hidden by Black out. Show it first." }
+            if hiddenBlackout.contains(uuid) { return blocked("Already hidden by Black out. Show it first.") }
             if let problem = displayRecoveryProblem {
-                return prefix + "Display recovery needs attention: \(problem)"
+                return blocked("Display recovery needs attention: \(problem)")
             }
             if hiddenRemoved.contains(uuid) {
                 guard isVerifiedRemovedDisplay(target.uuid) else {
-                    return prefix + "Display recovery isn’t verified. Review it in Displays."
+                    return blocked("Display recovery isn’t verified. Review it in Displays.")
                 }
                 guard let configuration = hideConfiguration(for: target.uuid) else {
-                    return prefix + "Turn on Remove from desktop for this display in Settings → Displays first."
+                    return blocked(Self.removalSetupBlocker)
                 }
                 if let blocker = hideReadiness(
                     for: configuration, projectedBlackouts: hiddenBlackout,
                     projectedRemovals: hiddenRemoved, projectedSources: projectedSources,
                     actionLeaseID: actionLeaseID, allowVerifiedRemovalNoOp: true
                 ) {
-                    return prefix + blocker.localizedDescription
+                    return blocked(blocker.localizedDescription)
                 }
                 return nil
             }
             guard let configuration = hideConfiguration(for: target.uuid) else {
-                return prefix + "Turn on Remove from desktop for this display in Settings → Displays first."
+                return blocked(Self.removalSetupBlocker)
             }
             guard sameStableIdentity(configuration.target, target),
                   let reviewed = step.reviewedRemoval,
                   reviewed == currentReviewedRemovalSetup(for: target.uuid) else {
-                return prefix + "Displays setup changed since review. Save this Action to accept the change."
+                return blocked(Self.setupChangedBlocker)
             }
             if let blocker = hideReadiness(
                 for: configuration,
@@ -1851,7 +1857,7 @@ final class AppModel: ObservableObject {
                 projectedSources: projectedSources,
                 actionLeaseID: actionLeaseID
             ) {
-                return prefix + blocker.localizedDescription
+                return blocked(blocker.localizedDescription)
             }
             return nil
         }
@@ -2272,10 +2278,10 @@ final class AppModel: ObservableObject {
             return .recoveryBlocksAction(protectionRuleBusyMessage)
         }
         if disconnectAutomationPaused || disconnectInspectionFailure != nil {
-            return .recoveryBlocksAction("Finish Full disconnect recovery first.")
+            return .recoveryBlocksAction(Self.fullDisconnectBlocker)
         }
         if let failure = handoffInspectionFailure {
-            return .recoveryBlocksHide("Couldn\u{2019}t check display recovery: \(failure)")
+            return .recoveryBlocksHide("Couldn’t check display recovery: \(failure)")
         }
         guard let status = handoffStatus else {
             return .recoveryBlocksHide("Display recovery status is unknown. Try again in a moment.")
@@ -2291,7 +2297,7 @@ final class AppModel: ObservableObject {
         if protectionQuiescencePending { return Self.automationStopping }
         if let failure = protectionQuiescenceFailure {
             _ = failure // Shown with its retry; repeating it here would duplicate it.
-            return .protectionCleanup("Automation cleanup needs attention. Choose Retry Automation Cleanup, then try again.")
+            return .protectionCleanup(Self.automationCleanupRetryMessage)
         }
         guard configuration.enabled else {
             return .unavailable("Turn on Remove from desktop for this display first.")
@@ -2326,7 +2332,7 @@ final class AppModel: ObservableObject {
             let targetMirrorReleasedByProjection = projectedSources != nil && isMirrorSource(targetUUID) &&
                 projectedSources?.values.contains(targetUUID.lowercased()) != true
             guard !isDisplayMirrored(target.id) || targetMirrorReleasedByProjection else {
-                return .unavailable("macOS is already mirroring this display. Turn off mirroring in System Settings \u{2192} Displays first.")
+                return .unavailable("macOS is already mirroring this display. Turn off mirroring in System Settings → Displays first.")
             }
         }
         guard let sourceIdentity = configuration.source else {
@@ -2373,7 +2379,7 @@ final class AppModel: ObservableObject {
     /// Why this display can't be removed from the desktop, or nil when it can.
     func removalIneligibleReason(for display: DisplayRecord) -> String? {
         if display.builtin {
-            return "Built-in displays can\u{2019}t be removed from the desktop."
+            return "Built-in displays can’t be removed from the desktop."
         }
         guard display.uuid.flatMap(UUID.init(uuidString:)) != nil else {
             return "This display has no stable ID."
@@ -2441,7 +2447,7 @@ final class AppModel: ObservableObject {
         // Disconnect preparation, consent and recovery exclude other display changes.
         if disconnectAutomationPaused || disconnectInspectionFailure != nil ||
             disconnectLease != nil || disconnectStatus?.resolved == false {
-            return .unavailable("Finish Full disconnect recovery first.")
+            return .unavailable(Self.fullDisconnectBlocker)
         }
         if displayLifecycleTransitioning { return .sleeping }
         guard let uuid = display.uuid, UUID(uuidString: uuid) != nil,
@@ -2458,7 +2464,7 @@ final class AppModel: ObservableObject {
             if isMirrorSource(uuid) {
                 return .unavailable("A removed display mirrors onto this one and needs recovery.")
             }
-            return .unavailable("macOS is mirroring this display. Turn off mirroring in System Settings \u{2192} Displays first.")
+            return .unavailable("macOS is mirroring this display. Turn off mirroring in System Settings → Displays first.")
         }
         guard display.active, display.online, !display.asleep,
               display.bounds.width > 0, display.bounds.height > 0 else {
@@ -2470,7 +2476,7 @@ final class AppModel: ObservableObject {
                 !hiddenRemovals.contains(otherUUID) && !hiddenBlackouts.contains(otherUUID)
         }
         guard anotherStaysVisible else {
-            return .unavailable("PanelCtl won\u{2019}t hide the last visible display.")
+            return .unavailable("PanelCtl won’t hide the last visible display.")
         }
         return nil
     }
@@ -2644,7 +2650,7 @@ final class AppModel: ObservableObject {
                     guard let self, self.hideOperation == .hiding(targetUUID) else { return }
                     guard succeeded else {
                         self.hideOperation = .idle
-                        let failure = message ?? "Automation cleanup could not be verified."
+                        let failure = message ?? Self.automationCleanupUnverified
                         self.protectionQuiescenceFailure = failure
                         self.reconcileProtection()
                         self.refuse(.hide, targetUUID: targetUUID, error: DisplayHideError.protectionCleanup(
@@ -2699,7 +2705,7 @@ final class AppModel: ObservableObject {
             coverHiddenDisplays()
             reconcileProtection()
             refuse(.hide, targetUUID: targetUUID, error: DisplayHideError.unavailable(
-                "The display wasn\u{2019}t fully covered. Try again."
+                "The display wasn’t fully covered. Try again."
             ), completion: completion)
             return
         }
@@ -2817,6 +2823,26 @@ final class AppModel: ObservableObject {
         return unresolved.allSatisfy(\.canShow)
     }
 
+    // Messages shared by several refusal paths; keep each wording in one place.
+    static let fullDisconnectBlocker = "Finish Full disconnect recovery first."
+    static let automationCleanupRetryMessage = "Automation cleanup needs attention. Choose Retry Automation Cleanup, then try again."
+    static let automationCleanupUnverified = "Automation cleanup could not be verified."
+    static let displayChangedBlocker = "The display changed. Review it and run the Action again."
+    static let experimentalRemovalBlocker = "Turn on Experimental features in General to remove a display from the desktop."
+    static let setupChangedBlocker = "Displays setup changed since review. Save this Action to accept the change."
+    static let removalSetupBlocker = "Turn on Remove from desktop for this display in Settings → Displays first."
+
+    /// Acting on a request that waited would act on a state its sender didn't
+    /// see; a second Toggle Hide would undo the first.
+    private func staleRequestBlocker(receivedAt: ContinuousClock.Instant) -> String? {
+        let finished: String
+        if let date = lastHideOrShowFinished, receivedAt < date { finished = "A Hide or Show" }
+        else if let date = lastDisplayActionFinished, receivedAt < date { finished = "A named Action" }
+        else if let date = lastOneShotFinished, receivedAt < date { finished = "An Automation rule" }
+        else { return nil }
+        return "\(finished) finished while this request waited. Check the displays, then try again."
+    }
+
     private static let automationStopping = DisplayHideError.recoveryBlocksAction(
         "PanelCtl is still stopping automation. Try again in a moment."
     )
@@ -2831,7 +2857,7 @@ final class AppModel: ObservableObject {
             return .recoveryBlocksAction(protectionRuleBusyMessage)
         }
         if disconnectAutomationPaused || disconnectInspectionFailure != nil {
-            return .recoveryBlocksAction("Finish Full disconnect recovery first.")
+            return .recoveryBlocksAction(Self.fullDisconnectBlocker)
         }
         if displayLifecycleTransitioning, !allowingInputReturnWait { return .sleeping }
         if protectionQuiescencePending { return Self.automationStopping }
@@ -2896,7 +2922,7 @@ final class AppModel: ObservableObject {
     /// A display recovery problem that needs the user; a healthy hidden display isn't one.
     var displayRecoveryProblem: String? {
         if let failure = handoffInspectionFailure {
-            return "Couldn\u{2019}t check display recovery: \(failure)"
+            return "Couldn’t check display recovery: \(failure)"
         }
         guard let status = handoffStatus else { return nil }
         switch status.state {
@@ -2927,7 +2953,7 @@ final class AppModel: ObservableObject {
               let removalStatus = targetUUID.flatMap({ status.removal(for: $0) }) else { return nil }
         let input = configuredReturnInput(for: removalStatus.target)
         if let warning = input.warning {
-            return "Show won\u{2019}t switch the monitor input: \(warning)"
+            return "Show won’t switch the monitor input: \(warning)"
         }
         return input.value.map { "Show switches the monitor back to \(MonitorInput.name($0))." }
     }
@@ -3124,7 +3150,7 @@ final class AppModel: ObservableObject {
             return "Full disconnect or its recovery is active."
         }
         if protectionCoordinator.hasUncertainBlackoutCoverage {
-            return "Blackout helper coverage is uncertain. Wait for helper status to settle."
+            return "Waiting for automation blackouts to settle."
         }
         guard let source = currentDisplay(matching: identity) else {
             return "The source display is unavailable or ambiguous. Reconnect it."
@@ -3431,7 +3457,7 @@ final class AppModel: ObservableObject {
         }
         // Input 0 means the monitor doesn't know; Show would refuse it anyway.
         guard reading.current != 0 else {
-            macInputDetections[key] = .unavailable("The monitor didn\u{2019}t report its current input.")
+            macInputDetections[key] = .unavailable("The monitor didn’t report its current input.")
             return
         }
         guard reading.current != configuration.awayInput else {
@@ -3575,14 +3601,8 @@ final class AppModel: ObservableObject {
         if hideOperation.isBusy || handoffStatus?.state == .busy {
             return response(.busy, "A display operation is running. Try again when it finishes.", ruleID: ruleID)
         }
-        if let finished = lastHideOrShowFinished, receivedAt < finished {
-            return response(.busy, "A Hide or Show finished while this request waited. Check the displays, then try again.", ruleID: ruleID)
-        }
-        if let finished = lastDisplayActionFinished, receivedAt < finished {
-            return response(.busy, "A named Action finished while this request waited. Check the displays, then try again.", ruleID: ruleID)
-        }
-        if let finished = lastOneShotFinished, receivedAt < finished {
-            return response(.busy, "An Automation rule finished while this request waited. Check the displays, then try again.", ruleID: ruleID)
+        if let stale = staleRequestBlocker(receivedAt: receivedAt) {
+            return response(.busy, stale, ruleID: ruleID)
         }
         guard !displayLifecycleTransitioning else {
             return response(.refused, DisplayHideError.sleeping.localizedDescription, ruleID: ruleID)
@@ -3599,7 +3619,7 @@ final class AppModel: ObservableObject {
             disconnectInspectionFailure != nil || disconnectLease != nil || disconnectStatus?.resolved == false ||
             disconnectRecoveryBlocked {
             return response(.recoveryNeeded,
-                "Finish Full disconnect recovery first.",
+                Self.fullDisconnectBlocker,
                 ruleID: ruleID)
         }
 
@@ -3623,7 +3643,7 @@ final class AppModel: ObservableObject {
         if disconnectAutomationPaused || disconnectInspectionFailure != nil || disconnectLease != nil ||
             disconnectStatus?.resolved == false || disconnectRecoveryBlocked {
             return response(.recoveryNeeded,
-                "Finish Full disconnect recovery first.",
+                Self.fullDisconnectBlocker,
                 ruleID: ruleID)
         }
 
@@ -3750,16 +3770,8 @@ final class AppModel: ObservableObject {
         guard !hideOperation.isBusy else {
             return response(.busy, DisplayHideError.actionInProgress.localizedDescription)
         }
-        // Acting on a request that waited would act on a state its sender
-        // didn't see; a second Toggle Hide would undo the first.
-        if let finished = lastHideOrShowFinished, receivedAt < finished {
-            return response(.busy, "Another Hide or Show finished while this request waited. Check the display, then try again.")
-        }
-        if let finished = lastDisplayActionFinished, receivedAt < finished {
-            return response(.busy, "A named Action finished while this request waited. Check the displays, then try again.")
-        }
-        if let finished = lastOneShotFinished, receivedAt < finished {
-            return response(.busy, "An Automation rule finished while this request waited. Check the displays, then try again.")
+        if let stale = staleRequestBlocker(receivedAt: receivedAt) {
+            return response(.busy, stale)
         }
         refreshDisplays()
         guard handoffStatus?.state != .busy else {
@@ -3788,19 +3800,19 @@ final class AppModel: ObservableObject {
             return response(.recoveryNeeded, problem)
         }
         guard let tile else {
-            return response(.refused, "No connected display has this UUID. Copy the command again from PanelCtl Settings \u{2192} Displays.")
+            return response(.refused, "No connected display has this UUID. Copy the command again from PanelCtl Settings → Displays.")
         }
         if action == .hide, tile.status == .hidden {
             return response(.noOp, "\(tile.name) is already hidden.")
         }
         if action == .show, !hidden {
-            return response(.noOp, "\(tile.name) isn\u{2019}t hidden.")
+            return response(.noOp, "\(tile.name) isn’t hidden.")
         }
         // A forced black-out uses blackOut's own readiness checks, not the
         // saved removal configuration's source/Experimental requirements.
         let forcedBlackOut = action == .hide && request.hideStyle == .blackOut
         guard forcedBlackOut || (tile.action == action && tile.actionBlocker == nil) else {
-            return response(.refused, tile.actionBlocker ?? "PanelCtl can\u{2019}t do that for \(tile.name) now.")
+            return response(.refused, tile.actionBlocker ?? "PanelCtl can’t do that for \(tile.name) now.")
         }
         let result = await withCheckedContinuation { continuation in
             let finished: (DisplayOperationResult) -> Void = { continuation.resume(returning: $0) }
@@ -3891,16 +3903,8 @@ final class AppModel: ObservableObject {
             refuse(.busy, runningDisplayAction != nil ? displayActionBusyMessage : protectionRuleBusyMessage, for: action)
             return
         }
-        if let finished = lastHideOrShowFinished, receivedAt < finished {
-            refuse(.busy, "Another display operation finished while this request waited. Check the displays, then try again.", for: action)
-            return
-        }
-        if let actionFinished = lastDisplayActionFinished, receivedAt < actionFinished {
-            refuse(.busy, "A named Action finished while this request waited. Check the displays, then try again.", for: action)
-            return
-        }
-        if let oneShotFinished = lastOneShotFinished, receivedAt < oneShotFinished {
-            refuse(.busy, "An Automation rule finished while this request waited. Check the displays, then try again.", for: action)
+        if let stale = staleRequestBlocker(receivedAt: receivedAt) {
+            refuse(.busy, stale, for: action)
             return
         }
 
@@ -3963,7 +3967,7 @@ final class AppModel: ObservableObject {
             if step.effect == .restoreArrangement {
                 if let blocker = displayActionStepRunBlocker(action: action, step: step, index: offset,
                     projectedBlackouts: projectedBlackouts, projectedRemovals: projectedRemovals, actionLeaseID: id) {
-                    refuse(.refused, blocker, for: action, atStep: offset)
+                    refuse(.refused, blocker.message, for: action, atStep: offset)
                     return
                 }
                 do {
@@ -4004,10 +4008,10 @@ final class AppModel: ObservableObject {
                 expectedTarget: targetSnapshot
             ) {
                 let outcome: AppControlOutcome = hideOperation.isBusy || handoffStatus?.state == .busy ? .busy
-                    : blocker.localizedCaseInsensitiveContains("recovery") || blocker.localizedCaseInsensitiveContains("journal") ? .recoveryNeeded : .refused
+                    : blocker.message.localizedCaseInsensitiveContains("recovery") || blocker.message.localizedCaseInsensitiveContains("journal") ? .recoveryNeeded : .refused
                 let moveResult = step.effect == .moveWindows
-                    ? AppControlWindowMoveResult(refusalReason: windowMoveRefusalReason(for: blocker)) : nil
-                refuse(outcome, blocker, for: action, atStep: offset, windowMove: moveResult)
+                    ? AppControlWindowMoveResult(refusalReason: blocker.windowMoveReason) : nil
+                refuse(outcome, blocker.message, for: action, atStep: offset, windowMove: moveResult)
                 return
             }
             let key = uuid.lowercased()
@@ -4024,7 +4028,7 @@ final class AppModel: ObservableObject {
                 do {
                     let request = try captureHideRequest(targetUUID: uuid)
                     guard request.target == targetSnapshot else {
-                        refuse(.refused, "Step \(offset + 1): The display changed. Review it and run the Action again.", for: action, atStep: offset)
+                        refuse(.refused, "Step \(offset + 1): \(Self.displayChangedBlocker)", for: action, atStep: offset)
                         return
                     }
                     preparedHideRequests[offset] = request
@@ -4233,12 +4237,12 @@ final class AppModel: ObservableObject {
                 expectedTarget: expectedTarget
             ) {
                 let outcome: AppControlOutcome = self.displayLifecycleTransitioning ? .refused
-                    : blocker.localizedCaseInsensitiveContains("recovery") ? .recoveryNeeded : .refused
+                    : blocker.message.localizedCaseInsensitiveContains("recovery") ? .recoveryNeeded : .refused
                 stepResults.append(AppControlActionStepResult(index: offset + 1, targetUUID: uuid,
                     effect: step.effect.rawValue, outcome: outcome,
-                    desktopSummary: action.steps.count > 1 ? Self.boundedActionStepText(blocker) : Self.bounded(blocker),
+                    desktopSummary: action.steps.count > 1 ? Self.boundedActionStepText(blocker.message) : Self.bounded(blocker.message),
                     windowMove: step.effect == .moveWindows
-                        ? AppControlWindowMoveResult(refusalReason: windowMoveRefusalReason(for: blocker)) : nil))
+                        ? AppControlWindowMoveResult(refusalReason: blocker.windowMoveReason) : nil))
                 stoppingOutcome = outcome
                 stoppingAtIndex = offset + 1
                 appendNotRun(from: offset + 1)
@@ -4422,7 +4426,7 @@ final class AppModel: ObservableObject {
                     self.protectionQuiescencePending = false
                     guard self.runningDisplayAction?.id == id else { return }
                     guard succeeded else {
-                        let failure = message ?? "Automation cleanup could not be verified."
+                        let failure = message ?? Self.automationCleanupUnverified
                         self.protectionQuiescenceFailure = failure
                         let first = action.steps[0]
                         let uuid = first.target?.uuid ?? ""
@@ -4509,7 +4513,7 @@ final class AppModel: ObservableObject {
             throw DisplayHideError.actionInProgress
         }
         guard experimentalFeaturesEnabled else {
-            throw DisplayHideError.unavailable("Turn on Experimental features in General to remove a display from the desktop.")
+            throw DisplayHideError.unavailable(Self.experimentalRemovalBlocker)
         }
         guard let configuration = hidePreferences[targetUUID] else {
             throw DisplayHideError.unavailable("Turn on Remove from desktop for this display first.")
@@ -4535,7 +4539,7 @@ final class AppModel: ObservableObject {
         }
         if displayLifecycleTransitioning { return "Wait for displays to finish waking or reconnecting." }
         if disconnectAutomationPaused || disconnectInspectionFailure != nil || disconnectRecoveryBlocked {
-            return "Finish Full disconnect recovery first."
+            return Self.fullDisconnectBlocker
         }
         if protectionQuiescencePending { return Self.automationStopping.localizedDescription }
         if let failure = protectionQuiescenceFailure { return failure }
@@ -4573,7 +4577,7 @@ final class AppModel: ObservableObject {
                 }
                 do {
                     guard succeeded else {
-                        self.protectionQuiescenceFailure = message ?? "Automation cleanup could not be verified."
+                        self.protectionQuiescenceFailure = message ?? Self.automationCleanupUnverified
                         throw DisplayHideError.recoveryBlocksAction(self.protectionQuiescenceFailure!)
                     }
                     guard !self.isShuttingDown, !self.sessionRecoveryInterrupted,
@@ -4787,7 +4791,7 @@ final class AppModel: ObservableObject {
                 refreshStatus: actionLeaseID == nil
             )
             guard request.targetUUID.caseInsensitiveCompare(targetUUID) == .orderedSame else {
-                throw DisplayHideError.recoveryBlocksAction("This display isn\u{2019}t hidden by PanelCtl.")
+                throw DisplayHideError.recoveryBlocksAction("This display isn’t hidden by PanelCtl.")
             }
         } catch {
             refuse(.show, targetUUID: targetUUID, error: error, completion: completion)
@@ -5225,7 +5229,7 @@ final class AppModel: ObservableObject {
         // If macOS kept the verified mirror topology, there is nothing to reapply.
         if status.state != .none, status.mirrorTopologyVerified {
             guard sleepRemovalsStillHidden(intent.journalRemovals, in: status) else {
-                recordSleepResumeFailure(intent.removals.first, reason: "The mirror topology no longer verifies after wake. Inspect recovery before continuing.")
+                recordSleepResumeFailure(intent.removals.first, reason: "The mirrors didn’t verify after wake. Inspect recovery.")
                 return
             }
             return
@@ -5260,7 +5264,7 @@ final class AppModel: ObservableObject {
                   let journalIdentity = status.journalIdentity,
                   let baselineIdentity = status.baselineIdentity,
                   let observedTopologyIdentity = status.observedTopologyIdentity else {
-                recordSleepResumeFailure(removal, reason: "The guarded journal expectation is unavailable after wake.")
+                recordSleepResumeFailure(removal, reason: "The saved recovery record is unavailable after wake.")
                 return
             }
             let expectation = DisplayHideWakeExpectation(
@@ -5389,7 +5393,7 @@ final class AppModel: ObservableObject {
         displayResults[key] = DisplayOperationResult(
             action: .hide, succeeded: false,
             message: "PanelCtl didn’t re-hide this display \(context). \(reason) Fix the layout in System Settings → Displays, then inspect recovery.",
-            inputMessage: nil, inputOutcome: nil, inputNeedsAttention: true
+            inputMessage: nil, inputOutcome: nil, inputNeedsAttention: true, offersDisplaysSettings: true
         )
         onStatusChange?()
     }
@@ -5430,7 +5434,7 @@ final class AppModel: ObservableObject {
                 return "Automation paused · cleanup needs attention: \(failure)"
             }
             if disconnectPreparationPending || disconnectPauseCleanupPending {
-                return "Automation paused · stopping helpers"
+                return "Automation paused · stopping rules"
             }
             if disconnectStatus?.resolved == false {
                 return "Automation paused · waiting for reconnect"
@@ -5579,7 +5583,7 @@ final class AppModel: ObservableObject {
                 self.releaseDisconnectAutomationPauseIfSafe()
             } else {
                 self.protectionQuiescenceFailure = message ?? self.protectionQuiescenceFailure ??
-                    "Automation cleanup could not be verified."
+                    Self.automationCleanupUnverified
             }
             self.onStatusChange?()
         }
@@ -5984,7 +5988,7 @@ final class AppModel: ObservableObject {
                 if self.disconnectAutomationPaused { self.disconnectPauseCleanupAttempted = true }
                 self.protectionQuiescenceFailure = succeeded
                     ? nil
-                    : (message ?? "Automation cleanup could not be verified.")
+                    : (message ?? Self.automationCleanupUnverified)
                 let hiddenDisplaysReconciled = self.reconcileDeferredActionHiddenDisplays()
                 if !hiddenDisplaysReconciled {
                     if self.handoffStatus?.hasUnresolvedJournal != true,
@@ -6091,7 +6095,7 @@ final class AppModel: ObservableObject {
     private func validatedSavedInput(_ value: UInt8?) -> (value: UInt8?, warning: String?) {
         guard let value else { return (nil, nil) }
         guard DDCInput.parseValue(String(value)) != nil else {
-            return (nil, String(format: "the saved input code 0x%02X isn\u{2019}t valid. Choose the input again in Settings \u{2192} Displays.", value))
+            return (nil, String(format: "the saved input code 0x%02X isn’t valid. Choose the input again in Settings → Displays.", value))
         }
         return (value, nil)
     }
@@ -6147,13 +6151,13 @@ final class AppModel: ObservableObject {
             requestedInput: request.awayInput
         )
         if !cleanupSucceeded {
-            let failure = cleanupFailure ?? "Automation cleanup could not be verified."
+            let failure = cleanupFailure ?? Self.automationCleanupUnverified
             protectionQuiescenceFailure = failure
             hideOperation = .idle
             refreshHandoffStatus()
             reconcileProtection()
             finish(.hide, targetUUID: request.target.uuid, succeeded: false,
-                   message: "Couldn\u{2019}t hide: automation didn\u{2019}t confirm it stopped. \(failure)",
+                   message: "Couldn’t hide: automation didn’t confirm it stopped. \(failure)",
                    input: notAttempted, inputWarning: request.awayInputWarning, completion: completion)
             return
         }
@@ -6188,7 +6192,7 @@ final class AppModel: ObservableObject {
             refreshHandoffStatus()
             guard handoffStatus?.state == .hidden else {
                 throw DisplayHideError.recoveryBlocksAction(
-                    "PanelCtl couldn\u{2019}t confirm the display is hidden. Check its recovery details."
+                    "PanelCtl couldn’t confirm the display is hidden. Check its recovery details."
                 )
             }
             hideOperation = .idle
@@ -6201,7 +6205,7 @@ final class AppModel: ObservableObject {
             rearmProtectionAfterDisplayRecovery()
             let outcome = returnedInputOutcome ?? (error as? DisplayHandoffOperationFailure)?.inputOutcome ?? notAttempted
             finish(.hide, targetUUID: request.target.uuid, succeeded: false,
-                   message: "Couldn\u{2019}t hide. \(error.localizedDescription)",
+                   message: "Couldn’t hide. \(error.localizedDescription)",
                    input: outcome, inputWarning: request.awayInputWarning, completion: completion)
         }
     }
@@ -6221,13 +6225,13 @@ final class AppModel: ObservableObject {
         func notStarted(_ reason: String) {
             hideOperation = .idle
             reconcileProtection()
-            finish(.show, targetUUID: targetUUID, succeeded: false, message: "Couldn\u{2019}t show. \(reason)",
+            finish(.show, targetUUID: targetUUID, succeeded: false, message: "Couldn’t show. \(reason)",
                    input: notAttempted, inputWarning: request.returnInputWarning, completion: completion)
         }
         guard cleanupSucceeded else {
-            let failure = cleanupFailure ?? "Automation cleanup could not be verified."
+            let failure = cleanupFailure ?? Self.automationCleanupUnverified
             protectionQuiescenceFailure = failure
-            notStarted("Couldn\u{2019}t show: automation didn\u{2019}t confirm it stopped. \(failure)")
+            notStarted("Couldn’t show: automation didn’t confirm it stopped. \(failure)")
             return
         }
         protectionQuiescenceFailure = nil
@@ -6287,7 +6291,7 @@ final class AppModel: ObservableObject {
             reconcileProtection()
             let outcome = returnedInputOutcome ?? (error as? DisplayHandoffOperationFailure)?.inputOutcome ?? notAttempted
             finish(.show, targetUUID: targetUUID, succeeded: false,
-                   message: "Couldn\u{2019}t show. \(error.localizedDescription)",
+                   message: "Couldn’t show. \(error.localizedDescription)",
                    input: outcome, inputWarning: request.returnInputWarning, completion: completion)
         }
     }
@@ -6327,7 +6331,7 @@ final class AppModel: ObservableObject {
         let result = DisplayOperationResult(
             action: action,
             succeeded: false,
-            message: "Couldn\u{2019}t \(action == .hide ? "hide" : "show"). \(error.localizedDescription)",
+            message: "Couldn’t \(action == .hide ? "hide" : "show"). \(error.localizedDescription)",
             inputMessage: nil,
             inputOutcome: nil,
             inputNeedsAttention: false
@@ -6349,19 +6353,19 @@ final class AppModel: ObservableObject {
         let detail = outcome.detail.map { " " + Self.sentence($0) } ?? ""
         switch outcome.state {
         case .notRequested:
-            return warning.map { ("Didn\u{2019}t switch the monitor input: \($0)", true) }
+            return warning.map { ("Didn’t switch the monitor input: \($0)", true) }
         case .notAttempted:
-            return outcome.requestedInput == nil ? nil : ("Didn\u{2019}t switch the monitor input.", false)
+            return outcome.requestedInput == nil ? nil : ("Didn’t switch the monitor input.", false)
         case .skipped:
-            return ("Couldn\u{2019}t switch the monitor input.\(detail) Use the monitor\u{2019}s buttons.", true)
+            return ("Couldn’t switch the monitor input.\(detail) Use the monitor’s buttons.", true)
         case .verified:
             return ("Switched the monitor to \(input).", false)
         case .alreadySelected:
             return ("The monitor was already on \(input).", false)
         case .unverified:
-            return ("Couldn\u{2019}t confirm the monitor switched to \(input). If it didn\u{2019}t, use its buttons.", true)
+            return ("Couldn’t confirm the monitor switched to \(input). If it didn’t, use its buttons.", true)
         case .failed:
-            return ("Couldn\u{2019}t switch the monitor to \(input).\(detail) Use the monitor\u{2019}s buttons.", true)
+            return ("Couldn’t switch the monitor to \(input).\(detail) Use the monitor’s buttons.", true)
         }
     }
 
@@ -6416,16 +6420,16 @@ final class AppModel: ObservableObject {
         if controlRunningRule != nil { return protectionRuleBusyMessage }
         if !experimentalFeaturesEnabled { return "Turn on Experimental features in General first." }
         if let disconnectInspectionFailure {
-            return "Can\u{2019}t read disconnect recovery. Run `panelctl recovery status`. (\(disconnectInspectionFailure))"
+            return "Can’t read disconnect recovery. Run `panelctl recovery status`. (\(disconnectInspectionFailure))"
         }
         if disconnectLease != nil || disconnectStatus?.resolved == false {
             return "Finish the current disconnect recovery first."
         }
         if let protectionQuiescenceFailure {
-            return "Automation cleanup needs attention. Choose Retry Automation Cleanup, then try again. (\(protectionQuiescenceFailure))"
+            return "\(Self.automationCleanupRetryMessage) (\(protectionQuiescenceFailure))"
         }
         if protectionQuiescencePending || disconnectPauseCleanupPending {
-            return "Waiting for automation cleanup to finish\u{2026}"
+            return "Waiting for automation cleanup to finish…"
         }
         if !blackoutHiddenDisplays.isEmpty || handoffStatus?.hasUnresolvedJournal == true ||
             handoffInspectionFailure != nil || hideOperation.isBusy || displayLifecycleTransitioning {
@@ -6436,7 +6440,7 @@ final class AppModel: ObservableObject {
 
     var disconnectBlocker: String? {
         if let blocker = disconnectEligibilityBlocker { return blocker }
-        if disconnectPreparationPending { return "Stopping automation\u{2026}"
+        if disconnectPreparationPending { return "Stopping automation…"
         }
         if disconnectRequest != nil || disconnectConsentPending { return "Confirm or cancel the current disconnect."
         }
@@ -6492,7 +6496,7 @@ final class AppModel: ObservableObject {
     ) {
         guard disconnectPreparationPending else { return }
         if !succeeded {
-            let failure = message ?? "Automation cleanup could not be verified."
+            let failure = message ?? Self.automationCleanupUnverified
             protectionQuiescenceFailure = failure
             disconnectFailure = "Automation cleanup needs attention: \(failure)"
             disconnectPreparationPending = false
@@ -6552,7 +6556,7 @@ final class AppModel: ObservableObject {
             }
             if let blocker = disconnectEligibilityBlocker { throw RecoveryError.unsafe(blocker) }
             guard !protectionCoordinator.hasManagedProcess else {
-                throw RecoveryError.unsafe("Automation helpers are still stopping; wait for cleanup to finish.")
+                throw RecoveryError.unsafe("Automation is still stopping. Try again in a moment.")
             }
             disconnectLease = try disconnectController.disconnect(request, consent: true, executable: disconnectExecutable())
         } catch { disconnectFailure = error.localizedDescription }
@@ -6642,7 +6646,7 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.protectionQuiescenceFailure = succeeded
                 ? nil
-                : (message ?? "Automation cleanup could not be verified.")
+                : (message ?? Self.automationCleanupUnverified)
             self.runtimeState = self.aggregateRuntimeState
             self.onStatusChange?()
         }

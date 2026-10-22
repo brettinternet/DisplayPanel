@@ -1063,7 +1063,7 @@ final class WindowRelocationTests: XCTestCase {
             token: UUID(), kind: .begin, displayIDs: [1]
         ))
         XCTAssertFalse(result.0)
-        XCTAssertTrue(result.1?.contains("did not acknowledge") == true,
+        XCTAssertTrue(result.1?.contains("didn’t respond in time") == true,
             "unexpected refusal: \(String(describing: result.1))")
         await withCheckedContinuation { continuation in coordinator.shutdown { continuation.resume() } }
     }

@@ -51,7 +51,7 @@ final class ExperimentalDisconnectTests: XCTestCase {
         for scope in ["15 seconds", "another screen stays on"] {
             XCTAssertTrue(consent.contains(scope))
         }
-        XCTAssertTrue(presentation(.refused).detail.contains("won\u{2019}t guess"))
+        XCTAssertTrue(presentation(.refused).detail.contains("won’t guess"))
         XCTAssertTrue(presentation(.helperFailed).detail.contains("journal is kept"))
         XCTAssertTrue(presentation(.watchdogRecovery).detail.contains("Not verified"))
         XCTAssertTrue(presentation(.reconnectFailed).detail.contains("journal is kept"))

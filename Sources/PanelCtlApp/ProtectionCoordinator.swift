@@ -84,7 +84,7 @@ final class ProtectionCoordinator {
         let active = services.values.filter(\.hasManagedProcess)
         let generation = relocationGeneration
         guard active.allSatisfy(\.relocationControlIsHealthy) else {
-            return (false, "A managed blackout helper is starting or stopping; relocation is paused until coverage is certain.", nil)
+            return (false, "An automation blackout is starting or stopping. Waiting for it to settle.", nil)
         }
         guard !active.isEmpty else { return (true, nil, generation) }
         return await withCheckedContinuation { continuation in
@@ -96,7 +96,7 @@ final class ProtectionCoordinator {
                 guard !completed else { return }
                 completed = true
                 for service in active { service.cancelRelocationSuppressionAcknowledgement(for: control.token) }
-                continuation.resume(returning: (false, "A managed blackout helper did not acknowledge relocation suppression within one second.", nil))
+                continuation.resume(returning: (false, "An automation blackout didn’t respond in time.", nil))
             }
             for service in active {
                 service.beginRelocationSuppression(control) { succeeded, message in
@@ -109,7 +109,7 @@ final class ProtectionCoordinator {
                     guard failure == nil, self.relocationGeneration == generation,
                           self.relocationHelpersAreHealthy else {
                         continuation.resume(returning: (false,
-                            failure ?? "Blackout helper generation changed before relocation was acknowledged.", nil))
+                            failure ?? "An automation blackout restarted during the move.", nil))
                         return
                     }
                     continuation.resume(returning: (true, nil, generation))

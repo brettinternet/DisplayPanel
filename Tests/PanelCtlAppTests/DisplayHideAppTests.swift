@@ -503,7 +503,7 @@ final class DisplayHideAppTests: XCTestCase {
         try await waitUntil { !unselected.protectionQuiescencePending }
         XCTAssertNil(unselected.selectedHiddenMirrorSource)
         XCTAssertFalse(unselected.hiddenMirrorOverlayPolicyEligible)
-        XCTAssertTrue(unselected.hiddenMirrorProtectionSummary.contains("isn\u{2019}t in a rule"))
+        XCTAssertTrue(unselected.hiddenMirrorProtectionSummary.contains("isn’t in a rule"))
 
         for state in [DisplayHandoffStatus.State.recovery, .busy, .unsupported, .none] {
             let status = handoffStatus(
@@ -1009,7 +1009,7 @@ final class DisplayHideAppTests: XCTestCase {
             }, "DDC I2C request failed (IOReturn -536870212)."),
             ({ (identity: DisplayHideIdentity) throws -> DDCInputReading in
                 DDCInputReading(displayID: identity.displayID, uuid: identity.uuid, current: 0)
-            }, "didn\u{2019}t report its current input"),
+            }, "didn’t report its current input"),
             ({ (identity: DisplayHideIdentity) throws -> DDCInputReading in
                 DDCInputReading(displayID: identity.displayID + 1, uuid: identity.uuid, current: 0x0F)
             }, "answered as a different display")
@@ -1165,7 +1165,7 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(shownResult.message, "Shown.")
         XCTAssertEqual(
             shownResult.inputMessage,
-            "Couldn\u{2019}t switch the monitor to DisplayPort 1. fake DDC write failure after desktop restore. Use the monitor\u{2019}s buttons."
+            "Couldn’t switch the monitor to DisplayPort 1. fake DDC write failure after desktop restore. Use the monitor’s buttons."
         )
         XCTAssertTrue(shownResult.needsAttention)
         XCTAssertEqual(shownResult.undoInputCommand, "panelctl ddc-input --display '\(Self.targetUUID)' --set 0x11")
@@ -1233,10 +1233,10 @@ final class DisplayHideAppTests: XCTestCase {
         let result = try await hideAndWait(model)
 
         XCTAssertFalse(result.succeeded)
-        XCTAssertTrue(result.message.contains("couldn\u{2019}t confirm the display is hidden"), result.message)
+        XCTAssertTrue(result.message.contains("couldn’t confirm the display is hidden"), result.message)
         XCTAssertEqual(result.inputMessage, "Switched the monitor to HDMI 1.")
         XCTAssertEqual(result.inputOutcome?.recoveryCommand, command, "the returned input outcome survives inspection failure")
-        XCTAssertEqual(result.undoInputCommand, command, "the monitor switched but the display isn\u{2019}t hidden, so the way back is offered")
+        XCTAssertEqual(result.undoInputCommand, command, "the monitor switched but the display isn’t hidden, so the way back is offered")
         XCTAssertNotNil(model.displayRecoveryProblem)
         XCTAssertEqual(model.displayTiles.first { $0.id == Self.targetKey }?.status, .needsRecovery)
         XCTAssertNil(model.pageRecoveryProblem, "the display that needs recovery shows the problem")
@@ -1320,8 +1320,8 @@ final class DisplayHideAppTests: XCTestCase {
             XCTAssertEqual(result.undoInputCommand, state == .unverified
                 ? "panelctl ddc-input --display '\(Self.targetUUID)' --set 0x0F" : nil)
             XCTAssertEqual(result.inputMessage, state == .skipped
-                ? "Couldn\u{2019}t switch the monitor input. \(detail). Use the monitor\u{2019}s buttons."
-                : "Couldn\u{2019}t confirm the monitor switched to HDMI 1. If it didn\u{2019}t, use its buttons.")
+                ? "Couldn’t switch the monitor input. \(detail). Use the monitor’s buttons."
+                : "Couldn’t confirm the monitor switched to HDMI 1. If it didn’t, use its buttons.")
             XCTAssertEqual(model.controlDisplayOutcome, .partial)
         }
     }
@@ -1355,7 +1355,7 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(model.handoffStatus?.state, .recovery)
         XCTAssertFalse(result.succeeded)
         XCTAssertTrue(result.message.contains("panelctl recovery restore --journal"), result.message)
-        XCTAssertEqual(result.inputMessage, "Couldn\u{2019}t switch the monitor to HDMI 1. fake write failed. Use the monitor\u{2019}s buttons.")
+        XCTAssertEqual(result.inputMessage, "Couldn’t switch the monitor to HDMI 1. fake write failed. Use the monitor’s buttons.")
         XCTAssertEqual(result.inputOutcome?.recoveryCommand, command)
         XCTAssertEqual(result.undoInputCommand, command)
         XCTAssertEqual(model.displayTiles.first { $0.id == Self.targetKey }?.status, .needsRecovery)
@@ -1396,13 +1396,13 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertNil(request.returnInput)
         let warning = "the saved input belongs to a different display."
         XCTAssertEqual(request.returnInputWarning, warning)
-        XCTAssertEqual(model.showReturnInputNote, "Show won\u{2019}t switch the monitor input: \(warning)")
+        XCTAssertEqual(model.showReturnInputNote, "Show won’t switch the monitor input: \(warning)")
 
         let result = try await showAndWait(model)
         XCTAssertTrue(showCalled)
         XCTAssertNil(showInput, "Show proceeds without issuing stale saved DDC input")
         XCTAssertTrue(result.succeeded)
-        XCTAssertEqual(result.inputMessage, "Didn\u{2019}t switch the monitor input: \(warning)")
+        XCTAssertEqual(result.inputMessage, "Didn’t switch the monitor input: \(warning)")
         XCTAssertTrue(result.inputNeedsAttention)
     }
 
@@ -1493,7 +1493,7 @@ final class DisplayHideAppTests: XCTestCase {
             XCTAssertEqual(hideCalls, 0, "cleanup \(cleanupResult) retained after ordinary disable must block Hide")
             XCTAssertTrue(model.protectionQuiescenceFailure?.localizedCaseInsensitiveContains("cleanup") == true)
             XCTAssertFalse(result.succeeded)
-            XCTAssertTrue(result.message.contains("automation didn\u{2019}t confirm it stopped"), result.message)
+            XCTAssertTrue(result.message.contains("automation didn’t confirm it stopped"), result.message)
         }
     }
 
@@ -1636,7 +1636,7 @@ final class DisplayHideAppTests: XCTestCase {
         let hiding = try XCTUnwrap(delegate.makeMenu().items.first { $0.title == "Target" })
         XCTAssertFalse(hiding.isEnabled)
         if #available(macOS 14.4, *) {
-            XCTAssertEqual(hiding.subtitle, "Hiding\u{2026}")
+            XCTAssertEqual(hiding.subtitle, "Hiding…")
         }
 
         completion?(false, "brightness restore failed")
@@ -1855,7 +1855,7 @@ final class DisplayHideAppTests: XCTestCase {
         model.hide(targetUUID: Self.sourceUUID)
         XCTAssertTrue(model.isBlackoutHidden(Self.sourceUUID), "another display can still be blacked out")
         XCTAssertEqual(model.blackoutReadiness(for: displays[0])?.localizedDescription,
-                       "PanelCtl won\u{2019}t hide the last visible display.")
+                       "PanelCtl won’t hide the last visible display.")
     }
 
     func testShowUsesConfirmedJournalAndRetainsFailureWithoutFalseSuccess() async throws {
@@ -1884,7 +1884,7 @@ final class DisplayHideAppTests: XCTestCase {
         // A stale action for another display never shows the journaled one.
         let wrongDisplay = try await showAndWait(model, Self.sourceUUID)
         XCTAssertFalse(wrongDisplay.succeeded)
-        XCTAssertTrue(wrongDisplay.message.contains("isn\u{2019}t hidden by PanelCtl"), wrongDisplay.message)
+        XCTAssertTrue(wrongDisplay.message.contains("isn’t hidden by PanelCtl"), wrongDisplay.message)
         XCTAssertTrue(shownJournalIDs.isEmpty)
 
         let failed = try await showAndWait(model)
@@ -2840,7 +2840,7 @@ final class DisplayHideAppTests: XCTestCase {
         // Inspection failures are problems even without a journal.
         box.value = handoffStatus(.none, target: nil, source: nil, inspectionFailure: "unreadable journal")
         model.refreshDisplays()
-        XCTAssertEqual(model.displayRecoveryProblem, "Couldn\u{2019}t check display recovery: unreadable journal")
+        XCTAssertEqual(model.displayRecoveryProblem, "Couldn’t check display recovery: unreadable journal")
     }
 
     func testExternalMirrorFollowerStaysVisibleWithoutUnresolvedRecovery() throws {
@@ -2871,7 +2871,7 @@ final class DisplayHideAppTests: XCTestCase {
             XCTAssertEqual(tile.status, .mirrored)
             XCTAssertEqual(tile.action, .hide)
             XCTAssertEqual(tile.actionBlocker,
-                           "macOS is mirroring this display. Turn off mirroring in System Settings \u{2192} Displays first.")
+                           "macOS is mirroring this display. Turn off mirroring in System Settings → Displays first.")
             XCTAssertNil(model.displayRecoveryProblem)
             XCTAssertFalse(model.activeDisplays.contains { $0.id == follower.id },
                            "Visibility must not make a mirror follower eligible for automation")
@@ -3402,9 +3402,9 @@ final class DisplayHideAppTests: XCTestCase {
         let menu = delegate.makeMenu()
         let titles = menu.items.map(\.title)
         XCTAssertTrue(titles.contains("Show Target"))
-        XCTAssertFalse(titles.contains("Review Display Recovery\u{2026}"), "a healthy hidden display isn't a recovery problem")
+        XCTAssertFalse(titles.contains("Review Display Recovery…"), "a healthy hidden display isn't a recovery problem")
         XCTAssertTrue(titles.contains("Hide Mirror source"), "another display can still be blacked out")
-        let settingsItem = try XCTUnwrap(menu.items.first { $0.title == "Settings\u{2026}" })
+        let settingsItem = try XCTUnwrap(menu.items.first { $0.title == "Settings…" })
         XCTAssertEqual(settingsItem.keyEquivalent, ",")
         model.setShowMenuBarIcon(false)
         XCTAssertTrue(delegate.makeMenu().items.contains { $0.title == "Show Target" },
@@ -3511,7 +3511,7 @@ final class DisplayHideAppTests: XCTestCase {
         delegate.model = model
         let menu = delegate.makeMenu()
         let titles = menu.items.map(\.title)
-        XCTAssertTrue(titles.contains("Review Display Recovery\u{2026}"))
+        XCTAssertTrue(titles.contains("Review Display Recovery…"))
         XCTAssertFalse(titles.contains("Show Target"), "Show needs a restorable journal")
 
         XCTAssertFalse(delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false))
@@ -3524,7 +3524,7 @@ final class DisplayHideAppTests: XCTestCase {
 
         controller.selectDisplay(uuid: Self.mainUUID)
         controller.select(.automation)
-        let review = try XCTUnwrap(menu.items.firstIndex { $0.title == "Review Display Recovery\u{2026}" })
+        let review = try XCTUnwrap(menu.items.firstIndex { $0.title == "Review Display Recovery…" })
         menu.performActionForItem(at: review)
         XCTAssertEqual(controller.selectedTab, .displays)
         XCTAssertEqual(controller.selectedDisplayID, Self.targetKey, "review selects the affected display")
@@ -3555,7 +3555,7 @@ final class DisplayHideAppTests: XCTestCase {
         let delegate = AppDelegate()
         delegate.model = model
         let menu = delegate.makeMenu()
-        let review = try XCTUnwrap(menu.items.firstIndex { $0.title == "Review Display Recovery\u{2026}" })
+        let review = try XCTUnwrap(menu.items.firstIndex { $0.title == "Review Display Recovery…" })
         menu.performActionForItem(at: review)
         let window = try XCTUnwrap(NSApp.windows.first {
             $0.identifier == SettingsWindowController.windowIdentifier && $0.isVisible
@@ -3733,8 +3733,8 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(showCalls, 1)
         let shownAgain = try await send(.show)
         XCTAssertEqual(shownAgain.outcome, .noOp)
-        XCTAssertEqual(shownAgain.summary, "Target isn\u{2019}t hidden.")
-        XCTAssertEqual(showCalls, 1, "a repeated Show doesn\u{2019}t switch the input again")
+        XCTAssertEqual(shownAgain.summary, "Target isn’t hidden.")
+        XCTAssertEqual(showCalls, 1, "a repeated Show doesn’t switch the input again")
         let status = try await send(.status, uuid: nil)
         XCTAssertEqual(status.outcome, .partial)
         XCTAssertEqual(status.exitCode, 5)
@@ -3924,7 +3924,7 @@ final class DisplayHideAppTests: XCTestCase {
         let first = try await Task.detached { try toggle() }.value
         XCTAssertEqual(first.outcome, .done)
         let second = try await XCTUnwrap(waited).value
-        XCTAssertEqual(second.outcome, .busy, "a toggle that waited doesn\u{2019}t undo the first")
+        XCTAssertEqual(second.outcome, .busy, "a toggle that waited doesn’t undo the first")
         XCTAssertEqual(second.exitCode, 1)
         XCTAssertEqual([hideCalls, showCalls], [1, 0])
         XCTAssertEqual(model.displayTiles.first { $0.uuid == Self.targetUUID }?.status, .hidden)
@@ -3973,7 +3973,7 @@ final class DisplayHideAppTests: XCTestCase {
         let hidden = await send(.toggleHide)
         XCTAssertEqual(hidden.outcome, .done)
         XCTAssertEqual(hidden.summary, "Hidden.")
-        XCTAssertNil(hidden.detail, "Black out doesn\u{2019}t switch inputs")
+        XCTAssertNil(hidden.detail, "Black out doesn’t switch inputs")
         XCTAssertTrue(model.isBlackoutHidden(Self.targetUUID))
         XCTAssertEqual(hidden.displays?.first { $0.targetUUID == Self.targetUUID }?.observedState, "hidden-by-panelctl")
         let again = await send(.hide)
@@ -3993,7 +3993,7 @@ final class DisplayHideAppTests: XCTestCase {
         let last = await send(.hide, Self.mainUUID)
         XCTAssertEqual(last.outcome, .refused)
         XCTAssertEqual(last.exitCode, 1)
-        XCTAssertEqual(last.summary, "PanelCtl won\u{2019}t hide the last visible display.")
+        XCTAssertEqual(last.summary, "PanelCtl won’t hide the last visible display.")
         XCTAssertFalse(model.isBlackoutHidden(Self.mainUUID))
 
         // Hides never start from wake or startup.
@@ -4003,10 +4003,10 @@ final class DisplayHideAppTests: XCTestCase {
         let waking = await send(.hide)
         XCTAssertEqual(waking.outcome, .refused)
         model.setDisplayLifecycleTransitioning(false)
-        XCTAssertFalse(model.isBlackoutHidden(Self.targetUUID), "a refused request doesn\u{2019}t run later")
+        XCTAssertFalse(model.isBlackoutHidden(Self.targetUUID), "a refused request doesn’t run later")
         XCTAssertTrue(model.isBlackoutHidden(Self.sourceUUID))
         let relaunched = makeModel(defaults: defaults, displays: displays)
-        XCTAssertFalse(relaunched.isBlackoutHidden(Self.sourceUUID), "relaunching doesn\u{2019}t hide a display again")
+        XCTAssertFalse(relaunched.isBlackoutHidden(Self.sourceUUID), "relaunching doesn’t hide a display again")
     }
 
     func testOversizedStatusDoesNotMisreportCompletedProtectionToggle() async throws {

@@ -51,13 +51,13 @@ final class BlackoutHideTests: XCTestCase {
             XCTAssertEqual(showSide.subtitle, "Hidden", "each display shows its state")
         }
         XCTAssertTrue(delegate.makeMenu().items.contains { $0.title == "Hide Main" && $0.isEnabled })
-        XCTAssertEqual(hide(Self.sideUUID, model)?.message, "Couldn\u{2019}t hide. This display is already hidden.")
+        XCTAssertEqual(hide(Self.sideUUID, model)?.message, "Couldn’t hide. This display is already hidden.")
 
         XCTAssertEqual(hide(Self.thirdUUID, model)?.succeeded, true)
         XCTAssertEqual(coverRequests.last, [202, 303], "several displays can be blacked out at once")
 
         // The last visible display stays visible.
-        let blocker = "PanelCtl won\u{2019}t hide the last visible display."
+        let blocker = "PanelCtl won’t hide the last visible display."
         XCTAssertEqual(tile(Self.mainUUID, model).actionBlocker, blocker)
         let hideMain = try XCTUnwrap(delegate.makeMenu().items.first { $0.title == "Hide Main" })
         XCTAssertFalse(hideMain.isEnabled, "a Hide that can't run is dimmed")
@@ -65,7 +65,7 @@ final class BlackoutHideTests: XCTestCase {
         let requests = coverRequests.count
         result = hide(Self.mainUUID, model)
         XCTAssertEqual(result?.succeeded, false)
-        XCTAssertEqual(result?.message, "Couldn\u{2019}t hide. " + blocker)
+        XCTAssertEqual(result?.message, "Couldn’t hide. " + blocker)
         XCTAssertEqual(coverRequests.count, requests)
         XCTAssertFalse(model.isBlackoutHidden(Self.mainUUID))
 
@@ -134,7 +134,7 @@ final class BlackoutHideTests: XCTestCase {
             XCTAssertEqual(showSource.subtitle, "Hidden")
         }
 
-        let lastVisible = "PanelCtl won\u{2019}t hide the last visible display."
+        let lastVisible = "PanelCtl won’t hide the last visible display."
         XCTAssertEqual(tile(Self.thirdUUID, model).actionBlocker, lastVisible,
                        "the removed target and blacked-out source do not count as visible")
         XCTAssertFalse(model.isBlackoutHidden(Self.thirdUUID))
@@ -148,7 +148,7 @@ final class BlackoutHideTests: XCTestCase {
         XCTAssertEqual(model.displayResults[Self.mainUUID.lowercased()]?.message,
                        "Shown because macOS started mirroring it.")
         XCTAssertEqual(hide(Self.mainUUID, model)?.message,
-                       "Couldn\u{2019}t hide. macOS is mirroring this display. Turn off mirroring in System Settings \u{2192} Displays first.")
+                       "Couldn’t hide. macOS is mirroring this display. Turn off mirroring in System Settings → Displays first.")
     }
 
     func testVerifiedSourceShowAndRemovalShowKeepIndependentState() async throws {
@@ -291,20 +291,20 @@ final class BlackoutHideTests: XCTestCase {
 
         XCTAssertEqual(tile(Self.sideUUID, model).actionBlocker, "Wake this display to hide it.")
         XCTAssertEqual(hide(Self.mainUUID, model)?.message,
-                       "Couldn\u{2019}t hide. PanelCtl won\u{2019}t hide the last visible display.",
+                       "Couldn’t hide. PanelCtl won’t hide the last visible display.",
                        "an asleep display doesn't count as visible")
 
         current = displays
         mirrored = [202]
         model.refreshDisplays()
         XCTAssertEqual(hide(Self.sideUUID, model)?.message,
-                       "Couldn\u{2019}t hide. macOS is mirroring this display. Turn off mirroring in System Settings \u{2192} Displays first.")
+                       "Couldn’t hide. macOS is mirroring this display. Turn off mirroring in System Settings → Displays first.")
 
         mirrored = []
         uncoverable = [202]
         let result = hide(Self.sideUUID, model)
         XCTAssertEqual(result?.succeeded, false)
-        XCTAssertEqual(result?.message, "Couldn\u{2019}t hide. The display wasn\u{2019}t fully covered. Try again.")
+        XCTAssertEqual(result?.message, "Couldn’t hide. The display wasn’t fully covered. Try again.")
         XCTAssertFalse(model.isBlackoutHidden(Self.sideUUID))
         XCTAssertEqual(coverRequests.last, [])
         XCTAssertTrue(model.uncoveredHiddenDisplays.isEmpty)
@@ -485,7 +485,7 @@ final class BlackoutHideTests: XCTestCase {
         try await waitUntil("source Hide finished") { result != nil && !model.protectionQuiescencePending }
         XCTAssertEqual(result?.succeeded, true, result?.message ?? "")
         XCTAssertEqual(model.hiddenMirrorProtectionSummary,
-                       "Automation suspended while hidden \u{00B7} Main is blacked out by Hide",
+                       "Automation suspended while hidden · Main is blacked out by Hide",
                        "a selected source that Hide covers isn't reported as unselected")
 
         let stopped = expectation(description: "watcher stopped")
