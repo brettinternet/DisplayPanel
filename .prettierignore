@@ -1,4 +1,4 @@
-# Markdown is hand-wrapped, and Backlog.md owns backlog/.
+# Markdown is hand-wrapped, and bl owns backlog/.
 *.md
 backlog/
 Packaging/Assets.xcassets/

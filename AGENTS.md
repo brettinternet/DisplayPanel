@@ -2,20 +2,23 @@
 
 ## Backlog
 
-This repository uses Backlog.md in `backlog/` as the authoritative task source.
-Install the pinned CLI with `mise install`; invoke it as `mise exec -- backlog`.
-Read `backlog instructions overview` and the matching task-creation,
-task-execution, or task-finalization guide before that operation. Search/read
-existing tasks first. Use the CLI for task changes; never edit task Markdown
-by hand. Reread each task after writing it.
+This repository uses native `bl` in `backlog/` as the authoritative task
+source. Install the pinned CLI with `mise install`; invoke it as
+`mise exec -- bl`. Read `mise exec -- bl instructions overview` and
+`mise exec -- bl instructions workflow` before acting. Read and change tasks
+only through `bl` (CLI or MCP); never edit task Markdown by hand. Reread each
+task after writing it.
 
-Claim tasks on the primary `main` checkout by setting `In Progress` and rereading
-before implementation. Do not select a task already in progress. Keep backlog
-state on primary `main`, including when implementation uses a worktree; the
-config intentionally disables cross-branch/remote task scanning and auto-commit.
-Respect dependencies. Record concrete blockers and resume conditions in the task;
-`To Do` does not mean prerequisites or human gates are satisfied. Only mark Done
-when acceptance criteria and delivery evidence are met. Do not push or open a PR
+Pick and claim work in one step, with one stable session for the whole loop:
+`mise exec -- bl next --claim --start --session SESSION --json`. A status
+change is not a claim. Renew with `mise exec -- bl heartbeat --session SESSION`
+before half the TTL. Keep backlog state on primary `main`, including when
+implementation uses a worktree. Respect dependencies. Record each criterion's
+command and result with `mise exec -- bl ac ID check N --evidence TEXT`, not
+note lines; a status alone does not mean prerequisites or human gates are
+satisfied. Finish with `mise exec -- bl done ID --session SESSION` only when
+acceptance criteria and delivery evidence are met; if stopping incomplete, use
+`mise exec -- bl release ID --session SESSION`. Do not push or open a PR
 without explicit permission.
 
 ## Test selection

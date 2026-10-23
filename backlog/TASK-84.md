@@ -1,0 +1,42 @@
+---
+id: TASK-84
+title: Handle explicit Show during monitor input transitions
+status: done
+type: bug
+priority: medium
+assignees: ['@pi']
+rank: afd1745d1745d1736
+refs: [Sources/PanelCtlApp/AppModel.swift, Tests/PanelCtlAppTests/DisplayActionAppTests.swift, docs/display-recovery.md, Tests/PanelCtlAppTests/DisplayHideAppTests.swift]
+created: 2026-10-15T22:57:00Z
+updated: 2026-10-15T23:11:00Z
+---
+
+On 2026-10-15, installed PanelCtl 0.8.1 refused the saved two-step Show PC displays Action while the other computer powered down and monitors switched back. The first step reported Displays are sleeping or changing; the second was not run. Both displays remained hidden by mirroring after settling. User confirmed retry works; a read-only post-retry capture independently shows both steps done, both inputs alreadySelected, all four displays unmirrored, and the original journal verified. This is a transient request refusal with no deferred execution, not evidence of a permanently stuck gate or a failed unmirror transaction. After investigation, the user authorized the recommended bounded explicit Show wait and a commit on main. No hardware reproduction, installation or live display writes are authorized by this task.
+
+## Acceptance criteria
+
+- [x] Document the explicit Show behavior during input-return settlement, including timeout and cancellation, before changing current immediate-refusal semantics.
+- [x] The agreed behavior preserves fresh identity, exact mode and journal validation, actual sleep safety, and stop-on-failure; never retries a hardware write or automatically Shows solely because a monitor reconnects.
+- [x] Verify the chosen behavior with narrow fake-backed regressions for a Show Action arriving during settlement, timeout, and interruption; keep hardware validation limits explicit.
+
+## Plan
+
+1. Reuse the existing input-return settlement window for one explicit mirror Show or Show-only Action. Hold its existing operation/Action lease, suppress background re-hide, and wait for two quiet matching observations within the original 15-second deadline. Do not defer mixed Actions, Toggle, or actual sleep.
+2. Preserve captured journal/baseline/removal identities throughout the wait. Refuse on timeout, identity/journal change, sleep/unlock/shutdown, or changed saved request; consume the pending request before fresh normal Show preflight, with no hardware write retries.
+3. Keep direct Settings/menu Show and explicit app show consistent with named Show Actions; expose waiting through existing progress presentation.
+4. Add narrow fake-backed regressions for successful two-display Show after settlement, timeout and cancellation, identity/journal refusal, concurrent request exclusion, and writer failure without replay. Run affected suites/compiler checks and one independent safety review.
+5. Document hardware limits, finalize task evidence, and commit the fix on main without installation or push.
+
+## Notes
+
+User authorized implementation and commit on main on 2026-10-15, adopting the recommended bounded explicit Show wait. No installation, live display writes, push or PR authorized. Incident evidence: debug/show-transition-20261015/investigation.md. Implement via existing input-return settlement rather than replaying failed display writes; actual sleep remains immediate refusal/interruption.
+
+Implemented one pending explicit mirror Show inside the existing input-return settlement state machine. Direct/menu/Settings Show, app show, and Show-only Actions hold their existing operation or Action lease and wait for two quiet matching observations within the original 15-second deadline. Normal fresh preflight still owns modes, identity, journal and input return; no writer is retried. Mixed Actions/Toggle and actual sleep retain refusal semantics. Sleep/unlock/shutdown, changed identities/journal, or deadline expiry consume and refuse the request. Pending Show suppresses background re-hide. Settings retains Show/Show All even while the journal target is temporarily absent. Timeout cleanup releases the operation before reconciling automation.
+
+Verification: initial focused new regressions passed (3); expanded DisplayHideAppTests, DisplayActionAppTests, AppControlServerTests and AutomationSafetyTests passed with warnings-as-errors: 157 selected, 147 runnable, 10 interactive skips. After final review fixes, DisplayHideAppTests and DisplayActionAppTests passed again: 140 selected, 130 runnable, 10 interactive skips. CLIParserTests.testHelpVersionAndErrorDescriptions passed; built panelctl help app executed read-only. git diff --check passed. Swift LSP diagnostics were unknown, so compiler/tests provide verification. Evidence logs retained in ignored debug/show-transition-20261015/. No native UI, DDC, public/private display-write trial, installation, push or PR.
+
+Independent read-only safety review 02250cdc-0f4d-47ae-b9c6-adb8ef233dfb found the temporary-missing-target Settings/menu Show admission gap; corrected the guard and extended the direct/CLI regression to use refreshed canShow=false status with absent target, assert Show/Show All remain reachable, and assert no writes until return. Also fixed direct timeout automation reconciliation and extended the existing helper-backed overlay test; initial fixture placement left its blackout trigger active, so moved timeout before that trigger without weakening assertions. Final focused suites pass. Review artifact: /Users/brett/.pi/agent/sessions/--Users-brett-dev-me-panelctl--/subagent-artifacts/outputs/02250cdc-0f4d-47ae-b9c6-adb8ef233dfb/show-settlement-review.md. No remaining reported findings; no second general review.
+
+## Summary
+
+Explicit mirror Show and Show-only Actions now wait within an existing 15-second input-return window, then revalidate and execute once. Sleep, timeout and identity/journal changes refuse safely; pending Show replaces background re-hide and never retries writes. Fixed temporary-missing-target Show availability and timeout automation cleanup. Focused warnings-as-errors tests pass (147 runnable in expanded suites, 130 rerun after final fixes; 10 native-UI skips), CLI help check passes, and independent safety-review finding is fixed with regression coverage. Hardware timing remains unverified; no installation or display-write trial.
