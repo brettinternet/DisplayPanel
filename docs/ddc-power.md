@@ -1,6 +1,6 @@
 # Experimental DDC power
 
-`panelctl ddc-power` turns a monitor off or on over DDC (VCP `0xD6`) on Apple
+`dp ddc-power` turns a monitor off or on over DDC (VCP `0xD6`) on Apple
 Silicon. It is CLI-only and experimental.
 
 > [!WARNING]
@@ -9,9 +9,9 @@ Silicon. It is CLI-only and experimental.
 > monitor's power within reach.
 
 ```sh
-panelctl ddc-power --display UUID                                # read only
-panelctl ddc-power --display UUID --set off --accept-power-risk
-panelctl ddc-power --display UUID --set on --json                # best effort
+dp ddc-power --display UUID                                # read only
+dp ddc-power --display UUID --set off --accept-power-risk
+dp ddc-power --display UUID --set on --json                # best effort
 ```
 
 Power is not input switching or hiding: after Off, the macOS desktop may still

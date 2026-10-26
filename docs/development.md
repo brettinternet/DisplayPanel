@@ -7,11 +7,11 @@ task init                     # install tools, create .env, install Git hooks
 task check                    # Prettier, ShellCheck, warnings-as-errors build
 task fix                      # apply Prettier formatting
 swift test --disable-sandbox
-swift build --product panelctl
-swift build --product PanelCtlApp
+swift build --product dp
+swift build --product DisplayPanelApp
 scripts/test-release-version.sh
 python3 scripts/test-signing.py # fake tools only; no keys or privacy prompts
-task build:release            # universal .build/PanelCtl.app (https://taskfile.dev)
+task build:release            # universal .build/DisplayPanel.app (https://taskfile.dev)
 ```
 
 Tests use fake display writers and DDC channels; they never change real
@@ -19,11 +19,11 @@ displays. Opt-in environment variables:
 
 | Variable | Effect |
 | --- | --- |
-| `PANELCTL_TEST_LIVE_BLACKOUT=1` | Run a geometry test that briefly covers external screens with black windows |
-| `PANELCTL_ICC_EVIDENCE_DIR=<dir>` | Replay saved ICC profiles (read-only) |
-| `PANELCTL_SETTINGS_FIXTURE_OUTPUT=<dir>` | Write Settings screenshots (below) |
-| `PANELCTL_DISCONNECT_FIXTURE_OUTPUT=<dir>` | Write Full disconnect screenshots |
-| `PANELCTL_SETTINGS_FIXTURE_WIDTH=<pt>` / `_HEIGHT=<pt>` | Screenshot window size (width 440–680) |
+| `DISPLAYPANEL_TEST_LIVE_BLACKOUT=1` | Run a geometry test that briefly covers external screens with black windows |
+| `DISPLAYPANEL_ICC_EVIDENCE_DIR=<dir>` | Replay saved ICC profiles (read-only) |
+| `DISPLAYPANEL_SETTINGS_FIXTURE_OUTPUT=<dir>` | Write Settings screenshots (below) |
+| `DISPLAYPANEL_DISCONNECT_FIXTURE_OUTPUT=<dir>` | Write Full disconnect screenshots |
+| `DISPLAYPANEL_SETTINGS_FIXTURE_WIDTH=<pt>` / `_HEIGHT=<pt>` | Screenshot window size (width 440–680) |
 
 Recovery checks that don't change displays are in
 [display recovery](display-recovery.md#testing).
@@ -34,13 +34,13 @@ Render Settings with fake displays, without launching the app or touching real
 monitors:
 
 ```sh
-mkdir -p /tmp/panelctl-settings
-PANELCTL_SETTINGS_FIXTURE_OUTPUT=/tmp/panelctl-settings swift test --disable-sandbox \
+mkdir -p /tmp/displaypanel-settings
+DISPLAYPANEL_SETTINGS_FIXTURE_OUTPUT=/tmp/displaypanel-settings swift test --disable-sandbox \
   --filter 'SettingsWindowTests.test(Settings|Displays|DismissInputWarning|DisplayAction)FixtureSnapshots'
 ```
 
 ```sh
-PANELCTL_DISCONNECT_FIXTURE_OUTPUT=/tmp/panelctl-disconnect swift test --disable-sandbox \
+DISPLAYPANEL_DISCONNECT_FIXTURE_OUTPUT=/tmp/displaypanel-disconnect swift test --disable-sandbox \
   --filter 'DisplayDisconnectIntegrationTests|ExperimentalDisconnectTests'
 ```
 
@@ -55,7 +55,7 @@ also shows. The menu-bar mark in `StatusMark.swift` follows the same design.
 
 ## Release
 
-The version in `Sources/PanelCtlCore/CLIHelp.swift` must match the tag's base
+The version in `Sources/DisplayPanelCore/CLIHelp.swift` must match the tag's base
 version (`1.2.3` for `v1.2.3-beta.1`).
 
 ```sh
@@ -89,7 +89,7 @@ Never put certificates with private keys, passwords or exports in the repository
 chat or logs. No Apple Developer membership is needed.
 
 1. In **Keychain Access → Certificate Assistant → Create a Certificate**, use
-   name **PanelCtl Signing**, Identity Type **Self Signed Root**, Certificate
+   name **DisplayPanel Signing**, Identity Type **Self Signed Root**, Certificate
    Type **Code Signing**, and enable overriding defaults. Choose a deliberate
    long validity period (for example 3650 days), retain the Code Signing
    extended key usage, and save in the login keychain. Keep this same identity
@@ -104,34 +104,34 @@ chat or logs. No Apple Developer membership is needed.
 3. Copy the certificate's 40-character SHA-1 fingerprint (not the quoted name):
 
    ```sh
-   export PANELCTL_SIGNING_IDENTITY=REPLACE_WITH_40_CHARACTER_CERTIFICATE_SHA1
-   export PANELCTL_REQUIRE_SIGNING=1
+   export DISPLAYPANEL_SIGNING_IDENTITY=REPLACE_WITH_40_CHARACTER_CERTIFICATE_SHA1
+   export DISPLAYPANEL_REQUIRE_SIGNING=1
    task build:release
    ```
 
-   Both packaging scripts honor these variables. `PANELCTL_SIGNING_KEYCHAIN`
+   Both packaging scripts honor these variables. `DISPLAYPANEL_SIGNING_KEYCHAIN`
    optionally selects a specific keychain path. An invalid or unavailable
    configured identity fails signing; it never falls back to ad-hoc. Without an
    identity, PR/local packaging may use ad-hoc signing with a visible warning,
-   unless `PANELCTL_REQUIRE_SIGNING=1`. Direct `swift build` is not app packaging.
+   unless `DISPLAYPANEL_REQUIRE_SIGNING=1`. Direct `swift build` is not app packaging.
 
    For local `task` runs, set
-   `PANELCTL_SIGNING_IDENTITY=…` in `.env` (created from `example.env`
+   `DISPLAYPANEL_SIGNING_IDENTITY=…` in `.env` (created from `example.env`
    by `task init`; untracked), which the Taskfile loads.
    `task copy:release` refuses to install an ad-hoc signed app, because each
    ad-hoc build would make macOS drop Accessibility and other privacy grants.
 
 4. In Keychain Access **My Certificates**, select the identity including its
    private key and export a password-protected `.p12` outside the checkout
-   (the commands below use `/private/tmp/PanelCtl-signing.p12`). Keep an encrypted
+   (the commands below use `/private/tmp/DisplayPanel-signing.p12`). Keep an encrypted
    backup in owner-controlled storage. Run these commands yourself; the password
    command prompts for the export password without putting it in shell history:
 
    ```sh
-   base64 -i /private/tmp/PanelCtl-signing.p12 | tr -d '\n' | gh secret set PANELCTL_SIGNING_P12_BASE64 --repo brettinternet/PanelCtl
-   gh secret set PANELCTL_SIGNING_P12_PASSWORD --repo brettinternet/PanelCtl
-   gh secret set PANELCTL_SIGNING_IDENTITY --repo brettinternet/PanelCtl --body "$PANELCTL_SIGNING_IDENTITY"
-   gh secret list --repo brettinternet/PanelCtl
+   base64 -i /private/tmp/DisplayPanel-signing.p12 | tr -d '\n' | gh secret set DISPLAYPANEL_SIGNING_P12_BASE64 --repo brettinternet/DisplayPanel
+   gh secret set DISPLAYPANEL_SIGNING_P12_PASSWORD --repo brettinternet/DisplayPanel
+   gh secret set DISPLAYPANEL_SIGNING_IDENTITY --repo brettinternet/DisplayPanel --body "$DISPLAYPANEL_SIGNING_IDENTITY"
+   gh secret list --repo brettinternet/DisplayPanel
    ```
 
    Remove the temporary export through Finder after uploading and backing it up.
@@ -150,8 +150,8 @@ chat or logs. No Apple Developer membership is needed.
    not receive these secrets. The ephemeral runner is the final cleanup boundary
    if a job is forcibly terminated.
 
-The app identifier remains `com.brettinternet.panelctl`; the CLI/helper uses
-`com.brettinternet.panelctl.cli`. Nested code is signed before the app, using
+The app identifier remains `com.brettinternet.displaypanel`; the CLI/helper uses
+`com.brettinternet.displaypanel.cli`. Nested code is signed before the app, using
 one certificate. Explicit designated requirements pin the identifier and leaf
 certificate SHA-1, not the changing code hash. This is a certificate fingerprint,
 not use of SHA-1 as the executable's digest algorithm. See Apple's
@@ -163,11 +163,11 @@ After setup, package **two different commits** with the same identity into
 separate output directories. On each extracted app and CLI, run:
 
 ```sh
-codesign --verify --deep --strict /path/to/PanelCtl.app
-codesign -d -r- /path/to/PanelCtl.app
-codesign -d -r- /path/to/PanelCtl.app/Contents/Helpers/panelctl
-codesign -d -r- /path/to/panelctl
-/path/to/PanelCtl.app/Contents/Helpers/panelctl help
+codesign --verify --deep --strict /path/to/DisplayPanel.app
+codesign -d -r- /path/to/DisplayPanel.app
+codesign -d -r- /path/to/DisplayPanel.app/Contents/Helpers/dp
+codesign -d -r- /path/to/dp
+/path/to/DisplayPanel.app/Contents/Helpers/dp help
 ```
 
 Record the commits and the requirements: each corresponding requirement must
@@ -176,7 +176,7 @@ identifier, and contain no `cdhash`. The fake-tool signing tests check policy
 and command ordering only; they do not prove macOS accepts the certificate.
 
 With explicit owner approval for desktop interaction, install the first app
-using `scripts/install-release.swift SOURCE_APP /Applications/PanelCtl.app`,
+using `scripts/install-release.swift SOURCE_APP /Applications/DisplayPanel.app`,
 verify opening it and Launch at Login registration, then install the second at
 the same path and repeat. Confirm the bundled helper executes and the installed
 signature still verifies. The installer copies the signed bundle without
@@ -188,7 +188,7 @@ certificate is not notarization or Apple trust.
 To rotate, create a new identity and replace all three repository secrets plus
 the local fingerprint together. Retain the old key securely for any deliberate
 old-line rebuilds. Rotation changes the designated requirement. Users must
-remove/re-add PanelCtl's privacy grant once after rotation **or the first upgrade
+remove/re-add DisplayPanel's privacy grant once after rotation **or the first upgrade
 from an ad-hoc build**; a stale enabled switch in System Settings does not prove
 permission is valid. Builds signed with the unchanged identity are intended to
 retain grants. TASK-64 checks Accessibility in the app process and requests it

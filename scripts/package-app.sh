@@ -22,7 +22,7 @@ output_app=$6
 
 # shellcheck source=signing.sh
 source "$(dirname "${BASH_SOURCE[0]}")/signing.sh"
-panelctl_signing_configure
+displaypanel_signing_configure
 # shellcheck source=release-version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/release-version.sh"
 if ! release_version_parse "$tag"; then
@@ -65,13 +65,13 @@ if [[ -e "$output_app" ]]; then
 	exit 1
 fi
 
-staging=$(mktemp -d "$output_parent/.PanelCtl.app.XXXXXX")
+staging=$(mktemp -d "$output_parent/.DisplayPanel.app.XXXXXX")
 mkdir "$staging/Contents" "$staging/Contents/MacOS" \
 	"$staging/Contents/Helpers" "$staging/Contents/Resources"
 
-lipo -create "$arm64_ui" "$x86_64_ui" -output "$staging/Contents/MacOS/PanelCtl"
-lipo -create "$arm64_cli" "$x86_64_cli" -output "$staging/Contents/Helpers/panelctl"
-chmod 0755 "$staging/Contents/MacOS/PanelCtl" "$staging/Contents/Helpers/panelctl"
+lipo -create "$arm64_ui" "$x86_64_ui" -output "$staging/Contents/MacOS/DisplayPanel"
+lipo -create "$arm64_cli" "$x86_64_cli" -output "$staging/Contents/Helpers/dp"
+chmod 0755 "$staging/Contents/MacOS/DisplayPanel" "$staging/Contents/Helpers/dp"
 
 sed \
 	-e "s/@MARKETING_VERSION@/$marketing_version/g" \
@@ -90,11 +90,11 @@ xcrun actool \
 	--output-partial-info-plist /dev/null \
 	>/dev/null
 # Sign nested code first; both use the same configured certificate.
-panelctl_sign "$staging/Contents/Helpers/panelctl" "com.brettinternet.panelctl.cli"
-panelctl_sign "$staging" "com.brettinternet.panelctl"
+displaypanel_sign "$staging/Contents/Helpers/dp" "com.brettinternet.displaypanel.cli"
+displaypanel_sign "$staging" "com.brettinternet.displaypanel"
 codesign --verify --deep --strict "$staging"
 
-for binary in "$staging/Contents/MacOS/PanelCtl" "$staging/Contents/Helpers/panelctl"; do
+for binary in "$staging/Contents/MacOS/DisplayPanel" "$staging/Contents/Helpers/dp"; do
 	architectures=$(lipo -archs "$binary")
 	[[ "$architectures" == *arm64* && "$architectures" == *x86_64* ]]
 	lipo -info "$binary"

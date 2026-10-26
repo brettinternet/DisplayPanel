@@ -2,9 +2,9 @@
   <img width="128" src="Packaging/Assets.xcassets/AppIcon.appiconset/icon_128x128@2x.png" style="padding:0.5rem;">
 </p>
 
-<h1 align="center">panelctl</h1>
+<h1 align="center">DisplayPanel</h1>
 
-[![CI](https://github.com/brettinternet/panelctl/actions/workflows/ci.yml/badge.svg)](https://github.com/brettinternet/panelctl/actions/workflows/ci.yml)
+[![CI](https://github.com/brettinternet/displaypanel/actions/workflows/ci.yml/badge.svg)](https://github.com/brettinternet/displaypanel/actions/workflows/ci.yml)
 
 A macOS CLI and menu-bar app for per-display Hide/Show, idle blackout,
 click-through dimming, display sleep and experimental monitor controls.
@@ -15,12 +15,12 @@ click-through dimming, display sleep and experimental monitor controls.
 
 ```sh
 # CLI with mise
-mise use -g 'github:brettinternet/panelctl[matching=panelctl-cli]'
+mise use -g 'github:brettinternet/displaypanel[matching=dp-cli]'
 ```
 
 Or download the app or CLI and its SHA-256 checksum from
-[GitHub Releases](https://github.com/brettinternet/panelctl/releases). Move
-`PanelCtl.app` to `/Applications`, or put `panelctl` on your `PATH`.
+[GitHub Releases](https://github.com/brettinternet/displaypanel/releases). Move
+`DisplayPanel.app` to `/Applications`, or put `dp` on your `PATH`.
 
 Releases use a stable self-signed certificate, not Developer ID signing or
 notarization (older releases were ad-hoc signed). If macOS blocks one, verify
@@ -31,22 +31,22 @@ requires re-granting any privacy permissions once.
 To build the CLI (macOS 13+, Swift 5.9+):
 
 ```sh
-swift build -c release --product panelctl
-install -m 0755 .build/release/panelctl ~/.local/bin/panelctl
+swift build -c release --product dp
+install -m 0755 .build/release/dp ~/.local/bin/dp
 ```
 
 ## Use
 
 ```sh
-panelctl list                                            # find display UUIDs
-panelctl blackout --display UUID --idle-after 5m --watch # black out when idle
-panelctl blackout --display UUID --mode working --overlay-opacity 60 --timeout 1h
-panelctl sleep-displays --keep-system-awake
-panelctl wake-displays
-panelctl app toggle-hide --display UUID --json           # drive the running app
+dp list                                            # find display UUIDs
+dp blackout --display UUID --idle-after 5m --watch # black out when idle
+dp blackout --display UUID --mode working --overlay-opacity 60 --timeout 1h
+dp sleep-displays --keep-system-awake
+dp wake-displays
+dp app toggle-hide --display UUID --json           # drive the running app
 ```
 
-Run `panelctl help` or `panelctl <command> --help` for every option.
+Run `dp help` or `dp <command> --help` for every option.
 
 In the app, **Settings → Displays** hides and shows each display,
 **Automations** runs idle blackout and dimming rules, and **General** holds

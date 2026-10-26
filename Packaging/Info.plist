@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>PanelCtl</string>
+	<string>DisplayPanel</string>
 	<key>CFBundleExecutable</key>
-	<string>PanelCtl</string>
+	<string>DisplayPanel</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.brettinternet.panelctl</string>
+	<string>com.brettinternet.displaypanel</string>
 	<key>CFBundleIconFile</key>
 	<string>AppIcon</string>
 	<key>CFBundleIconName</key>
@@ -15,14 +15,14 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>PanelCtl</string>
+	<string>DisplayPanel</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>@MARKETING_VERSION@</string>
 	<key>CFBundleVersion</key>
 	<string>@BUILD_NUMBER@</string>
-	<key>PanelCtlReleaseVersion</key>
+	<key>DisplayPanelReleaseVersion</key>
 	<string>@RELEASE_VERSION@</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>

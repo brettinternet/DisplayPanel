@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Rename PanelCtl to DisplayPanel and the `panelctl` CLI to `dp`. The bundle ID, Application Support folder, defaults domain and release asset names change too; re-grant privacy permissions after upgrading.
 - Let Show wait for an in-progress monitor input switch before restoring displays, without retrying failed writes.
 - Resume enabled automation after display wake or configuration changes without requiring a manual refresh.
 - Shorten Settings, menu, dialog and error copy, and show each display's Keep windows off status once in the menu.

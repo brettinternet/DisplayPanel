@@ -2,17 +2,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "PanelCtl",
+    name: "DisplayPanel",
     platforms: [.macOS(.v13)],
     products: [
-        .executable(name: "panelctl", targets: ["panelctl"]),
-        .executable(name: "PanelCtlApp", targets: ["PanelCtlApp"])
+        .executable(name: "dp", targets: ["dp"]),
+        .executable(name: "DisplayPanelApp", targets: ["DisplayPanelApp"])
     ],
     targets: [
-        .target(name: "PanelCtlCore"),
-        .executableTarget(name: "panelctl", dependencies: ["PanelCtlCore"]),
-        .executableTarget(name: "PanelCtlApp", dependencies: ["PanelCtlCore"]),
-        .testTarget(name: "PanelCtlCoreTests", dependencies: ["PanelCtlCore"], resources: [.copy("Fixtures")]),
-        .testTarget(name: "PanelCtlAppTests", dependencies: ["PanelCtlApp", "PanelCtlCore"])
+        .target(name: "DisplayPanelCore"),
+        .executableTarget(name: "dp", dependencies: ["DisplayPanelCore"]),
+        .executableTarget(name: "DisplayPanelApp", dependencies: ["DisplayPanelCore"]),
+        .testTarget(name: "DisplayPanelCoreTests", dependencies: ["DisplayPanelCore"], resources: [.copy("Fixtures")]),
+        .testTarget(name: "DisplayPanelAppTests", dependencies: ["DisplayPanelApp", "DisplayPanelCore"])
     ]
 )

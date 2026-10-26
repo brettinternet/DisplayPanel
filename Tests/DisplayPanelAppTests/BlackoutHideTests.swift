@@ -1,0 +1,732 @@
+import AppKit
+import XCTest
+@testable import DisplayPanelApp
+@testable import DisplayPanelCore
+
+/// Hide's Black out style, with a fake overlay manager.
+@MainActor
+final class BlackoutHideTests: XCTestCase {
+    private static let mainUUID = "AAAAAAAA-0000-0000-0000-000000000001"
+    private static let sideUUID = "BBBBBBBB-0000-0000-0000-000000000002"
+    private static let thirdUUID = "CCCCCCCC-0000-0000-0000-000000000003"
+    private static let suiteName = "displaypanel-blackout-hide-\(ProcessInfo.processInfo.processIdentifier)"
+
+    private let displays = [
+        display(1, id: 101, uuid: mainUUID, name: "Main", main: true),
+        display(2, id: 202, uuid: sideUUID, name: "Side"),
+        display(3, id: 303, uuid: thirdUUID, name: "Third")
+    ]
+    /// Every set of displays the model asked to cover, in order.
+    private var coverRequests: [Set<UInt32>] = []
+    /// Displays the fake overlay manager fails to cover.
+    private var uncoverable: Set<UInt32> = []
+
+    override func tearDown() {
+        UserDefaults(suiteName: Self.suiteName)?.removePersistentDomain(forName: Self.suiteName)
+        super.tearDown()
+    }
+
+    func testHideBlacksOutUntilShowAndKeepsOneDisplayVisible() throws {
+        let model = try makeModel()
+        let delegate = AppDelegate()
+        delegate.model = model
+        XCTAssertTrue(model.displayTiles.allSatisfy { $0.action == .hide && $0.actionBlocker == nil })
+        XCTAssertFalse(model.statusMark.hidden)
+
+        var result = hide(Self.sideUUID, model)
+        XCTAssertEqual(result?.succeeded, true)
+        XCTAssertEqual(coverRequests.last, [202])
+        XCTAssertEqual(tile(Self.sideUUID, model).status, .hidden)
+        XCTAssertTrue(model.statusMark.hidden, "the menu-bar mark shows a hidden display")
+        XCTAssertEqual(tile(Self.sideUUID, model).action, .show)
+        XCTAssertNil(tile(Self.sideUUID, model).actionBlocker)
+        XCTAssertEqual(model.coveredHiddenDisplayIDs, [202])
+        XCTAssertEqual(model.automationDisplayChoices.map(\.uuid), [Self.mainUUID, Self.thirdUUID, Self.sideUUID])
+        XCTAssertEqual(model.automationDisplayChoices.last?.automationChoiceLabel, "Side (Hidden)")
+        XCTAssertEqual(model.makeNewDisplayAction(selectedDisplayID: Self.sideUUID).target?.uuid, Self.sideUUID)
+        XCTAssertEqual(model.coveredHiddenDisplayIDs, [202], "configuration does not show hidden displays")
+        let showSide = try XCTUnwrap(delegate.makeMenu().items.first { $0.title == "Show Side" })
+        XCTAssertTrue(showSide.isEnabled)
+        if #available(macOS 14.4, *) {
+            XCTAssertEqual(showSide.subtitle, "Hidden", "each display shows its state")
+        }
+        XCTAssertTrue(delegate.makeMenu().items.contains { $0.title == "Hide Main" && $0.isEnabled })
+        XCTAssertEqual(hide(Self.sideUUID, model)?.message, "Couldn’t hide. This display is already hidden.")
+
+        XCTAssertEqual(hide(Self.thirdUUID, model)?.succeeded, true)
+        XCTAssertEqual(coverRequests.last, [202, 303], "several displays can be blacked out at once")
+
+        // The last visible display stays visible.
+        let blocker = "DisplayPanel won’t hide the last visible display."
+        XCTAssertEqual(tile(Self.mainUUID, model).actionBlocker, blocker)
+        let hideMain = try XCTUnwrap(delegate.makeMenu().items.first { $0.title == "Hide Main" })
+        XCTAssertFalse(hideMain.isEnabled, "a Hide that can't run is dimmed")
+        XCTAssertEqual(hideMain.toolTip, blocker)
+        let requests = coverRequests.count
+        result = hide(Self.mainUUID, model)
+        XCTAssertEqual(result?.succeeded, false)
+        XCTAssertEqual(result?.message, "Couldn’t hide. " + blocker)
+        XCTAssertEqual(coverRequests.count, requests)
+        XCTAssertFalse(model.isBlackoutHidden(Self.mainUUID))
+
+        // Escape on a hidden display shows it; elsewhere it isn't Hide's.
+        XCTAssertFalse(model.showHiddenDisplay(at: 101))
+        XCTAssertTrue(model.showHiddenDisplay(at: 303))
+        XCTAssertEqual(coverRequests.last, [202])
+        XCTAssertEqual(model.displayResults[Self.thirdUUID.lowercased()]?.message, "Shown.")
+
+        result = show(Self.sideUUID, model)
+        XCTAssertEqual(result?.succeeded, true)
+        XCTAssertEqual(coverRequests.last, [])
+        XCTAssertEqual(tile(Self.sideUUID, model).status, .on)
+        XCTAssertEqual(tile(Self.sideUUID, model).action, .hide)
+        XCTAssertFalse(model.statusMark.hidden)
+
+        // Hidden displays are session-only: relaunch starts with every display shown.
+        XCTAssertEqual(hide(Self.sideUUID, model)?.succeeded, true)
+        let relaunched = try makeModel(keepingDefaults: true)
+        XCTAssertTrue(relaunched.blackoutHiddenDisplays.isEmpty)
+        XCTAssertEqual(tile(Self.sideUUID, relaunched).status, .on)
+    }
+
+    func testHiddenDisplayKeepsSavedNameWhenLiveNameDisappears() throws {
+        var connected = displays
+        let model = try makeModel(displays: { connected })
+        XCTAssertEqual(hide(Self.sideUUID, model)?.succeeded, true)
+
+        connected[1] = Self.display(2, id: 909, uuid: Self.sideUUID.lowercased(), name: nil)
+        model.refreshDisplays()
+        XCTAssertEqual(tile(Self.sideUUID, model).name, "Side")
+        XCTAssertEqual(tile(Self.sideUUID, model).action, .show)
+
+        connected[1] = Self.display(2, id: 909, uuid: Self.sideUUID, name: "Current name")
+        model.refreshDisplays()
+        XCTAssertEqual(tile(Self.sideUUID, model).name, "Current name", "Prefer an available live name")
+    }
+
+    func testVerifiedRemovalSourceCanBeHiddenAndExternalMirrorsStillRefuse() async throws {
+        var handoff = Self.handoffStatus(target: displays[1], source: displays[0])
+        var mirrored: Set<UInt32> = [101, 202]
+        let model = try makeModel(
+            mirrored: { mirrored.contains($0) },
+            handoff: { handoff }
+        )
+        try await waitUntil("verified removal status is quiesced") {
+            !model.protectionQuiescencePending
+        }
+
+        XCTAssertNil(model.blackoutReadiness(for: displays[0]))
+        let delegate = AppDelegate()
+        delegate.model = model
+        let request = AppControlRequest(command: .hide, targetUUID: Self.mainUUID)
+        let response = await model.handleDisplayControlRequest(request)
+        XCTAssertEqual(response.outcome, .done)
+        XCTAssertEqual(response.summary, "Hidden.")
+        XCTAssertEqual(response.displays?.first?.observedState, "hidden-by-displaypanel")
+        XCTAssertEqual(coverRequests.last, [101], "the source cover also blacks out its mirrored removed target")
+        XCTAssertEqual(model.coveredHiddenDisplayIDs, [101])
+        XCTAssertEqual(tile(Self.mainUUID, model).status, .hidden)
+        XCTAssertEqual(tile(Self.mainUUID, model).action, .show)
+        XCTAssertNil(tile(Self.mainUUID, model).actionBlocker)
+        let showSource = try XCTUnwrap(delegate.makeMenu().items.first { $0.title == "Show Main" })
+        XCTAssertTrue(showSource.isEnabled)
+        if #available(macOS 14.4, *) {
+            XCTAssertEqual(showSource.subtitle, "Hidden")
+        }
+
+        let lastVisible = "DisplayPanel won’t hide the last visible display."
+        XCTAssertEqual(tile(Self.thirdUUID, model).actionBlocker, lastVisible,
+                       "the removed target and blacked-out source do not count as visible")
+        XCTAssertFalse(model.isBlackoutHidden(Self.thirdUUID))
+
+        // An unverified/external mirror is not an authorized source. Reconciliation
+        // drops the source cover rather than masking a macOS mirror set.
+        handoff = Self.noHandoffStatus()
+        mirrored = [101]
+        model.refreshDisplays()
+        XCTAssertFalse(model.isBlackoutHidden(Self.mainUUID))
+        XCTAssertEqual(model.displayResults[Self.mainUUID.lowercased()]?.message,
+                       "Shown because macOS started mirroring it.")
+        XCTAssertEqual(hide(Self.mainUUID, model)?.message,
+                       "Couldn’t hide. macOS is mirroring this display. Turn off mirroring in System Settings → Displays first.")
+    }
+
+    func testVerifiedSourceShowAndRemovalShowKeepIndependentState() async throws {
+        var handoff = Self.handoffStatus(target: displays[1], source: displays[0])
+        var mirrored: Set<UInt32> = [101, 202]
+        let model = try makeModel(
+            mirrored: { mirrored.contains($0) },
+            handoff: { handoff },
+            showDisplay: { _, _ in
+                handoff = Self.noHandoffStatus()
+                mirrored = []
+                return .notRequested
+            }
+        )
+        try await waitUntil("verified removal status is quiesced") {
+            !model.protectionQuiescencePending
+        }
+        XCTAssertEqual(hide(Self.mainUUID, model)?.succeeded, true)
+
+        // Showing the source removes only its app-owned cover; the removal journal
+        // remains showable and no topology Show is issued.
+        let shownSource = await model.handleDisplayControlRequest(
+            AppControlRequest(command: .show, targetUUID: Self.mainUUID)
+        )
+        XCTAssertEqual(shownSource.outcome, .done)
+        XCTAssertEqual(handoff.state, .hidden)
+        XCTAssertEqual(tile(Self.sideUUID, model).status, .hidden)
+        XCTAssertFalse(model.isBlackoutHidden(Self.mainUUID))
+
+        // Re-cover it, then show the removed display. Its source's Hide cover remains.
+        XCTAssertEqual(hide(Self.mainUUID, model)?.succeeded, true)
+        let shownTarget = await model.handleDisplayControlRequest(
+            AppControlRequest(command: .show, targetUUID: Self.sideUUID)
+        )
+        XCTAssertEqual(shownTarget.outcome, .done)
+        XCTAssertEqual(handoff.state, .none)
+        XCTAssertTrue(model.isBlackoutHidden(Self.mainUUID))
+        XCTAssertEqual(coverRequests.last, [101])
+
+        // A fresh app session forgets only the source's session-only cover.
+        handoff = Self.handoffStatus(target: displays[1], source: displays[0])
+        mirrored = [101, 202]
+        let relaunched = try makeModel(
+            mirrored: { mirrored.contains($0) },
+            handoff: { handoff },
+            keepingDefaults: true
+        )
+        try await waitUntil("relaunch recovery status is quiesced") {
+            !relaunched.protectionQuiescencePending
+        }
+        XCTAssertFalse(relaunched.isBlackoutHidden(Self.mainUUID))
+        XCTAssertEqual(tile(Self.mainUUID, relaunched).status, .on)
+        XCTAssertEqual(tile(Self.sideUUID, relaunched).status, .hidden)
+    }
+
+    func testVerifiedSourceBlackoutSurvivesSleepWakeAndDisconnect() async throws {
+        var current = displays
+        var mirrored: Set<UInt32> = [101, 202]
+        let handoff = Self.handoffStatus(target: displays[1], source: displays[0])
+        let model = try makeModel(
+            displays: { current },
+            mirrored: { mirrored.contains($0) },
+            handoff: { handoff }
+        )
+        try await waitUntil("verified removal status is quiesced") {
+            !model.protectionQuiescencePending
+        }
+        XCTAssertEqual(hide(Self.mainUUID, model)?.succeeded, true)
+
+        model.setDisplayLifecycleTransitioning(true)
+        current = [Self.display(1, id: 101, uuid: Self.mainUUID, name: "Main", main: true, asleep: true), displays[1], displays[2]]
+        model.refreshDisplays()
+        XCTAssertTrue(model.isBlackoutHidden(Self.mainUUID))
+        XCTAssertEqual(coverRequests.last, [101], "the source's session Hide remains assigned through sleep")
+        model.setDisplayLifecycleTransitioning(false)
+        XCTAssertTrue(model.isBlackoutHidden(Self.mainUUID), "a verified mirror source is not mistaken for external mirroring while asleep")
+
+        current = displays
+        model.refreshDisplays()
+        XCTAssertTrue(model.isBlackoutHidden(Self.mainUUID))
+        XCTAssertEqual(coverRequests.last, [101], "the source is covered again on wake")
+
+        current = [displays[1], displays[2]]
+        mirrored = []
+        model.refreshDisplays()
+        XCTAssertTrue(model.isBlackoutHidden(Self.mainUUID), "a disconnected source retains its session Hide while another display remains")
+        XCTAssertEqual(tile(Self.mainUUID, model).status, .hidden)
+        XCTAssertNil(tile(Self.mainUUID, model).display)
+
+        current = displays
+        mirrored = [101, 202]
+        model.refreshDisplays()
+        XCTAssertTrue(model.isBlackoutHidden(Self.mainUUID))
+        XCTAssertEqual(coverRequests.last, [101], "the exact source is covered again when it reconnects")
+    }
+
+    func testSourceIsShownWhenOnlyItsRemovedTargetRemains() async throws {
+        var current = displays
+        let handoff = Self.handoffStatus(target: displays[1], source: displays[0])
+        let model = try makeModel(
+            displays: { current },
+            mirrored: { [101, 202].contains($0) },
+            handoff: { handoff }
+        )
+        try await waitUntil("verified removal status is quiesced") {
+            !model.protectionQuiescencePending
+        }
+        XCTAssertEqual(hide(Self.mainUUID, model)?.succeeded, true)
+        current = [displays[0], displays[1]]
+        model.refreshDisplays()
+        XCTAssertFalse(model.isBlackoutHidden(Self.mainUUID))
+        XCTAssertEqual(coverRequests.last, [])
+        XCTAssertEqual(tile(Self.sideUUID, model).status, .hidden)
+        XCTAssertNotNil(model.blackoutReadiness(for: current[0]))
+    }
+
+    func testUnverifiedRemovalSourceStillRefusesBlackout() async throws {
+        var handoff = Self.handoffStatus(target: displays[1], source: displays[0])
+        let model = try makeModel(mirrored: { [101, 202].contains($0) }, handoff: { handoff })
+        try await waitUntil("verified removal status is quiesced") {
+            !model.protectionQuiescencePending
+        }
+        XCTAssertNil(model.blackoutReadiness(for: displays[0]))
+        handoff = DisplayHandoffStatus(
+            state: .hidden, target: handoff.target, source: handoff.source,
+            journalPath: handoff.journalPath, journalID: handoff.journalID,
+            canShow: true, mirrorTopologyVerified: false
+        )
+        // Direct menu/Settings Hide must refresh even before a topology notification.
+        let coverCount = coverRequests.count
+        XCTAssertEqual(hide(Self.mainUUID, model)?.succeeded, false)
+        XCTAssertFalse(model.isBlackoutHidden(Self.mainUUID))
+        XCTAssertEqual(coverRequests.count, coverCount)
+    }
+
+    func testHideRefusesDisplaysItCantBlackOut() throws {
+        var current = [displays[0], Self.display(2, id: 202, uuid: Self.sideUUID, name: "Side", asleep: true)]
+        var mirrored: Set<UInt32> = []
+        let model = try makeModel(displays: { current }, mirrored: { mirrored.contains($0) })
+
+        XCTAssertEqual(tile(Self.sideUUID, model).actionBlocker, "Wake this display to hide it.")
+        XCTAssertEqual(hide(Self.mainUUID, model)?.message,
+                       "Couldn’t hide. DisplayPanel won’t hide the last visible display.",
+                       "an asleep display doesn't count as visible")
+
+        current = displays
+        mirrored = [202]
+        model.refreshDisplays()
+        XCTAssertEqual(hide(Self.sideUUID, model)?.message,
+                       "Couldn’t hide. macOS is mirroring this display. Turn off mirroring in System Settings → Displays first.")
+
+        mirrored = []
+        uncoverable = [202]
+        let result = hide(Self.sideUUID, model)
+        XCTAssertEqual(result?.succeeded, false)
+        XCTAssertEqual(result?.message, "Couldn’t hide. The display wasn’t fully covered. Try again.")
+        XCTAssertFalse(model.isBlackoutHidden(Self.sideUUID))
+        XCTAssertEqual(coverRequests.last, [])
+        XCTAssertTrue(model.uncoveredHiddenDisplays.isEmpty)
+    }
+
+    func testHiddenDisplayStaysHiddenThroughDisconnectionAndIsCoveredAgain() throws {
+        var current = displays
+        let model = try makeModel(displays: { current })
+        XCTAssertEqual(hide(Self.sideUUID, model)?.succeeded, true)
+
+        current = [displays[0], displays[2]]
+        model.refreshDisplays()
+        XCTAssertTrue(model.isBlackoutHidden(Self.sideUUID))
+        XCTAssertEqual(coverRequests.last, [])
+        XCTAssertEqual(model.coveredHiddenDisplayIDs, [])
+        let away = tile(Self.sideUUID, model)
+        XCTAssertEqual(away.status, .hidden)
+        XCTAssertNil(away.display)
+        XCTAssertEqual(away.action, .show, "Show stays reachable while it's away")
+
+        // It reconnects with a new display ID and a cover that fails at first.
+        let reconnected = Self.display(2, id: 222, uuid: Self.sideUUID, name: "Side")
+        current = [displays[0], reconnected, displays[2]]
+        uncoverable = [222]
+        model.refreshDisplays()
+        XCTAssertEqual(coverRequests.last, [222])
+        XCTAssertEqual(model.uncoveredHiddenDisplays, [Self.sideUUID.lowercased()])
+        XCTAssertEqual(model.coveredHiddenDisplayIDs, [], "focus never follows onto an uncovered display")
+
+        uncoverable = []
+        model.refreshDisplays()
+        XCTAssertEqual(coverRequests.last, [222])
+        XCTAssertTrue(model.uncoveredHiddenDisplays.isEmpty)
+        XCTAssertEqual(model.coveredHiddenDisplayIDs, [222])
+
+        // Show works while it's away, and its tile goes with it.
+        current = [displays[0], displays[2]]
+        model.refreshDisplays()
+        XCTAssertEqual(show(Self.sideUUID, model)?.succeeded, true)
+        XCTAssertFalse(model.displayTiles.contains { $0.id == Self.sideUUID.lowercased() })
+    }
+
+    func testHiddenDisplaysAreShownWhenNoOtherDisplayRemains() throws {
+        var current = [displays[0], displays[1]]
+        let model = try makeModel(displays: { current })
+        XCTAssertEqual(hide(Self.sideUUID, model)?.succeeded, true)
+
+        current = [displays[1]]
+        model.refreshDisplays()
+        XCTAssertFalse(model.isBlackoutHidden(Self.sideUUID))
+        XCTAssertEqual(coverRequests.last, [])
+        XCTAssertEqual(tile(Self.sideUUID, model).status, .on)
+        XCTAssertEqual(model.displayResults[Self.sideUUID.lowercased()]?.message,
+                       "Shown because no other display was connected.")
+    }
+
+    func testHiddenDisplayIsShownWhenMacOSMirrorsIt() throws {
+        var mirrored: Set<UInt32> = []
+        let model = try makeModel(mirrored: { mirrored.contains($0) })
+        XCTAssertEqual(hide(Self.sideUUID, model)?.succeeded, true)
+
+        // Another display now mirrors the hidden one, so it would show the cover too.
+        mirrored = [202, 303]
+        model.refreshDisplays()
+        XCTAssertFalse(model.isBlackoutHidden(Self.sideUUID))
+        XCTAssertEqual(coverRequests.last, [])
+        XCTAssertEqual(tile(Self.sideUUID, model).status, .mirrored)
+        XCTAssertEqual(model.displayResults[Self.sideUUID.lowercased()]?.message,
+                       "Shown because macOS started mirroring it.")
+    }
+
+    func testAutomationSkipsHiddenDisplaysAndRestoreNeverShowsThem() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("displaypanel-blackout-hide-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let helper = directory.appendingPathComponent("fake-dp")
+        let log = directory.appendingPathComponent("helper.log")
+        let script = """
+        #!/bin/bash
+        printf 'launch:%s\\n' "$*" >> "$DISPLAYPANEL_TEST_LOG"
+        printf '{"state":"blacked_out","blackedOutDisplayIDs":[101]}\\n'
+        trap 'printf "{\\"state\\":\\"stopped\\",\\"blackedOutDisplayIDs\\":[],\\"cleanupSucceeded\\":true}\\n"; exit 0' TERM
+        while IFS= read -r command; do
+            printf 'command:%s\\n' "$command" >> "$DISPLAYPANEL_TEST_LOG"
+            if [[ "$command" == "restore" ]]; then
+                printf '{"state":"waiting","blackedOutDisplayIDs":[]}\\n'
+            fi
+        done
+        """
+        try Data(script.utf8).write(to: helper)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        setenv("DISPLAYPANEL_HELPER", helper.path, 1)
+        setenv("DISPLAYPANEL_TEST_LOG", log.path, 1)
+        defer {
+            unsetenv("DISPLAYPANEL_HELPER")
+            unsetenv("DISPLAYPANEL_TEST_LOG")
+        }
+
+        let model = try makeModel(configure: { defaults in
+            var preferences = ProtectionPreferences()
+            preferences.isEnabled = true
+            preferences.didChooseDisplays = true
+            preferences.selectedDisplayUUIDs = [Self.mainUUID, Self.sideUUID]
+            preferences.idleSeconds = 120
+            preferences.followUpAction = .restore
+            preferences.followUpSeconds = 15
+            defaults.set(try JSONEncoder().encode(preferences), forKey: "blackoutPreferences")
+        })
+        let options = "--mode blocking --overlay-opacity 100 --idle-after 120 --watch --timeout 15"
+        let ruleID = try XCTUnwrap(model.automationPreferences.rules.first?.id.uuidString)
+        let ruleOption = "--displaypanel-rule \(ruleID)"
+        let both = "launch:blackout --display \(Self.mainUUID) --display \(Self.sideUUID) \(ruleOption) \(options)"
+        let skippingSide = "launch:blackout --display \(Self.mainUUID) --displaypanel-hidden-display \(Self.sideUUID) \(ruleOption) \(options)"
+        var lines = try await waitForLines(1, at: log)
+        XCTAssertEqual(lines, [both])
+
+        XCTAssertEqual(hide(Self.sideUUID, model)?.succeeded, true)
+        lines = try await waitForLines(2, at: log)
+        XCTAssertEqual(lines.last, skippingSide, "automation restarts without the hidden display")
+
+        // Restore ends the automation cover; it never shows the manually hidden display.
+        try await waitUntil("active automation cover on the remaining display") { model.runtimeState == .blackedOut }
+        XCTAssertTrue(try model.restoreBlackout())
+        lines = try await waitForLines(3, at: log)
+        XCTAssertEqual(lines.last, "command:restore")
+        try await waitUntil("waiting after Restore") { model.runtimeState == .waiting }
+        XCTAssertTrue(model.isBlackoutHidden(Self.sideUUID))
+        XCTAssertEqual(coverRequests.last, [202])
+
+        // Automation waits while every display it covers is hidden.
+        XCTAssertEqual(hide(Self.mainUUID, model)?.succeeded, true)
+        try await waitUntil("waiting for a shown display") {
+            model.runtimeState == .waitingForDisplays("The displays automation covers are hidden. Show one to resume.")
+        }
+
+        XCTAssertEqual(show(Self.mainUUID, model)?.succeeded, true)
+        XCTAssertEqual(show(Self.sideUUID, model)?.succeeded, true)
+        try await waitUntil("relaunch covering both") {
+            (try? String(contentsOf: log, encoding: .utf8))?
+                .split(separator: "\n").last.map(String.init) == both
+        }
+
+        let stopped = expectation(description: "watcher stopped")
+        model.shutdown { stopped.fulfill() }
+        await fulfillment(of: [stopped], timeout: 3)
+    }
+
+    func testBlackedOutRemovalSourceExplainsSuspendedAutomation() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("displaypanel-blackout-hide-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let helper = directory.appendingPathComponent("fake-dp")
+        let script = """
+        #!/bin/bash
+        printf '{"state":"waiting","blackedOutDisplayIDs":[]}\\n'
+        trap 'printf "{\\"state\\":\\"stopped\\",\\"blackedOutDisplayIDs\\":[],\\"cleanupSucceeded\\":true}\\n"; exit 0' TERM
+        while IFS= read -r command; do :; done
+        """
+        try Data(script.utf8).write(to: helper)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        setenv("DISPLAYPANEL_HELPER", helper.path, 1)
+        defer { unsetenv("DISPLAYPANEL_HELPER") }
+
+        let handoff = Self.handoffStatus(target: displays[1], source: displays[0])
+        let model = try makeModel(
+            mirrored: { [101, 202].contains($0) },
+            handoff: { handoff },
+            configure: { defaults in
+                var preferences = ProtectionPreferences()
+                preferences.isEnabled = true
+                preferences.allDisplays = true
+                defaults.set(try JSONEncoder().encode(preferences), forKey: "blackoutPreferences")
+            }
+        )
+        try await waitUntil("verified removal status is quiesced") { !model.protectionQuiescencePending }
+        var result: DisplayOperationResult?
+        model.hide(targetUUID: Self.mainUUID) { result = $0 }
+        try await waitUntil("source Hide finished") { result != nil && !model.protectionQuiescencePending }
+        XCTAssertEqual(result?.succeeded, true, result?.message ?? "")
+        XCTAssertEqual(model.hiddenMirrorProtectionSummary,
+                       "Automation suspended while hidden · Main is blacked out by Hide",
+                       "a selected source that Hide covers isn't reported as unselected")
+
+        let stopped = expectation(description: "watcher stopped")
+        model.shutdown { stopped.fulfill() }
+        await fulfillment(of: [stopped], timeout: 3)
+    }
+
+    func testAutomationRestartsOnceAfterMultiStepAction() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("displaypanel-action-rearm-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let helper = directory.appendingPathComponent("fake-dp")
+        let log = directory.appendingPathComponent("helper.log")
+        let script = """
+        #!/bin/bash
+        printf 'launch:%s\\n' "$*" >> "$DISPLAYPANEL_TEST_LOG"
+        printf '{"state":"waiting","blackedOutDisplayIDs":[]}\\n'
+        trap 'printf "{\\"state\\":\\"stopped\\",\\"blackedOutDisplayIDs\\":[],\\"cleanupSucceeded\\":true}\\n"; exit 0' TERM
+        while IFS= read -r command; do
+            printf 'command:%s\\n' "$command" >> "$DISPLAYPANEL_TEST_LOG"
+        done
+        """
+        try Data(script.utf8).write(to: helper)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
+        setenv("DISPLAYPANEL_HELPER", helper.path, 1)
+        setenv("DISPLAYPANEL_TEST_LOG", log.path, 1)
+        defer { unsetenv("DISPLAYPANEL_HELPER"); unsetenv("DISPLAYPANEL_TEST_LOG") }
+        let model = try makeModel(configure: { defaults in
+            var preferences = ProtectionPreferences()
+            preferences.isEnabled = true
+            preferences.didChooseDisplays = true
+            preferences.selectedDisplayUUIDs = [Self.mainUUID, Self.sideUUID]
+            preferences.idleSeconds = 120
+            preferences.followUpAction = .restore
+            preferences.followUpSeconds = 15
+            defaults.set(try JSONEncoder().encode(preferences), forKey: "blackoutPreferences")
+        })
+        _ = try await waitForLines(1, at: log)
+        let side = try XCTUnwrap(displays.first { $0.uuid == Self.sideUUID })
+        let third = try XCTUnwrap(displays.first { $0.uuid == Self.thirdUUID })
+        let action = DisplayAction(name: "Two blackouts", steps: [
+            DisplayActionStep(target: DisplayIdentitySnapshot(side), effect: .blackOut),
+            DisplayActionStep(target: DisplayIdentitySnapshot(third), effect: .blackOut)
+        ])
+        try model.saveDisplayAction(action)
+        let finished = expectation(description: "run")
+        model.runDisplayAction(id: action.id) { response in
+            XCTAssertEqual(response.outcome, .done, response.error ?? "")
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 5)
+        // Helpers stay stopped across steps and the run reconciles automation once afterward.
+        let lines = try await waitForLines(2, at: log)
+        XCTAssertTrue(lines.last?.contains("--displaypanel-hidden-display \(Self.sideUUID)") == true, "\(lines)")
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(try String(contentsOf: log, encoding: .utf8).split(separator: "\n").count, 2)
+    }
+
+    func testShowAllRestoresMixedHiddenDisplaysAndRemovesMenuItem() async throws {
+        var handoff = Self.handoffStatus(target: displays[1], source: displays[0])
+        let model = try makeModel(
+            handoff: { handoff },
+            showDisplay: { _, _ in
+                handoff = Self.noHandoffStatus()
+                return .notRequested
+            }
+        )
+        try await waitUntil("automation stopped") { !model.protectionQuiescencePending }
+        XCTAssertEqual(hide(Self.thirdUUID, model)?.succeeded, true)
+        let delegate = AppDelegate()
+        delegate.model = model
+        let menu = delegate.makeMenu()
+        let bulk = try XCTUnwrap(menu.item(withTitle: "Show All Displays"))
+        XCTAssertTrue(bulk.isEnabled)
+        let third = try XCTUnwrap(menu.item(withTitle: "Show Third"))
+        XCTAssertGreaterThan(menu.index(of: bulk), menu.index(of: third))
+
+        let finished = expectation(description: "both displays shown")
+        finished.expectedFulfillmentCount = 2
+        var shown: [String] = []
+        model.showAllDisplays { uuid, result in
+            XCTAssertTrue(result.succeeded, result.message)
+            shown.append(uuid)
+            finished.fulfill()
+        }
+        await fulfillment(of: [finished], timeout: 5)
+        XCTAssertEqual(shown, [Self.sideUUID, Self.thirdUUID])
+        XCTAssertTrue(model.hiddenDisplayTiles.isEmpty)
+        XCTAssertEqual(coverRequests.last, [])
+        XCTAssertNil(delegate.makeMenu().item(withTitle: "Show All Displays"))
+    }
+
+    func testShowAllStopsAtFailedRestoreAndLeavesRemainingDisplayHidden() async throws {
+        let handoff = Self.handoffStatus(target: displays[1], source: displays[0])
+        let model = try makeModel(
+            handoff: { handoff },
+            showDisplay: { _, _ in
+                throw NSError(domain: "fake-show", code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "Restore refused"])
+            }
+        )
+        try await waitUntil("automation stopped") { !model.protectionQuiescencePending }
+        XCTAssertEqual(hide(Self.thirdUUID, model)?.succeeded, true)
+        let failed = expectation(description: "failed restore surfaced")
+        var results: [String] = []
+        model.showAllDisplays { uuid, result in
+            results.append(uuid)
+            XCTAssertFalse(result.succeeded)
+            XCTAssertTrue(result.message.contains("Restore refused"), result.message)
+            failed.fulfill()
+        }
+        await fulfillment(of: [failed], timeout: 5)
+        XCTAssertEqual(results, [Self.sideUUID])
+        XCTAssertTrue(model.isBlackoutHidden(Self.thirdUUID))
+        XCTAssertEqual(model.hiddenDisplayTiles.count, 2)
+    }
+
+    // MARK: Helpers
+
+    private func makeModel(
+        displays: (() -> [DisplayRecord])? = nil,
+        mirrored: @escaping (UInt32) -> Bool = { _ in false },
+        handoff: @escaping () -> DisplayHandoffStatus = {
+            DisplayHandoffStatus(state: .none, journalPath: "/nonexistent/displaypanel-blackout-hide.json")
+        },
+        showDisplay: @escaping (String, UInt8?) throws -> DisplayInputOutcome = { _, _ in
+            XCTFail("A blackout Show never restores a removed display")
+            return .notRequested
+        },
+        keepingDefaults: Bool = false,
+        configure: (UserDefaults) throws -> Void = { _ in }
+    ) throws -> AppModel {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: Self.suiteName))
+        if !keepingDefaults {
+            defaults.removePersistentDomain(forName: Self.suiteName)
+        }
+        try configure(defaults)
+        let fixed = self.displays
+        return AppModel(
+            defaults: defaults,
+            displayProvider: displays ?? { fixed },
+            idleSecondsProvider: { nil },
+            isDisplayMirrored: mirrored,
+            inspectHandoff: handoff,
+            hideDisplay: { _, _, _ in
+                XCTFail("Black out never removes a display from the desktop")
+                return .notRequested
+            },
+            showDisplay: showDisplay,
+            checkDDCInput: { _ in
+                XCTFail("Black out never queries DDC")
+                return DDCInputReading(displayID: 0, uuid: "", current: 1)
+            },
+            coverDisplays: { [unowned self] ids in
+                coverRequests.append(ids)
+                return ids.intersection(uncoverable)
+            }
+        )
+    }
+
+    private static func noHandoffStatus() -> DisplayHandoffStatus {
+        DisplayHandoffStatus(state: .none, journalPath: "/nonexistent/displaypanel-blackout-hide.json")
+    }
+
+    private static func handoffStatus(target: DisplayRecord, source: DisplayRecord) -> DisplayHandoffStatus {
+        func identity(_ display: DisplayRecord) -> DisplayHandoffIdentity {
+            DisplayHandoffIdentity(DisplayHideIdentity(
+                uuid: display.uuid!, displayID: display.id, name: display.name,
+                vendor: display.vendor, model: display.model, serial: display.serial
+            ))
+        }
+        return DisplayHandoffStatus(
+            state: .hidden,
+            target: identity(target),
+            source: identity(source),
+            journalPath: "/fake/current.json",
+            journalID: "verified-fixture",
+            canShow: true,
+            mirrorTopologyVerified: true
+        )
+    }
+
+    private func hide(_ uuid: String, _ model: AppModel) -> DisplayOperationResult? {
+        var result: DisplayOperationResult?
+        model.hide(targetUUID: uuid) { result = $0 }
+        return result
+    }
+
+    private func show(_ uuid: String, _ model: AppModel) -> DisplayOperationResult? {
+        var result: DisplayOperationResult?
+        model.show(targetUUID: uuid) { result = $0 }
+        return result
+    }
+
+    private func tile(_ uuid: String, _ model: AppModel) -> DisplayTile {
+        guard let tile = model.displayTiles.first(where: { $0.id == uuid.lowercased() }) else {
+            XCTFail("no tile for \(uuid)")
+            return DisplayTile(id: "", uuid: nil, name: "", status: .unavailable, display: nil)
+        }
+        return tile
+    }
+
+    private func waitForLines(_ count: Int, at log: URL) async throws -> [String] {
+        for _ in 0..<150 {
+            if let contents = try? String(contentsOf: log, encoding: .utf8) {
+                let lines = contents.split(separator: "\n").map(String.init)
+                if lines.count >= count { return lines }
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTFail("Timed out waiting for \(count) helper log lines")
+        return []
+    }
+
+    private func waitUntil(_ condition: String, _ predicate: @escaping @MainActor () -> Bool) async throws {
+        for _ in 0..<150 {
+            if predicate() { return }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTFail("Timed out: \(condition)")
+    }
+
+    private static func display(
+        _ index: Int, id: UInt32, uuid: String, name: String?, main: Bool = false, asleep: Bool = false
+    ) -> DisplayRecord {
+        DisplayRecord(
+            index: index,
+            id: id,
+            uuid: uuid,
+            name: name,
+            active: true,
+            online: true,
+            asleep: asleep,
+            builtin: false,
+            main: main,
+            vendor: UInt32(index),
+            model: UInt32(index * 10),
+            serial: UInt32(index * 100),
+            bounds: DisplayBounds(CGRect(x: (index - 1) * 1920, y: 0, width: 1920, height: 1080)),
+            pixelWidth: 1920,
+            pixelHeight: 1080
+        )
+    }
+}

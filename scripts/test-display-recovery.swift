@@ -1,6 +1,6 @@
 #!/usr/bin/env swift
 // Opt-in, no-write integration checks. Run from a logged-in GUI session with
-// the freshly built panelctl path as the only argument. Artifacts are retained.
+// the freshly built dp path as the only argument. Artifacts are retained.
 import Foundation
 import Darwin
 
@@ -11,10 +11,10 @@ func require(_ value: @autoclosure () throws -> Bool, _ message: String) throws 
     if try !value() { throw TestFailure(description: message) }
 }
 
-let root = FileManager.default.temporaryDirectory.appendingPathComponent("panelctl-recovery-integration-\(UUID())")
+let root = FileManager.default.temporaryDirectory.appendingPathComponent("displaypanel-recovery-integration-\(UUID())")
 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false,
                                        attributes: [.posixPermissions: 0o700])
-try Data("panelctl recovery test artifacts\n".utf8).write(to: root.appendingPathComponent(".panelctl-test-owned"))
+try Data("dp recovery test artifacts\n".utf8).write(to: root.appendingPathComponent(".displaypanel-test-owned"))
 print("Recovery test artifacts: \(root.path)")
 
 final class Invocation {
@@ -78,7 +78,7 @@ func fixture(_ name: String) throws -> URL {
 }
 
 func run() throws {
-    try require(CommandLine.arguments.count == 2, "usage: swift scripts/test-display-recovery.swift <panelctl-binary>")
+    try require(CommandLine.arguments.count == 2, "usage: swift scripts/test-display-recovery.swift <displaypanel-binary>")
     let binary = URL(fileURLWithPath: CommandLine.arguments[1]).standardizedFileURL
     func command(_ arguments: [String], success: Bool = true) throws {
         try Invocation(executable: binary, args: arguments).wait(success: success)

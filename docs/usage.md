@@ -1,13 +1,13 @@
 # Usage
 
 ```sh
-panelctl list                                           # find display UUIDs
-panelctl blackout --display UUID --idle-after 5m --watch
-panelctl blackout --display UUID --mode working --overlay-opacity 60 --dim-to 25 --timeout 1h
-panelctl blackout --all --idle-after 5m --sleep-after 30m --keep-displays-awake
-panelctl sleep-displays --keep-system-awake
-panelctl wake-displays
-panelctl ddc-luminance --display index:2 --set 75
+dp list                                           # find display UUIDs
+dp blackout --display UUID --idle-after 5m --watch
+dp blackout --display UUID --mode working --overlay-opacity 60 --dim-to 25 --timeout 1h
+dp blackout --all --idle-after 5m --sleep-after 30m --keep-displays-awake
+dp sleep-displays --keep-system-awake
+dp wake-displays
+dp ddc-luminance --display index:2 --set 75
 ```
 
 A display selector is a UUID, a decimal or hex Core Graphics ID, or `index:N`.
@@ -19,7 +19,7 @@ take seconds or an `s`, `m` or `h` suffix.
 | Mode | Effect | Ends on |
 | --- | --- | --- |
 | Blocking (default) | Opaque black window; takes focus so the cursor hides | Input, `--timeout`, `--sleep-after` |
-| `--mode working` | Click-through dimming; focus and input untouched | `--timeout`, `--sleep-after`, menu Restore, `panelctl app restore` |
+| `--mode working` | Click-through dimming; focus and input untouched | `--timeout`, `--sleep-after`, menu Restore, `dp app restore` |
 
 | Flag | Behavior |
 | --- | --- |
@@ -42,7 +42,7 @@ take seconds or an `s`, `m` or `h` suffix.
 - In the app, Escape with the pointer on a black display restores it.
 
 For a persistent watcher, edit the
-[LaunchAgent example](../examples/com.brettinternet.panelctl.blackout.plist).
+[LaunchAgent example](../examples/com.brettinternet.displaypanel.blackout.plist).
 
 ## Menu-bar app
 
@@ -63,7 +63,7 @@ afterward (**Restore** or **Sleep**). Two enabled rules can't share a display.
 The master switch and Pause apply to all rules.
 
 An Action is 1–8 ordered steps: Hide, Show or Move windows for a display. It
-runs only from **Run** or `panelctl app run-action`. Steps run in order and stop
+runs only from **Run** or `dp app run-action`. Steps run in order and stop
 at the first problem; earlier changes are not undone. Hide only covers or
 removes a display; Move only relocates windows and never changes Hide state.
 A Hide (black out) step can also keep windows off the display for as long as
@@ -81,13 +81,13 @@ unknown window.
 Choose **Automatic** (the main eligible display, then the lowest stable display
 UUID) or one exact destination. The source, blacked-out, removed, asleep,
 offline and mirrored-member displays are ineligible; an unavailable explicit
-destination is refused rather than replaced. Moving windows requires PanelCtl’s
+destination is refused rather than replaced. Moving windows requires DisplayPanel’s
 Accessibility permission. Use **Allow Accessibility** in **Settings → Automations
 → Actions**, or beside the enabled keep-windows-off option in Displays, then turn
-on PanelCtl in System Settings → Privacy & Security → Device Control and Data
-Access (Accessibility on earlier macOS versions). PanelCtl notices the change within
+on DisplayPanel in System Settings → Privacy & Security → Device Control and Data
+Access (Accessibility on earlier macOS versions). DisplayPanel notices the change within
 seconds. CLI and background runs never open a permission prompt.
-`panelctl app run-action --action UUID` sends the request to the running app and
+`dp app run-action --action UUID` sends the request to the running app and
 returns privacy-safe moved/skipped/failed counts and reason codes. No window
 titles are stored.
 
@@ -102,22 +102,22 @@ badge means Automation is paused, and **!** means it needs attention.
 ## App automation
 
 ```sh
-panelctl app enable | disable | toggle        # master Automation switch
-panelctl app status --json
-panelctl app status --watch --json             # live, read-only status
-panelctl app restore | sleep-now
-panelctl app snooze --for 30m
-panelctl app resume
-panelctl app open-settings
-panelctl app hide | toggle-hide --display UUID [--style black-out] [--json]
-panelctl app show --display UUID [--json]
-panelctl app run-action --action UUID [--json]
-panelctl app run-rule --rule UUID [--json]
+dp app enable | disable | toggle        # master Automation switch
+dp app status --json
+dp app status --watch --json             # live, read-only status
+dp app restore | sleep-now
+dp app snooze --for 30m
+dp app resume
+dp app open-settings
+dp app hide | toggle-hide --display UUID [--style black-out] [--json]
+dp app show --display UUID [--json]
+dp app run-action --action UUID [--json]
+dp app run-rule --rule UUID [--json]
 ```
 
 ### Live status for integrations
 
-`panelctl app status --watch --json` opens one read-only connection. It prints a
+`dp app status --watch --json` opens one read-only connection. It prints a
 complete current status immediately, then newline-delimited JSON (one compact
 document per line), using the same fields as `app status --json` plus `sequence`.
 Sequence numbers start at 1 and increase per connection; compare consecutive
@@ -137,8 +137,8 @@ For a Stream Deck plugin, keep one watcher process and update your button from
 each parsed line. This shell example needs `jq` and prints the button label:
 
 ```sh
-panelctl app status --watch --json |
-  jq --unbuffered -r 'if .running then .summary else "PanelCtl disconnected" end'
+dp app status --watch --json |
+  jq --unbuffered -r 'if .running then .summary else "DisplayPanel disconnected" end'
 ```
 
 Consumers must read promptly. Each watcher's socket buffer holds one maximum-size
@@ -150,21 +150,21 @@ requests; use a separate normal CLI invocation for commands. Existing one-shot
 status and command requests retain their existing protocol and size limits.
 
 Without a standalone install, use
-`/Applications/PanelCtl.app/Contents/Helpers/panelctl`.
+`/Applications/DisplayPanel.app/Contents/Helpers/dp`.
 
 `status`, `hide`, `show`, `toggle-hide`, `run-action` and `run-rule` need the app
 running; the rest launch it in the background. `restore` ends Automation blackouts
 only; it never shows a hidden display.
 
-`panelctl app blackout-now` is retired. The CLI exits 2 with migration guidance
+`dp app blackout-now` is retired. The CLI exits 2 with migration guidance
 before contacting or launching the app, and the app refuses the same request from
 older clients without changing Automation or snooze state. Use `app hide --display`
 for one display until Show, `app run-action` for ordered Hide/Show steps, or
 `app run-rule` to run one saved Automation rule. The Run rule submenu replaced the
 former broadcast Blackout Now menu item; it never runs every rule at once.
 
-`panelctl app run-rule --rule UUID` runs exactly one saved Automation rule once,
-immediately bypassing its idle wait. Find stable IDs with `panelctl app status --json`
+`dp app run-rule --rule UUID` runs exactly one saved Automation rule once,
+immediately bypassing its idle wait. Find stable IDs with `dp app status --json`
 in `rules[].id`, or edit the rule in **Settings → Automations** and use
 **Command → Copy**. Save the rule before running its command. **Run now** in Settings and the menu bar’s **Run rule** submenu use
 this same one-shot operation. The submenu lists off rules too and marks the
@@ -197,7 +197,7 @@ and responses retain protocol 1 compatibility. An active selected rule or compet
 display operation returns `busy`; overlapping rules are refused, and Full disconnect
 or unresolved recovery returns `recovery-needed`. Run-rule never launches the app, queues,
 retries, broadcasts to another rule or automatically replays a lost response. After
-`response-lost`, check `panelctl app status --json`; a lost response does not cancel
+`response-lost`, check `dp app status --json`; a lost response does not cancel
 the run or make retry safe. The status response includes `runningRule` with the
 selected rule’s stable ID while it runs.
 
@@ -207,7 +207,7 @@ Copy the exact command from **Displays → Command**, or use it in a Stream Deck
 button or Shortcuts **Run Shell Script** action:
 
 ```sh
-/Applications/PanelCtl.app/Contents/Helpers/panelctl app toggle-hide \
+/Applications/DisplayPanel.app/Contents/Helpers/dp app toggle-hide \
   --display DISPLAY_UUID --json
 ```
 
@@ -246,14 +246,14 @@ After `response-lost`, check
       "displays": ["DISPLAY_UUID"], "nextAction": "dim", "secondsRemaining": 180 }
   ],
   "displays": [
-    { "targetUUID": "…", "observedState": "hidden-by-panelctl", "operation": "idle", "recoveryNeeded": false }
+    { "targetUUID": "…", "observedState": "hidden-by-displaypanel", "operation": "idle", "recoveryNeeded": false }
   ]
 }
 ```
 
 - Top-level fields summarize all rules; `rules` has one entry per rule.
 - `ok: true` means the app answered, not that everything succeeded.
-- `observedState`: `separate`, `hidden-by-panelctl`, `mirrored-externally`,
+- `observedState`: `separate`, `hidden-by-displaypanel`, `mirrored-externally`,
   `unavailable`, `recovery-needed`, `unsupported-recovery` or `unknown`.
 - `operation`: `idle`, `hiding` or `showing`.
 - `runningAction` appears while an Action runs; `runningRule` identifies the

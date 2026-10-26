@@ -19,7 +19,7 @@ defaults:
 
 # CI runners are dedicated to testing; local runs remain noninteractive by default.
 env:
-  PANELCTL_TEST_INTERACTIVE_UI: "1"
+  DISPLAYPANEL_TEST_INTERACTIVE_UI: "1"
   DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
 
 jobs:
@@ -33,18 +33,18 @@ jobs:
       - name: Check signing identity import
         timeout-minutes: 2
         env:
-          PANELCTL_SIGNING_P12_BASE64: ${{ secrets.PANELCTL_SIGNING_P12_BASE64 }}
-          PANELCTL_SIGNING_P12_PASSWORD: ${{ secrets.PANELCTL_SIGNING_P12_PASSWORD }}
-          PANELCTL_SIGNING_IDENTITY: ${{ secrets.PANELCTL_SIGNING_IDENTITY }}
+          DISPLAYPANEL_SIGNING_P12_BASE64: ${{ secrets.DISPLAYPANEL_SIGNING_P12_BASE64 }}
+          DISPLAYPANEL_SIGNING_P12_PASSWORD: ${{ secrets.DISPLAYPANEL_SIGNING_P12_PASSWORD }}
+          DISPLAYPANEL_SIGNING_IDENTITY: ${{ secrets.DISPLAYPANEL_SIGNING_IDENTITY }}
         run: |
-          export PANELCTL_SIGNING_KEYCHAIN="$RUNNER_TEMP/panelctl-signing.keychain-db"
-          echo "PANELCTL_SIGNING_KEYCHAIN=$PANELCTL_SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
+          export DISPLAYPANEL_SIGNING_KEYCHAIN="$RUNNER_TEMP/displaypanel-signing.keychain-db"
+          echo "DISPLAYPANEL_SIGNING_KEYCHAIN=$DISPLAYPANEL_SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
           python3 scripts/import-signing.py
-          cp /usr/bin/true "$RUNNER_TEMP/panelctl-signing-probe"
+          cp /usr/bin/true "$RUNNER_TEMP/displaypanel-signing-probe"
           source scripts/signing.sh
-          panelctl_signing_configure
-          panelctl_sign "$RUNNER_TEMP/panelctl-signing-probe" com.brettinternet.panelctl.signing-probe
-          codesign --verify --strict "$RUNNER_TEMP/panelctl-signing-probe"
+          displaypanel_signing_configure
+          displaypanel_sign "$RUNNER_TEMP/displaypanel-signing-probe" com.brettinternet.displaypanel.signing-probe
+          codesign --verify --strict "$RUNNER_TEMP/displaypanel-signing-probe"
       - name: Remove signing keychain
         if: always()
         run: python3 scripts/import-signing.py --cleanup
@@ -74,9 +74,9 @@ jobs:
       - name: Check signing policy (fake tools, no keys)
         run: python3 scripts/test-signing.py
       - name: Compile CLI product
-        run: swift build --disable-sandbox --product panelctl
+        run: swift build --disable-sandbox --product dp
       - name: Compile app product
-        run: swift build --disable-sandbox --product PanelCtlApp
+        run: swift build --disable-sandbox --product DisplayPanelApp
 
   release:
     name: Test and publish universal macOS release
@@ -85,8 +85,8 @@ jobs:
     permissions:
       contents: write
     env:
-      PANELCTL_REQUIRE_SIGNING: "1"
-      PANELCTL_SIGNING_IDENTITY: ${{ secrets.PANELCTL_SIGNING_IDENTITY }}
+      DISPLAYPANEL_REQUIRE_SIGNING: "1"
+      DISPLAYPANEL_SIGNING_IDENTITY: ${{ secrets.DISPLAYPANEL_SIGNING_IDENTITY }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -105,11 +105,11 @@ jobs:
         run: python3 scripts/test-signing.py
       - name: Import release signing identity
         env:
-          PANELCTL_SIGNING_P12_BASE64: ${{ secrets.PANELCTL_SIGNING_P12_BASE64 }}
-          PANELCTL_SIGNING_P12_PASSWORD: ${{ secrets.PANELCTL_SIGNING_P12_PASSWORD }}
+          DISPLAYPANEL_SIGNING_P12_BASE64: ${{ secrets.DISPLAYPANEL_SIGNING_P12_BASE64 }}
+          DISPLAYPANEL_SIGNING_P12_PASSWORD: ${{ secrets.DISPLAYPANEL_SIGNING_P12_PASSWORD }}
         run: |
-          export PANELCTL_SIGNING_KEYCHAIN="$RUNNER_TEMP/panelctl-signing.keychain-db"
-          echo "PANELCTL_SIGNING_KEYCHAIN=$PANELCTL_SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
+          export DISPLAYPANEL_SIGNING_KEYCHAIN="$RUNNER_TEMP/displaypanel-signing.keychain-db"
+          echo "DISPLAYPANEL_SIGNING_KEYCHAIN=$DISPLAYPANEL_SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
           python3 scripts/import-signing.py
       - name: Package release
         run: ./scripts/package-release.sh "$GITHUB_REF_NAME"
@@ -121,8 +121,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_NOTES: |
             Downloads:
-            - **PanelCtl menu-bar app** — `PanelCtl-…-macos-universal.zip`
-            - **Standalone panelctl CLI** — `panelctl-cli-…-macos-universal.zip`
+            - **DisplayPanel menu-bar app** — `DisplayPanel-…-macos-universal.zip`
+            - **Standalone dp CLI** — `dp-cli-…-macos-universal.zip`
 
             Both archives are universal arm64/x86_64 and signed with a stable self-signed certificate, not Developer ID signed or notarized. Verify the matching SHA-256 checksum; macOS may require Privacy & Security → Open Anyway.
         run: |
@@ -133,10 +133,10 @@ jobs:
             release_flags+=(--prerelease --latest=false)
           fi
           release_assets=(
-            "dist/PanelCtl-${GITHUB_REF_NAME}-macos-universal.zip#PanelCtl menu-bar app (universal macOS)"
-            "dist/PanelCtl-${GITHUB_REF_NAME}-macos-universal.zip.sha256#PanelCtl app SHA-256"
-            "dist/panelctl-cli-${GITHUB_REF_NAME}-macos-universal.zip#Standalone panelctl CLI (universal macOS)"
-            "dist/panelctl-cli-${GITHUB_REF_NAME}-macos-universal.zip.sha256#panelctl CLI SHA-256"
+            "dist/DisplayPanel-${GITHUB_REF_NAME}-macos-universal.zip#DisplayPanel menu-bar app (universal macOS)"
+            "dist/DisplayPanel-${GITHUB_REF_NAME}-macos-universal.zip.sha256#DisplayPanel app SHA-256"
+            "dist/dp-cli-${GITHUB_REF_NAME}-macos-universal.zip#Standalone dp CLI (universal macOS)"
+            "dist/dp-cli-${GITHUB_REF_NAME}-macos-universal.zip.sha256#dp CLI SHA-256"
           )
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${release_assets[@]}" --clobber

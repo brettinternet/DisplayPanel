@@ -32,10 +32,10 @@ CGCompleteDisplayConfiguration(config, kCGConfigureForSession);
 ## CLI
 
 ```sh
-panelctl recovery disable --display UUID --consent-disable --timeout 15s
-panelctl recovery status
-panelctl recovery enable
-panelctl recovery panic
+dp recovery disable --display UUID --consent-disable --timeout 15s
+dp recovery status
+dp recovery enable
+dp recovery panic
 ```
 
 - `disable` takes one display, explicit consent and a 1–60 second timeout. No
@@ -54,7 +54,7 @@ selected display while Experimental features are on (or while a disconnect is
 unresolved).
 
 1. Show any hidden displays and resolve any recovery first.
-2. Choose **Disconnect…**. PanelCtl pauses automation and restores dimmed
+2. Choose **Disconnect…**. DisplayPanel pauses automation and restores dimmed
    brightness.
 3. Confirm you're present, a named display stays usable, and you accept manual
    recovery. Consent expires after 30 seconds and covers one 15-second
@@ -89,7 +89,7 @@ serial, connector, transport, boot session, OS build and user. Missing,
 duplicate or changed evidence refuses. An offline display keeps its saved ID;
 another ID is never substituted.
 
-PanelCtl can't detect an identical monitor swapped onto the same port, or a
+DisplayPanel can't detect an identical monitor swapped onto the same port, or a
 reused display ID.
 
 ## Journal
@@ -107,19 +107,19 @@ lock → reload journal → check identity → one reconnect → up to 6 checks 
 ```
 
 - An interrupted reconnect is never repeated.
-- If macOS reconnects the display itself (for example on wake), PanelCtl
+- If macOS reconnects the display itself (for example on wake), DisplayPanel
   accepts it and doesn't disconnect again.
 
 ## If it doesn't come back
 
-1. `panelctl recovery status`, then `panelctl recovery enable`.
-2. `panelctl recovery panic` (same checks, can't bypass a refusal).
+1. `dp recovery status`, then `dp recovery enable`.
+2. `dp recovery panic` (same checks, can't bypass a refusal).
 3. Select the Mac's input with the monitor's buttons.
 4. Log out or restart (not guaranteed to help).
 5. Replug the cable, or try another port. A new port may give the display a
    new ID.
 
-PanelCtl never escalates automatically. Windows, Spaces, HDR and color are not
+DisplayPanel never escalates automatically. Windows, Spaces, HDR and color are not
 restored.
 
 ## Tests

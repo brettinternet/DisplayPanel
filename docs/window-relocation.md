@@ -49,13 +49,13 @@ Hide never moves windows; Move never changes hide state or installs a watcher.
 ## 2. Execution and public window evidence
 
 All AX calls, including permission checks, enumeration and writes, belong to the
-app process. `panelctl app run-action` uses the existing app-control route; the
+app process. `dp app run-action` uses the existing app-control route; the
 standalone CLI and blackout helper never perform AX work. Only an explicit
 in-app permission interaction may request Accessibility. Background and CLI
 runs check without prompting and report missing/revoked permission. Do not
 request Screen Recording permission or infer movability from occupancy data.
 
-Enumerate regular running applications, excluding PanelCtl/helper and system
+Enumerate regular running applications, excluding DisplayPanel/helper and system
 surfaces. Use `AXUIElementCreateApplication` and `kAXWindowsAttribute`, then
 public window attributes for position, size, minimized/fullscreen state and
 settable position/size. No `_AXUIElementGetWindow`, SkyLight, private Space API,
@@ -181,7 +181,7 @@ eligible new window is considered within one tick plus the active pass budget
 service delay, not a promise every app will accept a move. Publish delayed/failed
 passes rather than claiming enforcement succeeded.
 
-States: off, armed (remembered on, not hidden by PanelCtl), enforcing (hidden
+States: off, armed (remembered on, not hidden by DisplayPanel), enforcing (hidden
 with intent and gates satisfied), paused (reason, including a user pause). Show state/reason and last moved/failed counts in Displays, menu and
 status stream. Automation snooze/disable does not control keep-off directly;
 only resulting loss of coverage stops it. Pausing, coverage exit or
@@ -200,7 +200,7 @@ paused; reconnect never substitutes identities.
 
 Moves must not call the app's manual-activity hooks, reset idle timers, send input
 or extend blackout. Empty-display detection continues to observe real geometry,
-but PanelCtl-authored relocation must not count as new user occupancy that clears
+but DisplayPanel-authored relocation must not count as new user occupancy that clears
 `requiresOccupiedBeforeRearming`, nor may transient relocation samples initiate
 or prolong empty-display blackout. TASK-65 must carry a session-only relocation
 suppression signal to affected managed helpers before writes and acknowledge it

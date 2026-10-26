@@ -5,8 +5,8 @@ display so its desktop disappears and optionally switches its input. `back`
 restores it and optionally switches back.
 
 ```sh
-panelctl away --display TARGET_UUID --source SOURCE_UUID --input hdmi1 --consent-away
-panelctl back --display TARGET_UUID --input dp1 --consent-back
+dp away --display TARGET_UUID --source SOURCE_UUID --input hdmi1 --consent-away
+dp back --display TARGET_UUID --input dp1 --consent-back
 ```
 
 - Targets and sources follow the [mirroring rules](display-mirroring.md).

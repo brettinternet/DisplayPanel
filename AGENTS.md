@@ -26,7 +26,7 @@ without explicit permission.
 Start with `swift test --disable-sandbox --filter '<Suite>.<test>'` (or the
 smallest affected suite); expand only for shared behavior or integration risk.
 Do not repeatedly run the full suite for a focused fix. Native windows, menus
-and sheets are skipped unless `PANELCTL_TEST_INTERACTIVE_UI=1`. Do not set that
+and sheets are skipped unless `DISPLAYPANEL_TEST_INTERACTIVE_UI=1`. Do not set that
 flag for model/core changes. For changes requiring native interaction, get user
 approval before presenting UI on their desktop, then opt in with a narrow
 `--filter`; do not rerun focus-sensitive failures in a loop. CI opts in on its

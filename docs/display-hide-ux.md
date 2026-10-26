@@ -8,7 +8,7 @@ same thing.
 
 | Style | What happens | How to choose it |
 | --- | --- | --- |
-| **Black out** (default) | A black window covers the display; its desktop stays put | Default, or `panelctl app hide --display UUID --style black-out` |
+| **Black out** (default) | A black window covers the display; its desktop stays put | Default, or `dp app hide --display UUID --style black-out` |
 | **Remove from desktop** | The display [mirrors](display-mirroring.md) another, so windows move off it; optionally switches the monitor's input | Experimental features, then the display's **Remove from desktop** switch |
 
 Neither style turns the monitor off or cuts its signal.
@@ -47,7 +47,7 @@ Choose **Automatic** (current main display, then stable UUID order) or one exact
 destination. If that destination is asleep, disconnected, covered, mirrored,
 removed or ambiguous, movement pauses instead of picking another.
 
-While the Hide lasts, PanelCtl rescans every second and moves new or returning
+While the Hide lasts, DisplayPanel rescans every second and moves new or returning
 windows off the display, using the same rules as [Move windows](#named-manual-actions).
 Windows that refuse or keep coming back are retried with backoff up to 30
 seconds. The status reads **Armed** (on, not hidden), **Enforcing** (hidden and
@@ -93,7 +93,7 @@ Show: restore layout → verify → switch input back (optional)
   windows go.
 - Show restores layout and display modes, not HDR, color profiles, windows or
   Spaces.
-- After sleep, or when a hidden monitor re-links to the Mac, PanelCtl repairs
+- After sleep, or when a hidden monitor re-links to the Mac, DisplayPanel repairs
   lost mirrors and layout once without switching inputs or showing displays.
   Changed identities or failed checks leave the display in recovery. See
   [wake recovery](display-recovery.md#sleep-wake-and-reboot) and
@@ -128,12 +128,12 @@ steps and once as a Move step, in either order. Hide never moves windows; Move
 never changes Hide state.
 
 ```sh
-panelctl app run-action --action ACTION_UUID --json
+dp app run-action --action ACTION_UUID --json
 ```
 
 - Actions run only from **Run** or this command, never from rules, login or
   wake. `--style` doesn't apply to Actions.
-- PanelCtl checks every step first. A refusal names the step and changes
+- DisplayPanel checks every step first. A refusal names the step and changes
   nothing.
 - Steps run in order. Disconnected targets and targets already hidden the other
   way are skipped with a reason. Other failures stop the run; earlier steps stay
@@ -150,7 +150,7 @@ panelctl app run-action --action ACTION_UUID --json
   It doesn't activate apps, switch Spaces or move windows back on Show.
   Full-screen, minimized and unmovable windows are skipped with reasons.
 - Moving windows needs Accessibility permission, granted with **Allow
-  Accessibility** in Displays or **Settings → Automations → Actions**. PanelCtl
+  Accessibility** in Displays or **Settings → Automations → Actions**. DisplayPanel
   never prompts on its own. Results give moved, skipped and failed counts;
   window titles aren't stored.
 - Outcomes: `done` (finished, possibly with skipped steps), `no-op` (nothing to
@@ -183,7 +183,7 @@ a black window only: no DDC dimming, and **Sleep** becomes Restore.
 | Hiding… / Showing… / Busy | In progress; no cancel or queue |
 | Blacked out | An automation cover; **Restore** ends it |
 | Asleep / Unavailable | Wake or reconnect the display |
-| Mirrored | Mirrored outside PanelCtl; fix in System Settings → Displays |
+| Mirrored | Mirrored outside DisplayPanel; fix in System Settings → Displays |
 | Needs recovery | Read the reason; Show when allowed, or recover the previous session after reboot |
 
 Removed displays stay listed even when disconnected. Reconnect the same
@@ -196,7 +196,7 @@ neither shows displays or switches inputs. Missing monitors must reconnect and
 existing mirrors must be turned off first. See
 [previous-session recovery](display-recovery.md#recovering-after-reboot).
 
-If PanelCtl can't confirm that dimmed brightness was restored, automation
+If DisplayPanel can't confirm that dimmed brightness was restored, automation
 pauses and **Retry Automation Cleanup** appears. It only restores saved
 brightness.
 
@@ -224,7 +224,7 @@ unavailable, then retry Show.
 **Displays → Command** shows a copyable command for Stream Deck or Shortcuts:
 
 ```sh
-/Applications/PanelCtl.app/Contents/Helpers/panelctl app toggle-hide --display DISPLAY_UUID --json
+/Applications/DisplayPanel.app/Contents/Helpers/dp app toggle-hide --display DISPLAY_UUID --json
 ```
 
 Use `hide` or `show` for a specific state. Add `--style black-out` to `hide` or

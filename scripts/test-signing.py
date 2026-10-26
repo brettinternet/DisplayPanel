@@ -34,7 +34,7 @@ elif name == "security":
         invalid = os.environ.get("INVALID_IDENTITY") or (os.environ.get("UNTRUSTED_IDENTITY") and not trusted)
         if not os.environ.get("MISSING_IDENTITY") and not ("-v" in args and invalid):
             reason = "CSSMERR_TP_CERT_EXPIRED" if os.environ.get("INVALID_IDENTITY") else "CSSMERR_TP_NOT_TRUSTED" if invalid else ""
-            print(os.environ["PANELCTL_SIGNING_IDENTITY"], reason)
+            print(os.environ["DISPLAYPANEL_SIGNING_IDENTITY"], reason)
     if args[0] == "find-certificate":
         encoded = "d3Jvbmc=" if os.environ.get("WRONG_CERTIFICATE") else "ZmFrZSBjZXJ0aWZpY2F0ZQ=="
         print("-----BEGIN CERTIFICATE-----\\n" + encoded + "\\n-----END CERTIFICATE-----")
@@ -57,13 +57,13 @@ elif name == "vtool":
 
 class SigningTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="panelctl-signing-test-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="displaypanel-signing-test-")
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name)
         self.log = self.directory / "commands.jsonl"
         self.env = {key: value for key, value in os.environ.items()
-                    if not key.startswith("PANELCTL_SIGNING_")
-                    and key != "PANELCTL_REQUIRE_SIGNING"}
+                    if not key.startswith("DISPLAYPANEL_SIGNING_")
+                    and key != "DISPLAYPANEL_REQUIRE_SIGNING"}
         self.env.update(PATH=f"{self.directory}:{os.environ['PATH']}",
                         SIGNING_TEST_LOG=str(self.log))
         for name in ("codesign", "security", "sudo", "lipo", "xcrun", "vtool"):
@@ -79,7 +79,7 @@ class SigningTests(unittest.TestCase):
 
     def sign(self):
         return self.run_command("bash", "-euc",
-            'source "$1"; panelctl_signing_configure; panelctl_sign "$2" com.brettinternet.panelctl',
+            'source "$1"; displaypanel_signing_configure; displaypanel_sign "$2" com.brettinternet.displaypanel',
             "bash", str(ROOT / "scripts/signing.sh"), str(self.directory / "App with spaces.app"))
 
     def test_local_adhoc_warns(self):
@@ -89,31 +89,31 @@ class SigningTests(unittest.TestCase):
         self.assertEqual(self.calls()[0][3], "-")
 
     def test_required_missing_or_explicit_adhoc_refuses(self):
-        self.env["PANELCTL_REQUIRE_SIGNING"] = "1"
+        self.env["DISPLAYPANEL_REQUIRE_SIGNING"] = "1"
         for identity in ("", "-"):
-            self.env["PANELCTL_SIGNING_IDENTITY"] = identity
+            self.env["DISPLAYPANEL_SIGNING_IDENTITY"] = identity
             self.assertNotEqual(self.sign().returncode, 0)
         self.assertEqual(self.calls(), [])
 
     def test_invalid_configuration_refuses(self):
-        for identity in ("PanelCtl Signing", "ABC", '"; echo injected'):
-            self.env["PANELCTL_SIGNING_IDENTITY"] = identity
+        for identity in ("DisplayPanel Signing", "ABC", '"; echo injected'):
+            self.env["DISPLAYPANEL_SIGNING_IDENTITY"] = identity
             self.assertNotEqual(self.sign().returncode, 0)
-        self.env["PANELCTL_SIGNING_IDENTITY"] = IDENTITY
-        self.env["PANELCTL_REQUIRE_SIGNING"] = "true"
+        self.env["DISPLAYPANEL_SIGNING_IDENTITY"] = IDENTITY
+        self.env["DISPLAYPANEL_REQUIRE_SIGNING"] = "true"
         self.assertNotEqual(self.sign().returncode, 0)
         self.assertEqual(self.calls(), [])
 
     def test_certificate_requirement_is_stable_and_keychain_is_scoped(self):
-        self.env.update(PANELCTL_SIGNING_IDENTITY=IDENTITY,
-                        PANELCTL_SIGNING_KEYCHAIN="/a path/signing.keychain-db")
+        self.env.update(DISPLAYPANEL_SIGNING_IDENTITY=IDENTITY,
+                        DISPLAYPANEL_SIGNING_KEYCHAIN="/a path/signing.keychain-db")
         for _ in range(2):
             result = self.sign()
             self.assertEqual(result.returncode, 0, result.stderr)
         first, second = self.calls()
         self.assertEqual(first, second)
         requirement = first[first.index("--requirements") + 1]
-        self.assertEqual(requirement, '=designated => identifier "com.brettinternet.panelctl" '
+        self.assertEqual(requirement, '=designated => identifier "com.brettinternet.displaypanel" '
                          f'and certificate leaf = H"{IDENTITY}"')
         self.assertNotIn("cdhash", requirement)
         # Compile the exact literal argument with macOS, without signing or keys.
@@ -122,7 +122,7 @@ class SigningTests(unittest.TestCase):
         self.assertEqual(first[first.index("--keychain") + 1], "/a path/signing.keychain-db")
 
     def test_signing_failure_never_falls_back(self):
-        self.env.update(PANELCTL_SIGNING_IDENTITY=IDENTITY, FAIL_SIGN="1")
+        self.env.update(DISPLAYPANEL_SIGNING_IDENTITY=IDENTITY, FAIL_SIGN="1")
         self.assertEqual(self.sign().returncode, 42)
         self.assertEqual(len(self.calls()), 1)
 
@@ -131,25 +131,25 @@ class SigningTests(unittest.TestCase):
         binary.write_text("fake input")
         binary.chmod(0o755)
         return self.run_command("bash", str(ROOT / "scripts/package-app.sh"), "v0.3.0",
-                                *([str(binary)] * 4), str(self.directory / "PanelCtl.app"))
+                                *([str(binary)] * 4), str(self.directory / "DisplayPanel.app"))
 
     def test_app_signs_helper_before_bundle_and_verifies(self):
-        self.env["PANELCTL_SIGNING_IDENTITY"] = IDENTITY
+        self.env["DISPLAYPANEL_SIGNING_IDENTITY"] = IDENTITY
         result = self.package_app()
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = [call for call in self.calls() if call[0] == "codesign"]
         self.assertEqual(len(calls), 3)
-        for call, identifier in zip(calls[:2], ("com.brettinternet.panelctl.cli", "com.brettinternet.panelctl")):
+        for call, identifier in zip(calls[:2], ("com.brettinternet.displaypanel.cli", "com.brettinternet.displaypanel")):
             self.assertEqual(call[call.index("--sign") + 1], IDENTITY)
             self.assertEqual(call[call.index("--identifier") + 1], identifier)
             self.assertIn(f'identifier "{identifier}"', call[call.index("--requirements") + 1])
-        self.assertTrue(calls[0][-1].endswith("/Contents/Helpers/panelctl"))
+        self.assertTrue(calls[0][-1].endswith("/Contents/Helpers/dp"))
         self.assertIn("--verify", calls[2])
         self.assertIn("--strict", calls[2])
-        self.assertTrue((self.directory / "PanelCtl.app/Contents/Helpers/panelctl").exists())
+        self.assertTrue((self.directory / "DisplayPanel.app/Contents/Helpers/dp").exists())
 
     def test_packagers_fail_before_build_without_required_identity(self):
-        self.env["PANELCTL_REQUIRE_SIGNING"] = "1"
+        self.env["DISPLAYPANEL_REQUIRE_SIGNING"] = "1"
         self.assertNotEqual(self.package_app().returncode, 0)
         result = self.run_command("bash", str(ROOT / "scripts/package-release.sh"), "v0.3.0")
         self.assertNotEqual(result.returncode, 0)
@@ -160,10 +160,10 @@ class SigningTests(unittest.TestCase):
         return self.run_command("python3", str(ROOT / "scripts/import-signing.py"))
 
     def configure_import(self):
-        self.env.update(PANELCTL_SIGNING_IDENTITY=IDENTITY,
-                        PANELCTL_SIGNING_P12_BASE64=base64.b64encode(b"fake certificate").decode(),
-                        PANELCTL_SIGNING_P12_PASSWORD="fake password",
-                        PANELCTL_SIGNING_KEYCHAIN=str(self.directory / "signing.keychain-db"))
+        self.env.update(DISPLAYPANEL_SIGNING_IDENTITY=IDENTITY,
+                        DISPLAYPANEL_SIGNING_P12_BASE64=base64.b64encode(b"fake certificate").decode(),
+                        DISPLAYPANEL_SIGNING_P12_PASSWORD="fake password",
+                        DISPLAYPANEL_SIGNING_KEYCHAIN=str(self.directory / "signing.keychain-db"))
 
     def test_import_missing_secrets_refuses(self):
         self.assertNotEqual(self.import_identity().returncode, 0)
@@ -181,7 +181,7 @@ class SigningTests(unittest.TestCase):
         self.assertFalse(Path(imported[2]).exists())
         self.assertEqual(imported[-2:], ["-T", "/usr/bin/codesign"])
         self.assertNotIn("fake password", result.stdout + result.stderr)
-        self.assertEqual(calls[-1][2:], ["-d", "user", "-s", self.env["PANELCTL_SIGNING_KEYCHAIN"],
+        self.assertEqual(calls[-1][2:], ["-d", "user", "-s", self.env["DISPLAYPANEL_SIGNING_KEYCHAIN"],
                                        "/a path/login.keychain-db"])
         cleanup = self.run_command("python3", str(ROOT / "scripts/import-signing.py"), "--cleanup")
         self.assertEqual(cleanup.returncode, 0, cleanup.stderr)
@@ -226,7 +226,7 @@ class SigningTests(unittest.TestCase):
 
     def test_import_refuses_existing_keychain(self):
         self.configure_import()
-        Path(self.env["PANELCTL_SIGNING_KEYCHAIN"]).touch()
+        Path(self.env["DISPLAYPANEL_SIGNING_KEYCHAIN"]).touch()
         self.assertNotEqual(self.import_identity().returncode, 0)
         self.assertEqual(self.calls(), [])
 

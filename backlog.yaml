@@ -1,6 +1,6 @@
 version: 1
 project:
-  name: panelctl
+  name: displaypanel
 sources:
   - id: tasks
     type: native

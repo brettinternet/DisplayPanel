@@ -5,9 +5,9 @@ display with public macOS APIs. The Mac keeps sending a signal; brightness and
 input are untouched.
 
 ```sh
-panelctl list
-panelctl mirror --display TARGET_UUID --source SOURCE_UUID --consent-mirror
-panelctl unmirror --display TARGET_UUID --consent-unmirror
+dp list
+dp mirror --display TARGET_UUID --source SOURCE_UUID --consent-mirror
+dp unmirror --display TARGET_UUID --consent-unmirror
 ```
 
 | Role | Requirements |
@@ -17,7 +17,7 @@ panelctl unmirror --display TARGET_UUID --consent-unmirror
 | Refused | Existing mirrors, ambiguous identity, unavailable original mode, unresolved recovery |
 
 Both commands take `--journal <path>` (default
-`~/Library/Application Support/PanelCtl/Recovery/current.json`). Use the same
+`~/Library/Application Support/DisplayPanel/Recovery/current.json`). Use the same
 path for both.
 
 ## How it works
@@ -43,16 +43,16 @@ unmirror: lock → restore modes, positions, mirroring, main display → verify
 - The source's resolution, refresh rate, HDR or color may change.
 - Show restores modes, positions and mirroring, **not** HDR, color profiles,
   windows or Spaces.
-- Other display apps ignore PanelCtl's locks. Don't change displays elsewhere
+- Other display apps ignore DisplayPanel's locks. Don't change displays elsewhere
   at the same time.
 - Nothing restores on exit. There is no watchdog for a mirror left in place.
 
 ## Recovery
 
 ```sh
-panelctl recovery status                          # list removals, no writes
-panelctl recovery verify --display TARGET_UUID    # check, no writes
-panelctl recovery restore --display TARGET_UUID   # Show that target
+dp recovery status                          # list removals, no writes
+dp recovery verify --display TARGET_UUID    # check, no writes
+dp recovery restore --display TARGET_UUID   # Show that target
 ```
 
 Errors print the exact restore command. If restoring fails, turn off mirroring

@@ -1,6 +1,6 @@
 # Display recovery
 
-Before changing the display layout, PanelCtl saves it to a journal so it can
+Before changing the display layout, DisplayPanel saves it to a journal so it can
 verify and restore it later. [Mirroring](display-mirroring.md),
 [handoff](display-handoff.md), app Hide/Show and
 [private disable](display-disable.md) share this journal.
@@ -21,7 +21,7 @@ Run these from your logged-in desktop session.
 | `recovery hide-again --consent-recovery` | **Yes** | Archive the old journal and hide its targets using a fresh baseline; no input switching |
 
 ```text
-~/Library/Application Support/PanelCtl/Recovery/current.json   # default --journal
+~/Library/Application Support/DisplayPanel/Recovery/current.json   # default --journal
 ```
 
 - A custom journal's folder must be yours, mode `0700`, not a symlink.
@@ -55,9 +55,9 @@ drag the menu bar back to the original display, then run `recovery verify`.
 ## Multiple removed displays
 
 ```sh
-panelctl recovery status
-panelctl recovery verify --display UUID
-panelctl recovery restore --display UUID
+dp recovery status
+dp recovery verify --display UUID
+dp recovery restore --display UUID
 ```
 
 Each removed display has its own entry. Restoring one leaves the others
@@ -119,17 +119,17 @@ retains the unresolved journal. An online display is not evidence that its Mac
 input is selected and never causes automatic Show or an input write.
 
 Hide is session-only: after logout or reboot, macOS loads its own layout. If
-macOS brings back a mirror itself, PanelCtl shows that display as **Mirrored**;
+macOS brings back a mirror itself, DisplayPanel shows that display as **Mirrored**;
 turn off mirroring in System Settings → Displays.
 
 ## Recovering after reboot
 
 A reboot ends the old Hide session. Numeric display and mode IDs may now belong
-to different things, so PanelCtl never restores or edits the old baseline to
+to different things, so DisplayPanel never restores or edits the old baseline to
 make its checks pass.
 
 When all captured monitors return as separate, awake displays with the same
-stable identities, PanelCtl compares two matching observations. If the complete
+stable identities, DisplayPanel compares two matching observations. If the complete
 desktop matches the old arrangement, main display, rotation, mode attributes and
 color profile on the same OS build, inspection automatically archives the old
 journal and clears recovery **without writing any display settings**. Boot-local
@@ -164,10 +164,10 @@ want those captured instead. Automatic cleanup never accepts a reduced mode.
 The equivalent CLI operations affect the whole journal, not one `--display`:
 
 ```sh
-panelctl recovery status
-panelctl recovery keep-shown --consent-recovery
+dp recovery status
+dp recovery keep-shown --consent-recovery
 # Or, explicitly hide the previous targets again:
-panelctl recovery hide-again --consent-recovery
+dp recovery hide-again --consent-recovery
 ```
 
 Both take `--journal <path>`. The old bytes remain in `recovery-<old-id>.json`,
@@ -185,7 +185,7 @@ was performed for this path.
 
 While the app stays running, a hidden monitor returning to the Mac's input can
 cause macOS to drop mirrors or shift the visible desktop without a Mac sleep.
-PanelCtl preserves the last verified hidden set before inspecting that change.
+DisplayPanel preserves the last verified hidden set before inspecting that change.
 Repair is on by default: after quiet notifications and two matching topology
 samples, within a fixed 15-second window, it reapplies the hidden set and saved
 visible origins/main together in at most one session transaction. Intact mirrors
@@ -216,7 +216,7 @@ Per-display numeric flags, attribution/suppression and repair outcomes are in th
 `display-reconfiguration` unified-log category. Observing this log is read-only:
 
 ```sh
-log stream --level info --style compact --predicate 'subsystem == "com.brettinternet.panelctl" AND category == "display-reconfiguration"'
+log stream --level info --style compact --predicate 'subsystem == "com.brettinternet.displaypanel" AND category == "display-reconfiguration"'
 ```
 
 Fake-backed tests cover baseline restoration, lost/intact mirror drift, manual
@@ -237,7 +237,7 @@ vendor/model/serial; a numeric display address is rebound only from that identit
 Only **Remember Current Mode** or **Forget** replaces or removes a saved mode. Turning protection off keeps it. Ordinary System Settings edits stand and
 never silently update the saved choice.
 
-After reconnect/input return or wake, PanelCtl waits for stable inventory and
+After reconnect/input return or wake, DisplayPanel waits for stable inventory and
 restores a differing exact mode once, before sampling the arrangement for
 correction. The saved mode must appear in CoreGraphics' offered list, including
 its ID and flags; no nearest resolution, refresh rate or scale is substituted.
@@ -250,7 +250,7 @@ reconnect is a new transition. Protection does not apply on launch, even when
 arrangement protection does.
 
 Hidden and mirrored displays are skipped. An unresolved recovery journal suspends
-mode protection; Hide/Show recovery keeps owning those modes. PanelCtl operations,
+mode protection; Hide/Show recovery keeps owning those modes. DisplayPanel operations,
 wake resume and hidden-display input-return repair suspend correction. Each write
 holds the operation and default-journal locks, rechecks identity and topology at
 staging and commit, uses a public session-only CoreGraphics transaction, and verifies
@@ -280,10 +280,10 @@ Only Remember updates a saved set. Forget removes it; turning protection off
 keeps saved sets and the preferred main choice.
 
 A **Preferred main display** is independent of saved sets. When a set has no saved
-arrangement and that display is visible, PanelCtl makes it main by translating
+arrangement and that display is visible, DisplayPanel makes it main by translating
 all origins equally. Relative placement stays unchanged. A saved arrangement
 always takes precedence, even if its geometry no longer matches. An absent or
-hidden preferred main causes no change. PanelCtl never invents positions for an
+hidden preferred main causes no change. DisplayPanel never invents positions for an
 unsaved set.
 
 Protection waits for two matching samples after a CoreGraphics add/remove
@@ -300,8 +300,8 @@ command through the running app.
 It does not launch the app or retry a lost response.
 
 ```sh
-panelctl app restore-arrangement --json
-panelctl app status --json
+dp app restore-arrangement --json
+dp app status --json
 ```
 
 Status reports `remembered`, `preferred-main`, `unprotected` or `suspended`, the
@@ -313,7 +313,7 @@ arrangement plan; a later topology change stops the run rather than rebinding it
 Saved identities require exactly one matching UUID and identical vendor, model
 and serial. A new numeric display ID is allowed between operations, never during
 one. Resolution, HiDPI scale and rotation changes are tolerated using the current
-logical sizes; PanelCtl does not restore modes or rotation. Remember also saves a
+logical sizes; DisplayPanel does not restore modes or rotation. Remember also saves a
 neighbor tree rooted at the saved main display. Each neighbor keeps its side and
 top/left or bottom/right edge alignment; other alignments keep their top/left
 offset in logical points. Equal-size alignment ties choose top/left. Neighbor
@@ -324,13 +324,13 @@ Unchanged geometry uses the exact saved origins, including older unusual layouts
 Resized layouts must retain each selected shared edge, remain contiguous and
 non-overlapping, and have integer origins in the CoreGraphics range. Disconnected,
 overlapping or corner-only saved layouts cannot adapt. Large offsets or conflicting
-branches can make a resized layout impossible; PanelCtl refuses with a reason
+branches can make a resized layout impossible; DisplayPanel refuses with a reason
 rather than moving displays arbitrarily or falling back to Preferred main. Extra
 contacts outside the neighbor tree are not constrained. Remember Current
 Arrangement can replace a refused layout. A mode change alone still does not trigger protection;
 use Restore arrangement explicitly or wait for a reconnect/wake transition.
 Duplicate or ambiguous identities are refused. If macOS swaps UUIDs between identical monitors
-with no serial, PanelCtl cannot detect that swap and will not guess using ports,
+with no serial, DisplayPanel cannot detect that swap and will not guess using ports,
 names or positions. Show a blacked-out main display before remembering/restoring
 an arrangement; it must belong to the visible set.
 
@@ -384,8 +384,8 @@ Opt-in checks against a built CLI that never change displays (needs a desktop
 session):
 
 ```sh
-swift build --product panelctl
-swift scripts/test-display-recovery.swift "$(swift build --show-bin-path)/panelctl"
+swift build --product dp
+swift scripts/test-display-recovery.swift "$(swift build --show-bin-path)/dp"
 ```
 
 The script covers capture, deadline verification, parent and helper signals,

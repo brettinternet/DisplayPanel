@@ -3,7 +3,7 @@
 macOS has no public API that sleeps or disconnects one external display while
 others stay on. These are the options:
 
-| Approach | Desktop stays | Result | PanelCtl |
+| Approach | Desktop stays | Result | DisplayPanel |
 | --- | --- | --- | --- |
 | Black window | Yes | OLED pixels unlit; monitor stays on | Blackout, Hide (black out) |
 | Translucent overlay | Yes | Dimmer; pixels may stay lit | Working-mode blackout |
@@ -31,7 +31,7 @@ A common bug: tools look the display up in `CGGetOnlineDisplayList` to
 re-enable it, but disabling removes it from that list
 ([displayplacer #109](https://github.com/jakehilborn/displayplacer/issues/109),
 [#126](https://github.com/jakehilborn/displayplacer/issues/126),
-[#137](https://github.com/jakehilborn/displayplacer/issues/137)). PanelCtl saves
+[#137](https://github.com/jakehilborn/displayplacer/issues/137)). DisplayPanel saves
 the ID first.
 
 **IOKit and DisplayServices.** IOKit power keys don't control arbitrary
@@ -62,8 +62,8 @@ See also the [tool survey](display-disable-tool-survey.md).
 ## Check your setup
 
 ```sh
-panelctl list
-panelctl probe --json      # DDC reads only
+dp list
+dp probe --json      # DDC reads only
 ```
 
 EDID power flags are advertised capabilities, not guarantees, and differ even

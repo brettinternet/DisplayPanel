@@ -1,12 +1,12 @@
 # DDC input select
 
-`panelctl ddc-input` reads or switches a monitor's input over DDC (VCP `0x60`)
+`dp ddc-input` reads or switches a monitor's input over DDC (VCP `0x60`)
 on Apple Silicon. Use it to hand a multi-input monitor to another computer.
 
 ```sh
-panelctl ddc-input --display UUID                 # read current input
-panelctl ddc-input --display UUID --set hdmi1     # switch
-panelctl ddc-input --display UUID --set 0x0F --json
+dp ddc-input --display UUID                 # read current input
+dp ddc-input --display UUID --set hdmi1     # switch
+dp ddc-input --display UUID --set 0x0F --json
 ```
 
 | Name | `dp1` | `dp2` | `hdmi1` | `hdmi2` |
@@ -19,7 +19,7 @@ known input.
 ## Check support
 
 ```sh
-panelctl probe --json
+dp probe --json
 ```
 
 `probe` only reads input and brightness from each external display:

@@ -8,7 +8,7 @@ dotenv: [".env"]
 vars:
   ARM64_BUILD_DIR: .build/task-release-arm64
   X86_64_BUILD_DIR: .build/task-release-x86_64
-  APP_PATH: .build/PanelCtl.app
+  APP_PATH: .build/DisplayPanel.app
   # Named for the link so the app records the SDK it uses; see scripts/package-release.sh.
   SDK_PATH:
     sh: xcrun --show-sdk-path
@@ -75,20 +75,20 @@ tasks:
   build:release:
     desc: Build the app (Release)
     cmds:
-      - swift build --disable-sandbox --configuration release --product PanelCtlApp --triple arm64-apple-macosx13.0 --scratch-path "{{.ARM64_BUILD_DIR}}" -Xswiftc -Xclang-linker -Xswiftc -isysroot -Xswiftc -Xclang-linker -Xswiftc "{{.SDK_PATH}}"
-      - swift build --disable-sandbox --configuration release --product panelctl --triple arm64-apple-macosx13.0 --scratch-path "{{.ARM64_BUILD_DIR}}" -Xswiftc -Xclang-linker -Xswiftc -isysroot -Xswiftc -Xclang-linker -Xswiftc "{{.SDK_PATH}}"
-      - swift build --disable-sandbox --configuration release --product PanelCtlApp --triple x86_64-apple-macosx13.0 --scratch-path "{{.X86_64_BUILD_DIR}}" -Xswiftc -Xclang-linker -Xswiftc -isysroot -Xswiftc -Xclang-linker -Xswiftc "{{.SDK_PATH}}"
-      - swift build --disable-sandbox --configuration release --product panelctl --triple x86_64-apple-macosx13.0 --scratch-path "{{.X86_64_BUILD_DIR}}" -Xswiftc -Xclang-linker -Xswiftc -isysroot -Xswiftc -Xclang-linker -Xswiftc "{{.SDK_PATH}}"
+      - swift build --disable-sandbox --configuration release --product DisplayPanelApp --triple arm64-apple-macosx13.0 --scratch-path "{{.ARM64_BUILD_DIR}}" -Xswiftc -Xclang-linker -Xswiftc -isysroot -Xswiftc -Xclang-linker -Xswiftc "{{.SDK_PATH}}"
+      - swift build --disable-sandbox --configuration release --product dp --triple arm64-apple-macosx13.0 --scratch-path "{{.ARM64_BUILD_DIR}}" -Xswiftc -Xclang-linker -Xswiftc -isysroot -Xswiftc -Xclang-linker -Xswiftc "{{.SDK_PATH}}"
+      - swift build --disable-sandbox --configuration release --product DisplayPanelApp --triple x86_64-apple-macosx13.0 --scratch-path "{{.X86_64_BUILD_DIR}}" -Xswiftc -Xclang-linker -Xswiftc -isysroot -Xswiftc -Xclang-linker -Xswiftc "{{.SDK_PATH}}"
+      - swift build --disable-sandbox --configuration release --product dp --triple x86_64-apple-macosx13.0 --scratch-path "{{.X86_64_BUILD_DIR}}" -Xswiftc -Xclang-linker -Xswiftc -isysroot -Xswiftc -Xclang-linker -Xswiftc "{{.SDK_PATH}}"
       - /bin/test ! -e "{{.APP_PATH}}" || /usr/bin/trash "{{.APP_PATH}}"
       - |
-        version=$(/usr/bin/sed -n 's/.*public static let version = "panelctl \([^"]*\)".*/\1/p' Sources/PanelCtlCore/CLIHelp.swift)
+        version=$(/usr/bin/sed -n 's/.*public static let version = "dp \([^"]*\)".*/\1/p' Sources/DisplayPanelCore/CLIHelp.swift)
         arm64_bin=$(swift build --disable-sandbox --configuration release --triple arm64-apple-macosx13.0 --scratch-path "{{.ARM64_BUILD_DIR}}" --show-bin-path)
         x86_64_bin=$(swift build --disable-sandbox --configuration release --triple x86_64-apple-macosx13.0 --scratch-path "{{.X86_64_BUILD_DIR}}" --show-bin-path)
         ./scripts/package-app.sh "v$version" \
-          "$arm64_bin/PanelCtlApp" \
-          "$x86_64_bin/PanelCtlApp" \
-          "$arm64_bin/panelctl" \
-          "$x86_64_bin/panelctl" \
+          "$arm64_bin/DisplayPanelApp" \
+          "$x86_64_bin/DisplayPanelApp" \
+          "$arm64_bin/dp" \
+          "$x86_64_bin/dp" \
           "{{.APP_PATH}}"
 
   build:icon:
@@ -110,10 +110,10 @@ tasks:
       # An ad-hoc signature changes every build, so macOS would drop privacy grants such as Accessibility.
       - |
         if ! codesign -d -r- "{{.APP_PATH}}" 2>&1 | grep -q 'certificate leaf = H"'; then
-          echo 'copy:release: refusing an ad-hoc signed app; set PANELCTL_SIGNING_IDENTITY in .env (see example.env)' >&2
+          echo 'copy:release: refusing an ad-hoc signed app; set DISPLAYPANEL_SIGNING_IDENTITY in .env (see example.env)' >&2
           exit 1
         fi
-      - /usr/bin/xcrun swift ./scripts/install-release.swift "{{.APP_PATH}}" /Applications/PanelCtl.app
+      - /usr/bin/xcrun swift ./scripts/install-release.swift "{{.APP_PATH}}" /Applications/DisplayPanel.app
 
   open:release:
     desc: Run the built app (Release)
