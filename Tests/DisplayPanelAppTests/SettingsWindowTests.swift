@@ -481,7 +481,7 @@ final class SettingsWindowTests: XCTestCase {
         // Controls exist before the sheet animation reaches its final geometry.
         RunLoop.main.run(until: Date().addingTimeInterval(0.5))
         if let output { try writeSnapshot(of: sheet, to: output, name: "arrangement-sheet-empty") }
-        try click(sheet, x: 140, top: 327) // Remember Current Arrangement.
+        try click(sheet, x: 140, top: 313) // Remember Current Arrangement.
         spin { model.arrangementPreferences.remembered.count == 1 }
         XCTAssertEqual(model.arrangementPreferences.remembered.count, 1)
         XCTAssertFalse(model.arrangementPreferences.enabled)
@@ -515,9 +515,9 @@ final class SettingsWindowTests: XCTestCase {
         window.setContentSize(NSSize(width: 680, height: 1000))
         let content = try XCTUnwrap(window.contentView)
         func keepOffSwitch() -> NSSwitch? {
-            // Experimental removal is off, so each display page has one switch.
-            let switches = nativeViews(in: content).compactMap { $0 as? NSSwitch }
-            return switches.count == 1 ? switches[0] : nil
+            // The unsaved mode-protection switch is disabled; this fixture's Keep Off switch is enabled.
+            let enabledSwitches = nativeViews(in: content).compactMap { $0 as? NSSwitch }.filter(\.isEnabled)
+            return enabledSwitches.count == 1 ? enabledSwitches[0] : nil
         }
         spin { content.layoutSubtreeIfNeeded(); return keepOffSwitch()?.state == .off }
         let toggle = try XCTUnwrap(keepOffSwitch())
@@ -575,8 +575,9 @@ final class SettingsWindowTests: XCTestCase {
         window.setContentSize(NSSize(width: 680, height: 1000))
         let content = try XCTUnwrap(window.contentView)
         func keepOffSwitch() -> NSSwitch? {
-            let switches = nativeViews(in: content).compactMap { $0 as? NSSwitch }
-            return switches.count == 1 ? switches[0] : nil
+            // The unsaved mode-protection switch is disabled; this fixture's Keep Off switch is enabled.
+            let enabledSwitches = nativeViews(in: content).compactMap { $0 as? NSSwitch }.filter(\.isEnabled)
+            return enabledSwitches.count == 1 ? enabledSwitches[0] : nil
         }
         spin { content.layoutSubtreeIfNeeded(); return keepOffSwitch()?.state == .on }
         let toggle = try XCTUnwrap(keepOffSwitch())

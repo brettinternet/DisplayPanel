@@ -80,7 +80,7 @@ final class MainMenuTests: XCTestCase {
             XCTAssertTrue(app.sendAction(action, to: target, from: item), "Shortcut \(key) must be handled")
         }
         try press("a")
-        XCTAssertEqual(text.selectedRange(), NSRange(location: 0, length: 8))
+        XCTAssertEqual(text.selectedRange(), NSRange(location: 0, length: 12))
         try press("c")
         XCTAssertTrue(pasteboard.string(forType: .string) == "DisplayPanel")
         try press("x")
