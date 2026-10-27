@@ -1,9 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.9.0
 
 - Rename PanelCtl to DisplayPanel and the `panelctl` CLI to `dp`. The bundle ID, Application Support folder, defaults domain and release asset names change too; re-grant privacy permissions after upgrading.
-- Sign releases with Developer ID and the hardened runtime instead of a self-signed certificate.
+- Sign releases with Developer ID and the hardened runtime, and notarize them, instead of a self-signed certificate. Downloads open without Open Anyway.
+- Protect remembered display arrangements and a preferred main display after reconnects and wake, adapting to display size changes.
+- Protect each display's saved mode after reconnects and wake.
+- Preserve hidden displays and their names across monitor re-links.
+- Add Show All Displays to the menu, and offer recovery for displays left hidden by a previous session.
 - Let Show wait for an in-progress monitor input switch before restoring displays, without retrying failed writes.
 - Resume enabled automation after display wake or configuration changes without requiring a manual refresh.
 - Shorten Settings, menu, dialog and error copy, and show each display's Keep windows off status once in the menu.
