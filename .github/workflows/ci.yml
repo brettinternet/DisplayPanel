@@ -121,8 +121,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_NOTES: |
             Downloads:
-            - **DisplayPanel menu-bar app** — `DisplayPanel-…-macos-universal.zip`
-            - **Standalone dp CLI** — `dp-cli-…-macos-universal.zip`
+            - **DisplayPanel menu-bar app** — `DisplayPanel-….app.zip`
+            - **Standalone dp CLI** — `dp-…-macos-universal.zip`
 
             Both archives are universal arm64/x86_64 and signed with Developer ID, but not yet notarized. Verify the matching SHA-256 checksum; macOS may require Privacy & Security → Open Anyway.
         run: |
@@ -133,10 +133,10 @@ jobs:
             release_flags+=(--prerelease --latest=false)
           fi
           release_assets=(
-            "dist/DisplayPanel-${GITHUB_REF_NAME}-macos-universal.zip#DisplayPanel menu-bar app (universal macOS)"
-            "dist/DisplayPanel-${GITHUB_REF_NAME}-macos-universal.zip.sha256#DisplayPanel app SHA-256"
-            "dist/dp-cli-${GITHUB_REF_NAME}-macos-universal.zip#Standalone dp CLI (universal macOS)"
-            "dist/dp-cli-${GITHUB_REF_NAME}-macos-universal.zip.sha256#dp CLI SHA-256"
+            "dist/DisplayPanel-${GITHUB_REF_NAME}.app.zip#DisplayPanel menu-bar app (universal macOS)"
+            "dist/DisplayPanel-${GITHUB_REF_NAME}.app.zip.sha256#DisplayPanel app SHA-256"
+            "dist/dp-${GITHUB_REF_NAME}-macos-universal.zip#Standalone dp CLI (universal macOS)"
+            "dist/dp-${GITHUB_REF_NAME}-macos-universal.zip.sha256#dp CLI SHA-256"
           )
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${release_assets[@]}" --clobber

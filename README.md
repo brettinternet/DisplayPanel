@@ -15,7 +15,7 @@ click-through dimming, display sleep and experimental monitor controls.
 
 ```sh
 # CLI with mise
-mise use -g 'github:brettinternet/displaypanel[matching=dp-cli]'
+mise use -g github:brettinternet/displaypanel
 ```
 
 Or download the app or CLI and its SHA-256 checksum from
