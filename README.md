@@ -22,11 +22,6 @@ Or download the app or CLI and its SHA-256 checksum from
 [GitHub Releases](https://github.com/brettinternet/displaypanel/releases). Move
 `DisplayPanel.app` to `/Applications`, or put `dp` on your `PATH`.
 
-Releases are Developer ID signed and notarized. The app's ticket is stapled;
-`dp` cannot be stapled, so its first run needs network access for Gatekeeper to
-check notarization. The first upgrade from an older self-signed or ad-hoc
-release requires re-granting any privacy permissions once.
-
 To build the CLI (macOS 13+, Swift 5.9+):
 
 ```sh
