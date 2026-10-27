@@ -8,6 +8,8 @@ enum InstallError: LocalizedError {
     case invalidSource(String)
     case invalidDestination(String)
     case destinationRunning(String)
+    case gatekeeperRejected(String)
+    case quarantineNotCleared(String)
 
     var errorDescription: String? {
         switch self {
@@ -19,6 +21,10 @@ enum InstallError: LocalizedError {
             return "destination must be an absolute .app path: \(path)"
         case .destinationRunning(let path):
             return "app is still running after being asked to quit: \(path)"
+        case .gatekeeperRejected(let path):
+            return "Gatekeeper rejected the downloaded app: \(path)"
+        case .quarantineNotCleared(let path):
+            return "could not clear quarantine: \(path)"
         }
     }
 }
@@ -39,6 +45,28 @@ func terminateRunningApp(at destination: URL) throws {
     }
     guard runningApps.allSatisfy(\.isTerminated) else {
         throw InstallError.destinationRunning(destination.path)
+    }
+}
+
+func run(_ tool: String, _ arguments: [String]) throws -> Bool {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: tool)
+    process.arguments = arguments
+    try process.run()
+    process.waitUntilExit()
+    return process.terminationStatus == 0
+}
+
+/// A copied download keeps its quarantine, so macOS would run it translocated
+/// and refuse Launch at Login. Accept it as Finder's move would, but only after
+/// Gatekeeper accepts it.
+func clearQuarantine(of app: URL) throws {
+    guard getxattr(app.path, "com.apple.quarantine", nil, 0, 0, 0) >= 0 else { return }
+    guard try run("/usr/sbin/spctl", ["--assess", "--type", "execute", app.path]) else {
+        throw InstallError.gatekeeperRejected(app.path)
+    }
+    guard try run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path]) else {
+        throw InstallError.quarantineNotCleared(app.path)
     }
 }
 
@@ -73,6 +101,7 @@ func install(sourcePath: String, destinationPath: String) throws {
     }
 
     try fileManager.copyItem(at: source, to: staging)
+    try clearQuarantine(of: staging)
 
     if fileManager.fileExists(atPath: destination.path) {
         try fileManager.trashItem(at: destination, resultingItemURL: &trashedDestination)

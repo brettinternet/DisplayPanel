@@ -214,8 +214,9 @@ With explicit owner approval for desktop interaction, install the app using
 `scripts/install-release.swift SOURCE_APP /Applications/DisplayPanel.app`,
 verify opening it and Launch at Login registration, then confirm the bundled
 helper executes and the installed signature still verifies. The installer copies
-the signed bundle without re-signing. Do not run blackout or recovery commands to
-test signing.
+the signed bundle without re-signing. A quarantined download must pass Gatekeeper;
+the installer then clears its quarantine so macOS does not translocate it.
+Do not run blackout or recovery commands to test signing.
 
 To rotate (renewal or expiry), create a new Developer ID Application
 certificate for the same team, then replace the three `DISPLAYPANEL_SIGNING_*`

@@ -24,3 +24,7 @@ release/
 
 debug/
 .env
+
+# CI test logs (otherwise release builds report a dirty tree)
+test-output.log
+test-stack-*.log
