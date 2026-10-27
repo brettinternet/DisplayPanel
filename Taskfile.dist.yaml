@@ -109,8 +109,8 @@ tasks:
     cmds:
       # An ad-hoc signature changes every build, so macOS would drop privacy grants such as Accessibility.
       - |
-        if ! codesign -d -r- "{{.APP_PATH}}" 2>&1 | grep -q 'certificate leaf = H"'; then
-          echo 'copy:release: refusing an ad-hoc signed app; set DISPLAYPANEL_SIGNING_IDENTITY in .env (see example.env)' >&2
+        if ! bash -c 'source scripts/signing.sh && displaypanel_check_requirement "$1" com.brettinternet.displaypanel' bash "{{.APP_PATH}}"; then
+          echo 'copy:release: refusing an app not signed with the Developer ID identity; set DISPLAYPANEL_SIGNING_IDENTITY in .env (see example.env)' >&2
           exit 1
         fi
       - /usr/bin/xcrun swift ./scripts/install-release.swift "{{.APP_PATH}}" /Applications/DisplayPanel.app

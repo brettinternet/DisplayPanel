@@ -124,7 +124,7 @@ jobs:
             - **DisplayPanel menu-bar app** — `DisplayPanel-…-macos-universal.zip`
             - **Standalone dp CLI** — `dp-cli-…-macos-universal.zip`
 
-            Both archives are universal arm64/x86_64 and signed with a stable self-signed certificate, not Developer ID signed or notarized. Verify the matching SHA-256 checksum; macOS may require Privacy & Security → Open Anyway.
+            Both archives are universal arm64/x86_64 and signed with Developer ID, but not yet notarized. Verify the matching SHA-256 checksum; macOS may require Privacy & Security → Open Anyway.
         run: |
           source scripts/release-version.sh
           release_version_parse "$GITHUB_REF_NAME"

@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Import owner-provided release secrets into a job-local signing keychain."""
 import base64
-import hashlib
 import json
 import os
 import re
 import shlex
-import ssl
 import sys
 from pathlib import Path
 import secrets
@@ -29,9 +27,8 @@ def main():
 
     def security(*args):
         # Never print arguments: import/partition commands contain passwords.
-        command = ["sudo", "-n", "security", *args] if args[0] == "add-trusted-cert" else ["security", *args]
         try:
-            result = subprocess.run(command, capture_output=True, timeout=30)
+            result = subprocess.run(["security", *args], capture_output=True, timeout=30)
         except subprocess.TimeoutExpired:
             raise SystemExit(f"security {args[0]} timed out after 30 seconds (output withheld)")
         if result.returncode:
@@ -51,35 +48,24 @@ def main():
                  "-T", "/usr/bin/codesign")
         security("set-key-partition-list", "-S", "apple-tool:,apple:,codesign:",
                  "-s", "-k", password, keychain)
+        # A Developer ID leaf must chain to Apple's root as is; never add trust.
+        # Apple's published intermediates cover runners that lack them.
+        for intermediate in sorted((Path(__file__).parent / "certificates").glob("*.cer")):
+            security("import", str(intermediate), "-k", keychain)
+        # --keychain selects the identity, but codesign and validation still build
+        # certificate chains through the user's search list. Preserve it for the
+        # always() cleanup.
+        previous = shlex.split(security("list-keychains", "-d", "user"))
+        Path(keychain + ".search-list.json").write_text(json.dumps(previous))
+        security("list-keychains", "-d", "user", "-s", keychain, *previous)
         identities = security("find-identity", "-p", "codesigning", keychain)
         if identity.upper() not in identities.upper():
             raise SystemExit("Imported keychain has no matching signing identity; check certificate/private-key export and fingerprint secret")
         valid = security("find-identity", "-v", "-p", "codesigning", keychain)
         if identity.upper() not in valid.upper():
             matching = next(line for line in identities.splitlines() if identity.upper() in line.upper())
-            if "CSSMERR_TP_NOT_TRUSTED" not in matching:
-                reasons = re.findall(r"CSSMERR_[A-Z_]+", matching)
-                raise SystemExit(f"Imported signing identity is not valid for code signing: {', '.join(reasons) or 'unknown reason'}")
-            # Only trust the exact configured public certificate, for code signing.
-            # This importer runs on disposable CI runners; never export a private key.
-            pem = security("find-certificate", "-p", keychain)
-            der = ssl.PEM_cert_to_DER_cert(pem)
-            if hashlib.sha1(der).hexdigest().upper() != identity.upper():
-                raise SystemExit("Refusing to trust a certificate that does not match the configured fingerprint")
-            public_certificate = Path(directory) / "signing-certificate.pem"
-            public_certificate.write_text(pem)
-            # The user trust domain prompts for authorization without a desktop.
-            # Dedicated macOS runners permit noninteractive sudo; use their admin domain.
-            security("add-trusted-cert", "-d", "-r", "trustRoot", "-p", "codeSign",
-                     "-k", keychain, str(public_certificate))
-            valid = security("find-identity", "-v", "-p", "codesigning", keychain)
-            if identity.upper() not in valid.upper():
-                raise SystemExit("Signing identity remains invalid after code-signing-only trust")
-        # --keychain selects the identity, but codesign still resolves certificates
-        # through the user's search list. Preserve it for the always() cleanup.
-        previous = shlex.split(security("list-keychains", "-d", "user"))
-        Path(keychain + ".search-list.json").write_text(json.dumps(previous))
-        security("list-keychains", "-d", "user", "-s", keychain, *previous)
+            reasons = re.findall(r"CSSMERR_[A-Z_]+", matching)
+            raise SystemExit(f"Imported signing identity is not valid for code signing: {', '.join(reasons) or 'unknown reason'}")
         print("Configured signing identity is valid and available to codesign")
 
 

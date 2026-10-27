@@ -16,30 +16,31 @@ FAKE_TOOL = '''#!/usr/bin/env python3
 import json, os, pathlib, sys
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
-if name == "sudo":
-    assert args[0] == "-n"
-    os.execvp(args[1], args[1:])
 with open(os.environ["SIGNING_TEST_LOG"], "a") as log:
     log.write(json.dumps([name, *args]) + "\\n")
 if name == "codesign":
     if os.environ.get("FAIL_SIGN") and "--sign" in args:
         sys.exit(42)
+    identifiers = pathlib.Path(os.environ["SIGNING_TEST_LOG"] + ".identifiers.json")
+    signed = json.loads(identifiers.read_text()) if identifiers.exists() else {}
+    if "--sign" in args:
+        signed[args[-1]] = args[args.index("--identifier") + 1]
+        identifiers.write_text(json.dumps(signed))
+    if args[:2] == ["-d", "-r-"]:
+        team = os.environ.get("FAKE_TEAM_ID", "4NQM9EVPZ3")
+        print(f'designated => identifier "{signed[args[2]]}" and anchor apple generic and '
+              'certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and '
+              'certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and '
+              f'certificate leaf[subject.OU] = "{team}"')
 elif name == "security":
     if args == ["list-keychains", "-d", "user"]:
         print('"/a path/login.keychain-db"')
-    if args[0] == "import":
+    if args[0] == "import" and args[1].endswith(".p12"):
         assert pathlib.Path(args[1]).read_bytes() == b"fake certificate"
     if args[0] == "find-identity":
-        trusted = pathlib.Path(os.environ["SIGNING_TEST_LOG"] + ".trusted").exists()
-        invalid = os.environ.get("INVALID_IDENTITY") or (os.environ.get("UNTRUSTED_IDENTITY") and not trusted)
+        invalid = os.environ.get("INVALID_IDENTITY")
         if not os.environ.get("MISSING_IDENTITY") and not ("-v" in args and invalid):
-            reason = "CSSMERR_TP_CERT_EXPIRED" if os.environ.get("INVALID_IDENTITY") else "CSSMERR_TP_NOT_TRUSTED" if invalid else ""
-            print(os.environ["DISPLAYPANEL_SIGNING_IDENTITY"], reason)
-    if args[0] == "find-certificate":
-        encoded = "d3Jvbmc=" if os.environ.get("WRONG_CERTIFICATE") else "ZmFrZSBjZXJ0aWZpY2F0ZQ=="
-        print("-----BEGIN CERTIFICATE-----\\n" + encoded + "\\n-----END CERTIFICATE-----")
-    if args[0] == "add-trusted-cert":
-        pathlib.Path(os.environ["SIGNING_TEST_LOG"] + ".trusted").touch()
+            print(os.environ["DISPLAYPANEL_SIGNING_IDENTITY"], invalid or "")
     if os.environ.get("FAIL_SECURITY") == args[0]:
         print("sensitive diagnostic", file=sys.stderr)
         sys.exit(1)
@@ -66,7 +67,7 @@ class SigningTests(unittest.TestCase):
                     and key != "DISPLAYPANEL_REQUIRE_SIGNING"}
         self.env.update(PATH=f"{self.directory}:{os.environ['PATH']}",
                         SIGNING_TEST_LOG=str(self.log))
-        for name in ("codesign", "security", "sudo", "lipo", "xcrun", "vtool"):
+        for name in ("codesign", "security", "lipo", "xcrun", "vtool"):
             tool = self.directory / name
             tool.write_text(FAKE_TOOL)
             tool.chmod(0o755)
@@ -104,22 +105,24 @@ class SigningTests(unittest.TestCase):
         self.assertNotEqual(self.sign().returncode, 0)
         self.assertEqual(self.calls(), [])
 
-    def test_certificate_requirement_is_stable_and_keychain_is_scoped(self):
+    def test_developer_id_signing_is_hardened_timestamped_and_keychain_scoped(self):
         self.env.update(DISPLAYPANEL_SIGNING_IDENTITY=IDENTITY,
                         DISPLAYPANEL_SIGNING_KEYCHAIN="/a path/signing.keychain-db")
-        for _ in range(2):
-            result = self.sign()
-            self.assertEqual(result.returncode, 0, result.stderr)
-        first, second = self.calls()
-        self.assertEqual(first, second)
-        requirement = first[first.index("--requirements") + 1]
-        self.assertEqual(requirement, '=designated => identifier "com.brettinternet.displaypanel" '
-                         f'and certificate leaf = H"{IDENTITY}"')
-        self.assertNotIn("cdhash", requirement)
-        # Compile the exact literal argument with macOS, without signing or keys.
-        parsed = self.run_command("/usr/bin/csreq", "-r", requirement, "-t")
-        self.assertEqual(parsed.returncode, 0, parsed.stderr)
-        self.assertEqual(first[first.index("--keychain") + 1], "/a path/signing.keychain-db")
+        result = self.sign()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        signing, check = self.calls()
+        self.assertEqual(signing[signing.index("--options") + 1], "runtime")
+        self.assertIn("--timestamp", signing)
+        # The SHA-1 selects the identity only; codesign's default requirement survives renewal.
+        self.assertNotIn("--requirements", signing)
+        self.assertEqual(signing[signing.index("--keychain") + 1], "/a path/signing.keychain-db")
+        self.assertEqual(check[1:], ["-d", "-r-", str(self.directory / "App with spaces.app")])
+
+    def test_signing_refuses_a_different_team(self):
+        self.env.update(DISPLAYPANEL_SIGNING_IDENTITY=IDENTITY, FAKE_TEAM_ID="ABCDE12345")
+        result = self.sign()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("team 4NQM9EVPZ3", result.stderr)
 
     def test_signing_failure_never_falls_back(self):
         self.env.update(DISPLAYPANEL_SIGNING_IDENTITY=IDENTITY, FAIL_SIGN="1")
@@ -138,14 +141,19 @@ class SigningTests(unittest.TestCase):
         result = self.package_app()
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = [call for call in self.calls() if call[0] == "codesign"]
-        self.assertEqual(len(calls), 3)
-        for call, identifier in zip(calls[:2], ("com.brettinternet.displaypanel.cli", "com.brettinternet.displaypanel")):
+        self.assertEqual(len(calls), 5)
+        signs = [call for call in calls if "--sign" in call]
+        for call, identifier in zip(signs, ("com.brettinternet.displaypanel.cli", "com.brettinternet.displaypanel")):
             self.assertEqual(call[call.index("--sign") + 1], IDENTITY)
             self.assertEqual(call[call.index("--identifier") + 1], identifier)
-            self.assertIn(f'identifier "{identifier}"', call[call.index("--requirements") + 1])
+            self.assertIn("--timestamp", call)
+        # Nested code is signed and checked before the outer bundle.
+        self.assertEqual(calls[0], signs[0])
         self.assertTrue(calls[0][-1].endswith("/Contents/Helpers/dp"))
-        self.assertIn("--verify", calls[2])
-        self.assertIn("--strict", calls[2])
+        self.assertEqual(calls[1][1:3], ["-d", "-r-"])
+        self.assertEqual(calls[2], signs[1])
+        self.assertIn("--verify", calls[4])
+        self.assertIn("--strict", calls[4])
         self.assertTrue((self.directory / "DisplayPanel.app/Contents/Helpers/dp").exists())
 
     def test_packagers_fail_before_build_without_required_identity(self):
@@ -175,44 +183,36 @@ class SigningTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = self.calls()
         self.assertEqual([call[1] for call in calls], ["create-keychain", "set-keychain-settings",
-                         "unlock-keychain", "import", "set-key-partition-list",
-                         "find-identity", "find-identity", "list-keychains", "list-keychains"])
+                         "unlock-keychain", "import", "set-key-partition-list", "import", "import",
+                         "list-keychains", "list-keychains", "find-identity", "find-identity"])
         imported = calls[3]
         self.assertFalse(Path(imported[2]).exists())
         self.assertEqual(imported[-2:], ["-T", "/usr/bin/codesign"])
         self.assertNotIn("fake password", result.stdout + result.stderr)
-        self.assertEqual(calls[-1][2:], ["-d", "user", "-s", self.env["DISPLAYPANEL_SIGNING_KEYCHAIN"],
+        self.assertEqual(calls[8][2:], ["-d", "user", "-s", self.env["DISPLAYPANEL_SIGNING_KEYCHAIN"],
                                        "/a path/login.keychain-db"])
         cleanup = self.run_command("python3", str(ROOT / "scripts/import-signing.py"), "--cleanup")
         self.assertEqual(cleanup.returncode, 0, cleanup.stderr)
         self.assertEqual(self.calls()[-1][2:], ["-d", "user", "-s", "/a path/login.keychain-db"])
 
-    def test_import_trusts_only_matching_public_certificate_for_code_signing(self):
+    def test_import_adds_apple_intermediates_without_trust_overrides(self):
         self.configure_import()
-        self.env["UNTRUSTED_IDENTITY"] = "1"
         result = self.import_identity()
         self.assertEqual(result.returncode, 0, result.stderr)
-        trust = next(call for call in self.calls() if call[1] == "add-trusted-cert")
-        self.assertEqual(trust[2:7], ["-d", "-r", "trustRoot", "-p", "codeSign"])
-        self.assertFalse(Path(trust[-1]).exists())
-        self.assertFalse(any(call[1] == "export" for call in self.calls()))
-
-    def test_import_never_trusts_a_different_certificate(self):
-        self.configure_import()
-        self.env.update(UNTRUSTED_IDENTITY="1", WRONG_CERTIFICATE="1")
-        result = self.import_identity()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("does not match", result.stderr)
-        self.assertFalse(any(call[1] == "add-trusted-cert" for call in self.calls()))
+        intermediates = [Path(call[2]).name for call in self.calls()[5:7]]
+        self.assertEqual(intermediates, ["DeveloperIDCA.cer", "DeveloperIDG2CA.cer"])
+        self.assertFalse(any(call[1] in ("add-trusted-cert", "export") for call in self.calls()))
 
     def test_import_refuses_missing_or_invalid_identity(self):
         self.configure_import()
-        for flag, message in (("MISSING_IDENTITY", "no matching signing identity"),
-                              ("INVALID_IDENTITY", "not valid for code signing")):
-            self.env[flag] = "1"
+        for flag, value, message in (("MISSING_IDENTITY", "1", "no matching signing identity"),
+                                     ("INVALID_IDENTITY", "CSSMERR_TP_CERT_EXPIRED", "CSSMERR_TP_CERT_EXPIRED"),
+                                     ("INVALID_IDENTITY", "CSSMERR_TP_NOT_TRUSTED", "CSSMERR_TP_NOT_TRUSTED")):
+            self.env[flag] = value
             result = self.import_identity()
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(message, result.stderr)
+            self.assertFalse(any(call[1] == "add-trusted-cert" for call in self.calls()))
             self.assertNotIn("fake password", result.stdout + result.stderr)
             del self.env[flag]
 

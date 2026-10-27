@@ -67,9 +67,10 @@ scripts/package-release.sh v1.2.3
 ```
 
 This writes universal app and CLI archives with SHA-256 files to `dist/`.
-Release CI requires a stable self-signed code-signing identity. Local packaging
-uses the same identity when configured; otherwise it prints an ad-hoc warning.
-Neither signature is Developer ID signing or notarization.
+Release CI requires the Developer ID Application identity and signs with the
+hardened runtime and a secure timestamp. Local packaging uses the same identity
+when configured; otherwise it prints an ad-hoc warning. Releases are not yet
+notarized.
 
 General settings shows the packaged release version. When HEAD is not at the
 matching release tag, packaging appends the short Git SHA (for example,
@@ -84,28 +85,23 @@ with macOS 13 behavior (for example, truncated Settings rows).
 When cross-building for Intel, find the output with
 `swift build … --show-bin-path` and check it with `xcrun lipo -archs`.
 
-### Stable signing identity (owner setup)
+### Developer ID identity (owner setup)
 
-The owner creates and retains the private key, or explicitly authorizes an
-agent to provision it into the local Keychain and GitHub Actions secrets.
-Without that scoped authorization, agents must not generate, export or read it.
-Never put certificates with private keys, passwords or exports in the repository,
-chat or logs. No Apple Developer membership is needed.
+Only the owner creates, exports and uploads the private key, `.p12`, its
+password and API keys. Agents may prepare commands and check secret names with
+`gh secret list`. Never put certificates with private keys, passwords or exports
+in the repository, chat or logs. Creating a Developer ID certificate requires the
+Apple Developer Program Account Holder role.
 
-1. In **Keychain Access → Certificate Assistant → Create a Certificate**, use
-   name **DisplayPanel Signing**, Identity Type **Self Signed Root**, Certificate
-   Type **Code Signing**, and enable overriding defaults. Choose a deliberate
-   long validity period (for example 3650 days), retain the Code Signing
-   extended key usage, and save in the login keychain. Keep this same identity
-   across builds; another certificate with the same name is not the same identity.
-2. If needed, open the certificate's Trust section and trust it for **Code
-   Signing only**, not SSL or unrelated uses. Confirm it appears here:
+1. Create a **Developer ID Application** certificate (developer.apple.com →
+   Certificates, or Xcode → Settings → Accounts → Manage Certificates) and keep
+   it in the login keychain. Confirm it is valid:
 
    ```sh
    security find-identity -v -p codesigning
    ```
 
-3. Copy the certificate's 40-character SHA-1 fingerprint (not the quoted name):
+2. Copy the certificate's 40-character SHA-1 fingerprint (not the quoted name):
 
    ```sh
    export DISPLAYPANEL_SIGNING_IDENTITY=REPLACE_WITH_40_CHARACTER_CERTIFICATE_SHA1
@@ -113,23 +109,24 @@ chat or logs. No Apple Developer membership is needed.
    task build:release
    ```
 
-   Both packaging scripts honor these variables. `DISPLAYPANEL_SIGNING_KEYCHAIN`
-   optionally selects a specific keychain path. An invalid or unavailable
-   configured identity fails signing; it never falls back to ad-hoc. Without an
-   identity, PR/local packaging may use ad-hoc signing with a visible warning,
-   unless `DISPLAYPANEL_REQUIRE_SIGNING=1`. Direct `swift build` is not app packaging.
+   Both packaging scripts honor these variables. The fingerprint only selects
+   the identity. `DISPLAYPANEL_SIGNING_KEYCHAIN` optionally selects a specific
+   keychain path. An invalid or unavailable configured identity fails signing;
+   it never falls back to ad-hoc. Without an identity, PR/local packaging may use
+   ad-hoc signing with a visible warning, unless `DISPLAYPANEL_REQUIRE_SIGNING=1`.
+   Direct `swift build` is not app packaging.
 
-   For local `task` runs, set
-   `DISPLAYPANEL_SIGNING_IDENTITY=…` in `.env` (created from `example.env`
-   by `task init`; untracked), which the Taskfile loads.
-   `task copy:release` refuses to install an ad-hoc signed app, because each
-   ad-hoc build would make macOS drop Accessibility and other privacy grants.
+   For local `task` runs, set `DISPLAYPANEL_SIGNING_IDENTITY=…` in `.env`
+   (created from `example.env` by `task init`; untracked), which the Taskfile
+   loads. `task copy:release` refuses an app that is not Developer ID signed for
+   the expected team, because each ad-hoc build would make macOS drop
+   Accessibility and other privacy grants.
 
-4. In Keychain Access **My Certificates**, select the identity including its
-   private key and export a password-protected `.p12` outside the checkout
-   (the commands below use `/private/tmp/DisplayPanel-signing.p12`). Keep an encrypted
-   backup in owner-controlled storage. Run these commands yourself; the password
-   command prompts for the export password without putting it in shell history:
+3. Export the identity with its private key as a password-protected `.p12`
+   outside the checkout (the commands below use
+   `/private/tmp/DisplayPanel-signing.p12`). Keep an encrypted backup in
+   owner-controlled storage. Run these commands yourself; the password command
+   prompts without putting it in shell history:
 
    ```sh
    base64 -i /private/tmp/DisplayPanel-signing.p12 | tr -d '\n' | gh secret set DISPLAYPANEL_SIGNING_P12_BASE64 --repo brettinternet/DisplayPanel
@@ -139,62 +136,64 @@ chat or logs. No Apple Developer membership is needed.
    ```
 
    Remove the temporary export through Finder after uploading and backing it up.
-   Never paste the export or password into a task, chat or log. Release CI imports
-   these secrets into a job-local keychain, grants `/usr/bin/codesign` access,
-   passes that keychain explicitly, temporarily adds it to the runner's keychain
-   search list for certificate resolution, and verifies
-   the configured identity is available. If the runner reports the self-signed
-   certificate as untrusted, it verifies the public certificate's fingerprint and
-   grants trust for **code signing only** in the disposable runner's admin domain
-   using noninteractive `sudo`, avoiding a GUI authorization prompt.
-   Expired or otherwise invalid identities still fail. It deletes the temporary
-   `.p12` and public certificate, then restores the original search list and deletes
-   the keychain in an `always()` step. Missing
-   secrets, import failures or signing failures prevent publication. PR jobs do
-   not receive these secrets. The ephemeral runner is the final cleanup boundary
-   if a job is forcibly terminated.
+   Release CI imports these secrets into a job-local keychain, grants
+   `/usr/bin/codesign` access, imports Apple's published Developer ID
+   intermediates (`scripts/certificates/`), passes that keychain explicitly,
+   temporarily adds it to the runner's keychain search list, and verifies the
+   configured identity is valid as is. It never adds trust settings; an expired,
+   untrusted or otherwise invalid identity fails. It deletes the temporary
+   `.p12`, then restores the original search list and deletes the keychain in an
+   `always()` step. Missing secrets, import failures or signing failures prevent
+   publication. PR jobs do not receive these secrets. The ephemeral runner is the
+   final cleanup boundary if a job is forcibly terminated. Run the **CI**
+   workflow manually (`workflow_dispatch`) to check the import and sign a probe.
 
-The app identifier remains `com.brettinternet.displaypanel`; the CLI/helper uses
+The app identifier is `com.brettinternet.displaypanel`; the CLI/helper uses
 `com.brettinternet.displaypanel.cli`. Nested code is signed before the app, using
-one certificate. Explicit designated requirements pin the identifier and leaf
-certificate SHA-1, not the changing code hash. This is a certificate fingerprint,
-not use of SHA-1 as the executable's digest algorithm. See Apple's
+one identity, with `--options runtime --timestamp` and no entitlements. The
+designated requirement is codesign's default for Developer ID: the identifier,
+`anchor apple generic`, the Developer ID certificate markers and
+`certificate leaf[subject.OU] = "4NQM9EVPZ3"`. `scripts/signing.sh` commits that
+Team ID and fails if a signature names another team. The requirement contains no
+certificate hash or `cdhash`, so it survives certificate renewal. See Apple's
 [code-signing requirements](https://developer.apple.com/library/archive/technotes/tn2206/).
 
 ### Signing acceptance and rotation
 
-After setup, package **two different commits** with the same identity into
-separate output directories. On each extracted app and CLI, run:
+On each packaged app and CLI, run:
 
 ```sh
 codesign --verify --deep --strict /path/to/DisplayPanel.app
 codesign -d -r- /path/to/DisplayPanel.app
 codesign -d -r- /path/to/DisplayPanel.app/Contents/Helpers/dp
 codesign -d -r- /path/to/dp
+codesign -dv /path/to/DisplayPanel.app 2>&1 | grep -E 'flags|Timestamp|TeamIdentifier'
 /path/to/DisplayPanel.app/Contents/Helpers/dp help
+/path/to/DisplayPanel.app/Contents/Helpers/dp probe --json
 ```
 
-Record the commits and the requirements: each corresponding requirement must
-be identical across the two builds, contain the certificate pin and expected
-identifier, and contain no `cdhash`. The fake-tool signing tests check policy
-and command ordering only; they do not prove macOS accepts the certificate.
+Each requirement must name the expected identifier, `anchor apple generic` and
+the committed Team ID, with no `cdhash`. `codesign -dv` must show
+`flags=0x10000(runtime)`, a `Timestamp` and the Team ID. `dp probe` is read-only;
+its `symbols` must all be `true`, showing private lookups still resolve under
+the hardened runtime. The fake-tool signing tests check policy and command
+ordering only; they do not prove macOS accepts the certificate.
 
-With explicit owner approval for desktop interaction, install the first app
-using `scripts/install-release.swift SOURCE_APP /Applications/DisplayPanel.app`,
-verify opening it and Launch at Login registration, then install the second at
-the same path and repeat. Confirm the bundled helper executes and the installed
-signature still verifies. The installer copies the signed bundle without
-re-signing; bundle location, helper lookup and `SMAppService.mainApp` are unchanged.
-Do not run blackout or recovery commands to test signing. Gatekeeper still may
-require **Open Anyway** after checking the release checksum: a self-signed
-certificate is not notarization or Apple trust.
+With explicit owner approval for desktop interaction, install the app using
+`scripts/install-release.swift SOURCE_APP /Applications/DisplayPanel.app`,
+verify opening it and Launch at Login registration, then confirm the bundled
+helper executes and the installed signature still verifies. The installer copies
+the signed bundle without re-signing. Do not run blackout or recovery commands to
+test signing. Until notarization, Gatekeeper may still require **Open Anyway**.
 
-To rotate, create a new identity and replace all three repository secrets plus
-the local fingerprint together. Retain the old key securely for any deliberate
-old-line rebuilds. Rotation changes the designated requirement. Users must
-remove/re-add DisplayPanel's privacy grant once after rotation **or the first upgrade
-from an ad-hoc build**; a stale enabled switch in System Settings does not prove
-permission is valid. Builds signed with the unchanged identity are intended to
+To rotate (renewal or expiry), create a new Developer ID Application
+certificate for the same team, then replace the three `DISPLAYPANEL_SIGNING_*`
+repository secrets and the local fingerprint together. The designated
+requirement does not change, so privacy grants survive. Changing teams changes
+the requirement and the committed Team ID; users must then remove/re-add
+DisplayPanel's privacy grant once, as after the first upgrade from a self-signed
+or ad-hoc build. A stale enabled switch in System Settings does not prove
+permission is valid. Builds signed for the unchanged team are intended to
 retain grants. DP-64 checks Accessibility in the app process and requests it
 only from the explicit in-app button. Fake-backed tests never open the
 permission prompt or move native windows; real window movement and grant-retention
