@@ -11,7 +11,9 @@ func require(_ value: @autoclosure () throws -> Bool, _ message: String) throws 
     if try !value() { throw TestFailure(description: message) }
 }
 
-let root = FileManager.default.temporaryDirectory.appendingPathComponent("displaypanel-recovery-integration-\(UUID())")
+// Fixed name: each run replaces the previous run's artifacts; a failed run keeps them for inspection.
+let root = FileManager.default.temporaryDirectory.appendingPathComponent("displaypanel-recovery-integration")
+try? FileManager.default.removeItem(at: root)
 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false,
                                        attributes: [.posixPermissions: 0o700])
 try Data("dp recovery test artifacts\n".utf8).write(to: root.appendingPathComponent(".displaypanel-test-owned"))
@@ -153,7 +155,7 @@ func run() throws {
     print("All recovery integration checks passed; no display writes requested.")
 }
 
-do { try run() }
+do { try run(); try? FileManager.default.removeItem(at: root) }
 catch {
     fputs("FAIL: \(error)\nArtifacts: \(root.path)\n", stderr)
     exit(1)

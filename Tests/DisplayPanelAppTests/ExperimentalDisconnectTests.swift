@@ -76,11 +76,7 @@ final class ExperimentalDisconnectTests: XCTestCase {
     }
 
     func testSyntheticJournalSurvivesRelaunchWithoutEnumerableTargetOrEvidenceMutation() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-disconnect-fixture-\(UUID())")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-                                               attributes: [.posixPermissions: 0o700])
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let url = directory.appendingPathComponent("current.json")
         let snapshotJSON: [String: Any] = [
             "bootSession": "synthetic-boot", "osBuild": "synthetic-build", "userID": getuid(),

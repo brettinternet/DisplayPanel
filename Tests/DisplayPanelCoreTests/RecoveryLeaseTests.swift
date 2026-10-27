@@ -7,12 +7,8 @@ final class RecoveryLeaseTests: XCTestCase {
     private var directory: URL!
 
     override func setUpWithError() throws {
-        directory = FileManager.default.temporaryDirectory.appendingPathComponent("displaypanel-lease-tests-\(UUID())")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-                                               attributes: [.posixPermissions: 0o700])
+        directory = try makeTestDirectory()
     }
-
-    override func tearDownWithError() throws { try FileManager.default.removeItem(at: directory) }
 
     private func snapshot() throws -> RecoverySnapshot {
         let value: [String: Any] = ["bootSession": "boot", "osBuild": "build", "userID": getuid(), "hostModel": "synthetic-model",

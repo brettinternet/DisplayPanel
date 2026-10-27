@@ -6,13 +6,7 @@ final class DisplayRecoveryTests: XCTestCase {
     private var directory: URL!
 
     override func setUpWithError() throws {
-        directory = FileManager.default.temporaryDirectory.appendingPathComponent("displaypanel-recovery-tests-\(UUID())")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-                                               attributes: [.posixPermissions: 0o700])
-    }
-
-    override func tearDownWithError() throws {
-        try FileManager.default.removeItem(at: directory)
+        directory = try makeTestDirectory()
     }
 
     private func store() -> RecoveryStore { RecoveryStore(url: directory.appendingPathComponent("current.json")) }

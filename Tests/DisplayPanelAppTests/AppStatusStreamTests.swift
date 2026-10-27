@@ -10,7 +10,7 @@ final class AppStatusStreamTests: XCTestCase {
 
     @MainActor
     func testInitialChangesCoalescingDeduplicationConcurrentWatchersAndShutdown() async throws {
-        let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("control.sock").path
         var snapshot = Self.status("waiting")
         var commands: [AppControlCommand] = []
         let server = AppControlServer(socketPath: path, statusSnapshot: { snapshot }) { request, _ in
@@ -148,7 +148,7 @@ final class AppStatusStreamTests: XCTestCase {
 
     @MainActor
     func testAbruptDropAfterInitialFrameEmitsNextSequenceAndNeverReconnects() async throws {
-        let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("control.sock").path
         var requests = 0
         let server = AppControlServer(socketPath: path) { _, _ in
             requests += 1
@@ -172,7 +172,7 @@ final class AppStatusStreamTests: XCTestCase {
 
     @MainActor
     func testLegacyServerDropProducesFinalDisconnectedDocument() async throws {
-        let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("control.sock").path
         let server = AppControlServer(socketPath: path) { _, _ in Self.status("waiting") }
         try server.start()
         defer { server.stop() }

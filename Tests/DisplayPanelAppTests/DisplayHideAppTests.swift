@@ -32,17 +32,13 @@ final class DisplayHideAppTests: XCTestCase {
     }
 
     func testHiddenOverlayIsSourceOnlyRestoreOnlyAndQuiescedBeforeShow() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-hidden-overlay-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let log = directory.appendingPathComponent("helper.log")
         let blackoutTrigger = directory.appendingPathComponent("blackout-trigger")
         let helper = try writeHiddenOverlayHelper(
             in: directory, log: log, initiallyWaiting: true, blackoutTrigger: blackoutTrigger
         )
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var preferences = ProtectionPreferences()
         preferences.isEnabled = true
         preferences.didChooseDisplays = true
@@ -144,18 +140,14 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testRemainingDisplaysRunBoundedOverlaysAndPauseOnRecovery() async throws {
         // nil saved selection means All displays with a stale saved selection of main only.
-        for (selected, saved) in [([Self.targetUUID, Self.sourceUUID], nil),
-                                  ([Self.targetUUID, Self.mainUUID], nil),
-                                  ([Self.targetUUID, Self.sourceUUID, Self.mainUUID], nil),
-                                  ([Self.targetUUID, Self.sourceUUID, Self.mainUUID], [Self.mainUUID])] {
-            let directory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("displaypanel-remaining-overlay-\(UUID().uuidString)", isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-            defer { try? FileManager.default.removeItem(at: directory) }
+        for (offset, (selected, saved)) in [([Self.targetUUID, Self.sourceUUID], nil),
+                                            ([Self.targetUUID, Self.mainUUID], nil),
+                                            ([Self.targetUUID, Self.sourceUUID, Self.mainUUID], nil),
+                                            ([Self.targetUUID, Self.sourceUUID, Self.mainUUID], [Self.mainUUID])].enumerated() {
+            let directory = try makeTestDirectory("\(offset)")
             let log = directory.appendingPathComponent("helper.log")
             let helper = try writeHiddenOverlayHelper(in: directory, log: log)
-            let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
+            let defaults = try makeDefaults("\(offset)")
             var preferences = ProtectionPreferences()
             preferences.isEnabled = true
             preferences.didChooseDisplays = true
@@ -211,14 +203,10 @@ final class DisplayHideAppTests: XCTestCase {
     }
 
     func testSourceOverlayCountsBlackedOutDisplaysAsCovered() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-hidden-overlay-blackout-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let log = directory.appendingPathComponent("helper.log")
         let helper = try writeHiddenOverlayHelper(in: directory, log: log)
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var preferences = ProtectionPreferences()
         preferences.isEnabled = true
         preferences.didChooseDisplays = true
@@ -322,10 +310,7 @@ final class DisplayHideAppTests: XCTestCase {
     }
 
     func testHiddenOverlaySummaryReportsFailedHelperWithHealthyHiddenJournal() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-hidden-overlay-failure-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let helper = directory.appendingPathComponent("fake-dp")
         let script = """
         #!/bin/bash
@@ -337,7 +322,6 @@ final class DisplayHideAppTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
 
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var preferences = ProtectionPreferences()
         preferences.isEnabled = true
         preferences.didChooseDisplays = true
@@ -370,10 +354,7 @@ final class DisplayHideAppTests: XCTestCase {
     }
 
     func testHiddenOverlaySummaryReportsPausedPlaybackState() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-hidden-overlay-paused-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let helper = directory.appendingPathComponent("fake-dp")
         let script = """
         #!/bin/bash
@@ -385,7 +366,6 @@ final class DisplayHideAppTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
 
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var preferences = ProtectionPreferences()
         preferences.isEnabled = true
         preferences.didChooseDisplays = true
@@ -413,10 +393,7 @@ final class DisplayHideAppTests: XCTestCase {
     }
 
     func testCrashedWindowOnlyOverlayAllowsRepeatedShowWithoutStoppedAcknowledgement() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-hidden-overlay-crash-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let helper = directory.appendingPathComponent("fake-dp")
         let log = directory.appendingPathComponent("helper.log")
         let script = """
@@ -436,7 +413,6 @@ final class DisplayHideAppTests: XCTestCase {
         }
 
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var preferences = ProtectionPreferences()
         preferences.isEnabled = true
         preferences.didChooseDisplays = true
@@ -491,7 +467,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testHiddenOverlayAppPolicyRefusesUnselectedOrUnhealthyState() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var preferences = ProtectionPreferences()
         preferences.isEnabled = true
         preferences.didChooseDisplays = true
@@ -531,13 +506,9 @@ final class DisplayHideAppTests: XCTestCase {
     }
 
     func testVerifiedRecoveryReleaseRearmsHelperBeforeStaleIdleCanTrigger() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-recovery-rearm-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let helper = try writeRearmHelper(in: directory)
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var preferences = ProtectionPreferences()
         preferences.isEnabled = true
         preferences.didChooseDisplays = true
@@ -581,13 +552,9 @@ final class DisplayHideAppTests: XCTestCase {
     }
 
     func testPreCaptureHideRefusalRearmsHelperAndDoesNotReuseOldIdle() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-hide-refusal-rearm-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let helper = try writeRearmHelper(in: directory)
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var preferences = ProtectionPreferences()
         preferences.isEnabled = true
         preferences.didChooseDisplays = true
@@ -640,7 +607,6 @@ final class DisplayHideAppTests: XCTestCase {
         let defaults = try makeDefaults()
         let legacy = Data(#"{"isEnabled":false,"idleSeconds":120,"allDisplays":false,"selectedDisplayUUIDs":["CCCC-UUID"],"didChooseDisplays":true}"#.utf8)
         defaults.set(legacy, forKey: "blackoutPreferences")
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
 
         let model = makeModel(defaults: defaults, displays: displays)
 
@@ -657,7 +623,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testPerDisplayHideConfigurationPersistsIndependently() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let model = makeModel(defaults: defaults, displays: displays)
         let protectionBefore = model.preferences
         let target = displays[1]
@@ -691,7 +656,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testLegacySavedHideReferencesRemapTargetAndSourceIDsWithoutLosingSettings() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let legacyData = try JSONSerialization.data(withJSONObject: [
             "configurations": [Self.targetUUID: [
                 "target": ["uuid": Self.targetUUID, "id": 202, "name": "Target", "vendor": 2, "model": 20, "serial": 200],
@@ -744,7 +708,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testReportedMonitorIDRemappingPreservesLegacyActionsAndHideSetup() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let specs: [(String, String, UInt32, UInt32, UInt32, UInt32)] = [
             ("A8D3635B-35EC-4171-BBE2-95FB8CF76111", "AW3425DW", 2, 1, 41613, 809650259),
             ("09084682-3C42-4455-AAB8-126A7431125B", "DELL S2721DGF", 1, 4, 16857, 1094800204),
@@ -805,8 +768,7 @@ final class DisplayHideAppTests: XCTestCase {
             }, "identity changed")
         ]
         for (name, change, reason) in cases {
-            let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
+            let defaults = try makeDefaults("\(name)")
             let inventory = HideDisplayInventoryBox(displays)
             var writerCalls = 0
             let model = makeModel(
@@ -829,7 +791,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testDisplayIDChangeAfterHideRequestCaptureRefusesBeforeFakeWriter() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let inventory = HideDisplayInventoryBox(displays)
         var quiescenceCompletion: ((Bool, String?) -> Void)?
         var writerCalls = 0
@@ -855,7 +816,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testSavedReturnInputUsesStableHardwareIdentityButShowKeepsJournalID() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var preferences = DisplayHidePreferences()
         preferences[Self.targetUUID] = DisplayHideConfiguration(
             target: DisplayIdentitySnapshot(uuid: Self.targetUUID, id: 999, name: "Old presentation name",
@@ -889,7 +849,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testRemovalDefaultsToTheMainDisplayAsMirrorSource() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let model = makeModel(defaults: defaults, displays: displays)
 
         XCTAssertNil(model.removalIneligibleReason(for: displays[1]))
@@ -926,7 +885,6 @@ final class DisplayHideAppTests: XCTestCase {
         try requireInteractiveUI()
         let defaults = try makeDefaults()
         defer {
-            defaults.removePersistentDomain(forName: suiteName(defaults))
             closeSettingsWindows()
         }
         let model = makeModel(defaults: defaults, displays: displays)
@@ -956,7 +914,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testMacInputIsDetectedReadOnlyAndBecomesTheReturnInput() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var checkCalls = 0
         var current: UInt8 = 0x0F
         let model = makeModel(
@@ -1036,7 +993,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testTheMacInputStaysKnownWhenHideIsSetToSwitchToIt() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var checkCalls = 0
         let model = makeModel(defaults: defaults, displays: displays, checkDDCInput: { identity in
             checkCalls += 1
@@ -1062,7 +1018,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testMacInputIsNotReadWhileTheDisplayIsHidden() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var preferences = DisplayHidePreferences()
         preferences[Self.targetUUID] = DisplayHideConfiguration(
             target: DisplayIdentitySnapshot(displays[1]), enabled: true,
@@ -1095,7 +1050,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testHideAndShowReportDesktopAndInputResultsInline() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let hidden = handoffStatus(.hidden, target: displays[1], source: displays[0], journalID: "input-journal", canShow: true,
                                    baselineIdentity: "input-baseline")
         var ownReconfiguration: () -> Void = {}
@@ -1209,7 +1163,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testHideInspectionFailurePreservesReturnedInputOutcome() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let hiddenStatus = handoffStatus(
             .recovery, target: displays[1], source: displays[0], journalID: "hide-inspection-journal",
             reason: "post-Hide observation failed", inspectionFailure: "fake post-Hide inspection failure"
@@ -1244,7 +1197,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testShowInspectionFailurePreservesReturnedInputOutcome() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var preferences = DisplayHidePreferences()
         preferences[Self.targetUUID] = DisplayHideConfiguration(
             target: DisplayIdentitySnapshot(displays[1]),
@@ -1293,8 +1245,7 @@ final class DisplayHideAppTests: XCTestCase {
             (1, DisplayInputOutcome.State.skipped, "DDC is unavailable"),
             (2, DisplayInputOutcome.State.unverified, "readback unavailable")
         ] {
-            let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
+            let defaults = try makeDefaults("\(index)")
             let hidden = handoffStatus(.hidden, target: displays[1], source: displays[0], journalID: "outcome-\(index)", canShow: true)
             let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
             let model = makeModel(
@@ -1328,7 +1279,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testAwayInputFailureReportsDesktopFailureAndRecoverySeparately() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let recovery = handoffStatus(.recovery, target: displays[1], source: displays[0], journalID: "retained-input-journal", canShow: false, reason: "journal retained after DDC failure")
         let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
         var hideCalls = 0
@@ -1369,7 +1319,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testStaleSavedReturnInputIsActionableButNeverBlocksShow() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var preferences = DisplayHidePreferences()
         let staleTarget = DisplayIdentitySnapshot(
             uuid: Self.targetUUID, id: 202, name: "Target", vendor: 2, model: 20, serial: 999
@@ -1408,7 +1357,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testMissingAndChangedTargetsRemainBoundToTheirSavedIdentity() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let initial = makeModel(defaults: defaults, displays: displays)
         initial.setHideEnabled(true, for: displays[1])
         initial.setHideSource(Self.mainUUID, for: Self.targetUUID)
@@ -1427,10 +1375,7 @@ final class DisplayHideAppTests: XCTestCase {
     }
 
     func testOrdinaryDisableFailureOrUnknownCleanupBlocksLaterHide() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-hide-cleanup-evidence-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let helper = directory.appendingPathComponent("fake-dp")
         let script = """
         #!/bin/bash
@@ -1476,8 +1421,7 @@ final class DisplayHideAppTests: XCTestCase {
             XCTAssertTrue(overlayCleanupFailure?.localizedCaseInsensitiveContains("cleanup") == true,
                           "a hardware-free overlay cannot clear a previous brightness cleanup failure")
 
-            let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
+            let defaults = try makeDefaults("\(cleanupResult)")
             var hideCalls = 0
             let model = makeModel(
                 defaults: defaults,
@@ -1499,10 +1443,7 @@ final class DisplayHideAppTests: XCTestCase {
     }
 
     func testCleanupRetryAfterHideFailureWorksWithAutomationOffAndSurvivesRelaunch() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-cleanup-retry-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let helper = directory.appendingPathComponent("fake-dp")
         try Data("""
         #!/bin/bash
@@ -1522,7 +1463,6 @@ final class DisplayHideAppTests: XCTestCase {
             unsetenv("DISPLAYPANEL_TEST_RETRY_RESULT")
         }
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let service = ProtectionService(cleanupIsVerified: { true })
         let model = makeModel(defaults: defaults, displays: displays,
                               useManagedProtectionService: true, protectionService: service)
@@ -1559,10 +1499,7 @@ final class DisplayHideAppTests: XCTestCase {
     }
 
     func testShowCleanupFailureCanBeRetriedWithoutRunningAutomation() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-show-cleanup-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let helper = directory.appendingPathComponent("fake-dp")
         try Data("""
         #!/bin/bash
@@ -1578,7 +1515,6 @@ final class DisplayHideAppTests: XCTestCase {
         setenv("DISPLAYPANEL_HELPER", helper.path, 1)
         defer { unsetenv("DISPLAYPANEL_HELPER") }
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var verified = true
         let service = ProtectionService(cleanupIsVerified: { verified })
         let box = StatusBox(handoffStatus(.hidden, target: displays[1], source: displays[0], journalID: "show-cleanup", canShow: true))
@@ -1607,7 +1543,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testHideQuiescesBeforeBackendAndRefusesDuplicateOrCleanupFailure() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var completion: ((Bool, String?) -> Void)?
         var quiesceCalls = 0
         var hideCalls = 0
@@ -1658,15 +1593,7 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testConfirmedIdentityChangeAtLockedBackendRefusesBeforeJournalOrWriter() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-hide-identity-race-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: false,
-            attributes: [.posixPermissions: 0o700]
-        )
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let store = RecoveryStore(url: directory.appendingPathComponent("current.json"))
         let operationStore = RecoveryStore(url: directory.appendingPathComponent("operation"))
         var backendDisplays = displays
@@ -1725,7 +1652,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testBackendRefusalBeforeCaptureKeepsNoJournalAndNoFalseSuccess() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
         var hideCalls = 0
         let model = makeModel(
@@ -1755,7 +1681,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testSettingsEditsKeepAFailedHideThatSwitchedTheMonitor() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let command = "dp ddc-input --display '\(Self.targetUUID)' --set 0x0F"
         let model = makeModel(
             defaults: defaults,
@@ -1784,7 +1709,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testPartialHideFailureKeepsRecoveryAndBlocksAnotherHide() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let recovery = handoffStatus(.recovery, target: displays[1], source: displays[0], journalID: "fake-journal", canShow: false, reason: "fake writer interrupted; journal retained")
         let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
         var hideCalls = 0
@@ -1831,7 +1755,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testBlackOutAndRemovalStayOffEachOthersDisplays() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
         let model = makeModel(defaults: defaults, displays: displays, status: { box.value })
         model.setHideEnabled(true, for: displays[1])
@@ -1861,7 +1784,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testShowUsesConfirmedJournalAndRetainsFailureWithoutFalseSuccess() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let hidden = handoffStatus(.hidden, target: displays[1], source: displays[0], journalID: "captured-journal", canShow: true)
         let box = StatusBox(hidden)
         var shownJournalIDs: [String] = []
@@ -1909,7 +1831,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testDisplayTransitionsBlockHideAndShow() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
         let model = makeModel(defaults: defaults, displays: displays, status: { box.value })
         model.setHideEnabled(true, for: displays[1])
@@ -1957,7 +1878,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testShowActionWaitsForInputReturnBeforeShowingBothDisplaysOnce() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let targets = [displays[1], displays[2]]
         var removals = targets.enumerated().map {
             sleepRemoval(id: "entry-\($0.offset)", target: $0.element, source: displays[0], resolved: false)
@@ -2021,8 +1941,7 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testPendingShowActionRefusesChangedStateAndNeverRetriesAWrite() async throws {
         for scenario in ["timeout", "identity", "journal", "sleep", "unlock", "shutdown", "writer"] {
-            let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
+            let defaults = try makeDefaults("\(scenario)")
             let targets = [displays[1], displays[2]]
             let removals = targets.enumerated().map {
                 sleepRemoval(id: "entry-\($0.offset)", target: $0.element, source: displays[0], resolved: false)
@@ -2082,8 +2001,7 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testIndividualAndScriptShowWaitForInputReturnWithExclusiveOwnership() async throws {
         for scripted in [false, true] {
-            let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
+            let defaults = try makeDefaults("\(scripted)")
             var removal = sleepRemoval(id: "entry", target: displays[1], source: displays[0], resolved: false)
             var shows = 0
             var connected = displays
@@ -2152,8 +2070,7 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testInputReturnRefusesMissingUnsettledChangedOrInterruptedState() async throws {
         for scenario in ["missing", "unsettled", "identity", "duplicate", "journal", "show", "sleep", "unlock"] {
-            let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
+            let defaults = try makeDefaults("\(scenario)")
             let removal = sleepRemoval(id: "entry", target: displays[1], source: displays[0], resolved: false)
             var status = multiHandoffStatus([removal], observations: [], journalID: "journal",
                                            state: .hidden, baselineIdentity: "baseline")
@@ -2215,11 +2132,7 @@ final class DisplayHideAppTests: XCTestCase {
     }
 
     private func exerciseWakeCore(layoutDrift: Bool, inputReturn: String? = nil) async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-app-wake-core-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-                                                attributes: [.posixPermissions: 0o700])
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let journalStore = RecoveryStore(url: directory.appendingPathComponent("current.json"))
         let operationStore = RecoveryStore(url: directory.appendingPathComponent("operation"))
         let savedAt = Date(timeIntervalSince1970: 1_700_000_000)
@@ -2300,7 +2213,6 @@ final class DisplayHideAppTests: XCTestCase {
         let core = DisplayHideController(store: journalStore, mirror: mirror,
                                          operationLock: { operationStore }, handoff: handoff)
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let model = AppModel(
             defaults: defaults,
             displayProvider: { self.appDisplayRecords(fakeTopology) },
@@ -2459,7 +2371,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testSleepWakeRehidesExactRestoredTwoDisplaySessionOnceWithoutDDC() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let first = sleepRemoval(id: "entry-target", target: displays[1], source: displays[2], resolved: false)
         let second = sleepRemoval(id: "entry-main", target: displays[0], source: displays[2], resolved: false)
         let initial = multiHandoffStatus([first, second], observations: [], journalID: "sleep-journal",
@@ -2512,7 +2423,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testSleepResumeDoesNotRehideEntriesAlreadyRestoredBeforeSleep() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let active = sleepRemoval(id: "active-entry", target: displays[1], source: displays[2], resolved: false)
         let alreadyRestored = sleepRemoval(id: "restored-entry", target: displays[0], source: displays[2], resolved: true)
         let baseline = multiHandoffStatus([active, alreadyRestored], observations: [], journalID: "partial-journal",
@@ -2548,7 +2458,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testExplicitShowCancelsPendingSleepResume() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let mirrored = sleepRemoval(id: "show-entry", target: displays[1], source: displays[2], resolved: false)
         let restored = sleepRemoval(id: mirrored.id, target: displays[1], source: displays[2], resolved: true)
         let box = StatusBox(multiHandoffStatus([mirrored], observations: [], journalID: "show-sleep-journal",
@@ -2575,7 +2484,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testSleepResumeRefusesChangedDisplayIDAndKeepsManualRecoveryVisible() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let mirrored = sleepRemoval(id: "changed-entry", target: displays[1], source: displays[2], resolved: false)
         let restored = sleepRemoval(id: mirrored.id, target: displays[1], source: displays[2], resolved: true)
         let box = StatusBox(multiHandoffStatus([mirrored], observations: [], journalID: "changed-journal",
@@ -2601,7 +2509,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testSleepResumeRefusesChangedBaselineIdentity() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let mirrored = sleepRemoval(id: "baseline-entry", target: displays[1], source: displays[2], resolved: false)
         let restored = sleepRemoval(id: mirrored.id, target: displays[1], source: displays[2], resolved: true)
         let box = StatusBox(multiHandoffStatus([mirrored], observations: [], journalID: "baseline-journal",
@@ -2624,7 +2531,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testUnrelatedDisplayChangeDoesNotRehideAResolvedSleepJournal() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let mirrored = sleepRemoval(id: "unrelated-entry", target: displays[1], source: displays[2], resolved: false)
         let restored = sleepRemoval(id: mirrored.id, target: displays[1], source: displays[2], resolved: true)
         let box = StatusBox(multiHandoffStatus([mirrored], observations: [], journalID: "unrelated-journal",
@@ -2646,7 +2552,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testFailedSleepResumeLeavesRecoveryAndDoesNotRetry() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let mirrored = sleepRemoval(id: "failed-entry", target: displays[1], source: displays[2], resolved: false)
         let restored = sleepRemoval(id: mirrored.id, target: displays[1], source: displays[2], resolved: true)
         let box = StatusBox(multiHandoffStatus([mirrored], observations: [], journalID: "failed-journal",
@@ -2679,7 +2584,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testSystemWakeWithoutScreensWakeDoesNotResumeEarly() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let mirrored = sleepRemoval(id: "system-entry", target: displays[1], source: displays[2], resolved: false)
         let box = StatusBox(multiHandoffStatus([mirrored], observations: [], journalID: "system-journal",
                                                state: .hidden, baselineIdentity: "exact-baseline"))
@@ -2698,7 +2602,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testWakeReadinessDeadlineCannotBeExtendedByDuplicateNotifications() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let mirrored = sleepRemoval(id: "deadline-entry", target: displays[1], source: displays[2], resolved: false)
         let box = StatusBox(multiHandoffStatus([mirrored], observations: [], journalID: "deadline-journal",
                                                state: .hidden, baselineIdentity: "stable-baseline"))
@@ -2736,7 +2639,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testSleepAgainDuringWakeDebounceKeepsIntentUntilFreshWake() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let mirrored = sleepRemoval(id: "second-sleep-entry", target: displays[1], source: displays[2], resolved: false)
         let restored = sleepRemoval(id: mirrored.id, target: displays[1], source: displays[2], resolved: true)
         let box = StatusBox(multiHandoffStatus([mirrored], observations: [], journalID: "second-sleep-journal",
@@ -2771,7 +2673,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testRecoveryTileOffersGuardedRestoreForManualRecovery() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let failed = sleepRemoval(id: "recovery-entry", target: displays[1], source: displays[2], resolved: false,
                                   state: "needsAttention", canShow: false, topologyVerified: false)
         let box = StatusBox(multiHandoffStatus([failed], observations: [], journalID: "recovery-journal",
@@ -2798,7 +2699,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testDisplayTilesFollowArrangementAndShowEachState() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let left = Self.display(index: 4, id: 404, uuid: Self.replacementUUID, name: "Dell", main: false, x: -1920)
         let main = displays[0]
         let right = Self.display(index: 2, id: 202, uuid: Self.targetUUID, name: "Dell", main: false)
@@ -2846,8 +2746,7 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testExternalMirrorFollowerStaysVisibleWithoutUnresolvedRecovery() throws {
         for restoredJournal in [false, true] {
-            let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
+            let defaults = try makeDefaults("\(restoredJournal)")
             let main = displays[0]
             let follower = Self.display(index: 2, id: 202, uuid: Self.targetUUID,
                                         name: "External mirror", main: false, x: 0, active: false)
@@ -2892,7 +2791,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testHealthyRemovalSessionKeepsPerDisplayActionsAndOtherHideSetupEditable() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let main = displays[0]
         let firstTarget = Self.display(index: 2, id: 202, uuid: Self.targetUUID, name: "First", main: false, active: false)
         let secondTarget = Self.display(index: 3, id: 303, uuid: Self.sourceUUID, name: "Second", main: false, active: false)
@@ -2935,7 +2833,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testDisconnectedRemovalKeepsItsOwnRecoveryStateBesideHealthyRemoval() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let main = displays[0]
         let firstTarget = Self.display(index: 2, id: 202, uuid: Self.targetUUID, name: "Connected target", main: false, active: false)
         let disconnectedTarget = Self.display(index: 3, id: 303, uuid: Self.sourceUUID, name: "Disconnected target", main: false, active: false)
@@ -2971,7 +2868,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testHiddenMirrorOverlayAllowsIndependentlySelectedVerifiedSources() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let main = displays[0]
         let firstTarget = Self.display(index: 2, id: 202, uuid: Self.targetUUID, name: "First", main: false, active: false)
         let secondTarget = Self.display(index: 3, id: 303, uuid: Self.sourceUUID, name: "Second", main: false, active: false)
@@ -3009,7 +2905,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testShowingOneRemovalLeavesOthersAndAutomationPausedUntilTheLastShow() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let main = displays[0]
         let firstTarget = Self.display(index: 2, id: 202, uuid: Self.targetUUID, name: "First", main: false, active: false)
         let secondTarget = Self.display(index: 3, id: 303, uuid: Self.sourceUUID, name: "Second", main: false, active: false)
@@ -3079,7 +2974,6 @@ final class DisplayHideAppTests: XCTestCase {
         try requireInteractiveUI()
         let defaults = try makeDefaults()
         defer {
-            defaults.removePersistentDomain(forName: suiteName(defaults))
             closeSettingsWindows()
         }
         var ddcChecks = 0
@@ -3164,7 +3058,6 @@ final class DisplayHideAppTests: XCTestCase {
         try requireInteractiveUI()
         let defaults = try makeDefaults()
         defer {
-            defaults.removePersistentDomain(forName: suiteName(defaults))
             closeSettingsWindows()
         }
         let recovery = handoffStatus(
@@ -3206,7 +3099,6 @@ final class DisplayHideAppTests: XCTestCase {
     func testNativeMenuArrowEventsReachShowAction() throws {
         try requireInteractiveUI()
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(handoffStatus(.hidden, target: displays[1], source: displays[0], journalID: "keyboard-menu-journal", canShow: true))
         var shownJournalIDs: [String] = []
         let model = makeModel(defaults: defaults, displays: displays, status: { box.value }, showDisplay: { journalID, _ in
@@ -3298,9 +3190,8 @@ final class DisplayHideAppTests: XCTestCase {
     func testNativeShowRunsWithoutDialogsAndResultsStayInline() async throws {
         try requireInteractiveUI()
         for succeeds in [true, false] {
-            let defaults = try makeDefaults()
+            let defaults = try makeDefaults("\(succeeds)")
             defer {
-                defaults.removePersistentDomain(forName: suiteName(defaults))
                 closeSettingsWindows()
             }
             let hidden = handoffStatus(.hidden, target: displays[1], source: displays[0], journalID: "inline-journal", canShow: true)
@@ -3354,7 +3245,6 @@ final class DisplayHideAppTests: XCTestCase {
         try requireInteractiveUI()
         let defaults = try makeDefaults()
         defer {
-            defaults.removePersistentDomain(forName: suiteName(defaults))
             closeSettingsWindows()
         }
         let longName = String(repeating: "VeryLongMonitorName-", count: 8)
@@ -3391,7 +3281,6 @@ final class DisplayHideAppTests: XCTestCase {
         try requireInteractiveUI()
         let defaults = try makeDefaults()
         defer {
-            defaults.removePersistentDomain(forName: suiteName(defaults))
             closeSettingsWindows()
         }
         let hidden = handoffStatus(.hidden, target: displays[1], source: displays[0], journalID: "fixture-journal", canShow: true)
@@ -3430,7 +3319,6 @@ final class DisplayHideAppTests: XCTestCase {
         try requireInteractiveUI()
         let defaults = try makeDefaults()
         defer {
-            defaults.removePersistentDomain(forName: suiteName(defaults))
             closeSettingsWindows()
         }
         let hidden = handoffStatus(.hidden, target: displays[1], source: displays[0], journalID: "quit-journal", canShow: true)
@@ -3498,7 +3386,6 @@ final class DisplayHideAppTests: XCTestCase {
         try requireInteractiveUI()
         let defaults = try makeDefaults()
         defer {
-            defaults.removePersistentDomain(forName: suiteName(defaults))
             closeSettingsWindows()
         }
         let recovery = handoffStatus(
@@ -3537,7 +3424,6 @@ final class DisplayHideAppTests: XCTestCase {
         let defaults = try makeDefaults()
         defaults.set(false, forKey: "experimentalFeaturesEnabled")
         defer {
-            defaults.removePersistentDomain(forName: suiteName(defaults))
             closeSettingsWindows()
         }
         // A `recovery capture` journal names no hidden display.
@@ -3639,7 +3525,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testScriptsHideAndShowThroughTheControlSocket() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
         var hideCalls = 0
         var showCalls = 0
@@ -3666,7 +3551,7 @@ final class DisplayHideAppTests: XCTestCase {
         model.detectMacInput(for: Self.targetUUID)
         let delegate = AppDelegate()
         delegate.model = model
-        let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("control.sock").path
         let server = AppControlServer(socketPath: path) { await delegate.handleControlRequest($0, receivedAt: $1) }
         try server.start()
         defer { server.stop() }
@@ -3764,7 +3649,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testForcedBlackOutStyleOverridesRemovalAndShowOrEscapeRestoresIt() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
         var hideCalls = 0
         var showCalls = 0
@@ -3784,7 +3668,7 @@ final class DisplayHideAppTests: XCTestCase {
                         "incomplete removal setup must not block forced black-out")
         let savedHidePreferences = model.hidePreferences
         let savedHideData = defaults.data(forKey: "displayHidePreferences")
-        let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("control.sock").path
         let delegate = AppDelegate()
         delegate.model = model
         let server = AppControlServer(socketPath: path) { await delegate.handleControlRequest($0, receivedAt: $1) }
@@ -3826,10 +3710,7 @@ final class DisplayHideAppTests: XCTestCase {
     }
 
     func testRetiredBlackoutNowSocketRequestRefusesWithoutChangingAutomationOrSnooze() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-retired-blackout-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let helper = directory.appendingPathComponent("fake-dp")
         let log = directory.appendingPathComponent("helper.log")
         let script = """
@@ -3846,7 +3727,6 @@ final class DisplayHideAppTests: XCTestCase {
         defer { unsetenv("DISPLAYPANEL_HELPER"); unsetenv("DISPLAYPANEL_TEST_LOG") }
 
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var settings = ProtectionPreferences()
         settings.didChooseDisplays = true
         settings.selectedDisplayUUIDs = [Self.targetUUID]
@@ -3864,7 +3744,7 @@ final class DisplayHideAppTests: XCTestCase {
         let savedAutomationData = defaults.data(forKey: "automationRules")
         let delegate = AppDelegate()
         delegate.model = model
-        let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = directory.appendingPathComponent("control.sock").path
         let server = AppControlServer(socketPath: path) { await delegate.handleControlRequest($0, receivedAt: $1) }
         try server.start()
         defer { server.stop() }
@@ -3890,8 +3770,7 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testScriptToggleThatWaitedBehindAHideIsBusy() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
-        let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("control.sock").path
         @Sendable func toggle() throws -> AppControlResponse {
             try AppControlClient(socketPath: path, launch: { XCTFail("must not launch") })
                 .execute(.toggleHide, targetUUID: Self.targetUUID)
@@ -3936,7 +3815,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testScriptsCanOnlyShowDuringRecovery() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         defaults.set(false, forKey: "experimentalFeaturesEnabled")
         let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
         let model = makeModel(defaults: defaults, displays: displays, status: { box.value })
@@ -3961,7 +3839,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testScriptsBlackOutByDefaultAndNeverRestartAHide() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         defaults.set(false, forKey: "experimentalFeaturesEnabled")
         let model = makeModel(defaults: defaults, displays: displays, hideDisplay: { _, _, _ in
             XCTFail("Remove from desktop needs Experimental features")
@@ -4012,7 +3889,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testOversizedStatusDoesNotMisreportCompletedProtectionToggle() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         // Status lists every display, so enough of them exceed the message limit.
         let many = displays + (4...40).map { index in
             Self.display(index: index, id: UInt32(400 + index), uuid: UUID().uuidString, name: "Extra \(index)", main: false)
@@ -4022,7 +3898,7 @@ final class DisplayHideAppTests: XCTestCase {
         let delegate = AppDelegate()
         delegate.model = model
         XCTAssertFalse(model.preferences.isEnabled)
-        let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("control.sock").path
         var toggleCount = 0
         let server = AppControlServer(socketPath: path) { request, receivedAt in
             if request.command == .toggle { toggleCount += 1 }
@@ -4048,7 +3924,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     func testScriptsRefuseChangedIdentityUnreadableJournalAndTransitions() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let model = makeModel(defaults: defaults, displays: displays)
         model.setHideEnabled(true, for: displays[1])
         model.setHideSource(Self.mainUUID, for: Self.targetUUID)
@@ -4132,7 +4007,7 @@ final class DisplayHideAppTests: XCTestCase {
                                            state: .recovery, sessionRecovery: confirmation)
             var calls = 0
             let model = makeModel(
-                defaults: try makeDefaults(), displays: displays, status: { status },
+                defaults: try makeDefaults("\(hideAgain)"), displays: displays, status: { status },
                 hideDisplay: { _, _, _ in XCTFail("must not run configured Hide/input switching"); return .notRequested },
                 showDisplay: { _, _ in XCTFail("must not restore the previous boot"); return .notRequested },
                 recoverDisplaySession: { captured, requestedHide in
@@ -4175,7 +4050,7 @@ final class DisplayHideAppTests: XCTestCase {
             var completion: ((Bool, String?) -> Void)?
             var calls = 0
             let model = makeModel(
-                defaults: try makeDefaults(), displays: displays, status: { status },
+                defaults: try makeDefaults("\(scenario)"), displays: displays, status: { status },
                 quiesceProtection: { callback in
                     if delayed { completion = callback } else { callback(true, nil) }
                 },
@@ -4372,17 +4247,11 @@ final class DisplayHideAppTests: XCTestCase {
         )
     }
 
-    private func makeDefaults() throws -> UserDefaults {
-        let name = suiteName(nil)
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
-        defaults.removePersistentDomain(forName: name)
+    private func makeDefaults(_ label: String = "") throws -> UserDefaults {
+        let defaults = try makeTestDefaults(label).defaults
         // Hide fixtures exercise the experimental path; gating has its own tests.
         defaults.set(true, forKey: "experimentalFeaturesEnabled")
         return defaults
-    }
-
-    private func suiteName(_: UserDefaults?) -> String {
-        "displaypanel-display-hide-app-\(ProcessInfo.processInfo.processIdentifier)"
     }
 
     private func waitForLogLines(_ count: Int, at log: URL) async throws -> [String] {

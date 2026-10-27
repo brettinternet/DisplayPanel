@@ -200,10 +200,7 @@ final class TargetRestoreTransactionTests: XCTestCase {
         let succeeds = ["placed", "exact"]
         for outcome in succeeds + ["targetMode", "targetMain", "siblingSeparate",
                                    "survivorX", "survivorMode", "survivorMain", "survivorActive"] {
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("displaypanel-partial-show-tests-\(UUID())")
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-                                                   attributes: [.posixPermissions: 0o700])
-            defer { try? FileManager.default.removeItem(at: directory) }
+            let directory = try makeTestDirectory(outcome)
             let store = RecoveryStore(url: directory.appendingPathComponent("current.json"))
             let operation = RecoveryStore(url: directory.appendingPathComponent("operation"))
             var journal = RecoveryJournal(snapshot: baseline, publicMirrorSession: PublicMirrorSession(baseline: baseline, removals: [

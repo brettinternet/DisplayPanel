@@ -9,7 +9,6 @@ final class BlackoutHideTests: XCTestCase {
     private static let mainUUID = "AAAAAAAA-0000-0000-0000-000000000001"
     private static let sideUUID = "BBBBBBBB-0000-0000-0000-000000000002"
     private static let thirdUUID = "CCCCCCCC-0000-0000-0000-000000000003"
-    private static let suiteName = "displaypanel-blackout-hide-\(ProcessInfo.processInfo.processIdentifier)"
 
     private let displays = [
         display(1, id: 101, uuid: mainUUID, name: "Main", main: true),
@@ -21,10 +20,8 @@ final class BlackoutHideTests: XCTestCase {
     /// Displays the fake overlay manager fails to cover.
     private var uncoverable: Set<UInt32> = []
 
-    override func tearDown() {
-        UserDefaults(suiteName: Self.suiteName)?.removePersistentDomain(forName: Self.suiteName)
-        super.tearDown()
-    }
+    /// The suite of the last model made, so `keepingDefaults` can reopen it.
+    private var suiteName = ""
 
     func testHideBlacksOutUntilShowAndKeepsOneDisplayVisible() throws {
         let model = try makeModel()
@@ -377,9 +374,7 @@ final class BlackoutHideTests: XCTestCase {
     }
 
     func testAutomationSkipsHiddenDisplaysAndRestoreNeverShowsThem() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-blackout-hide-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = try makeTestDirectory()
         let helper = directory.appendingPathComponent("fake-dp")
         let log = directory.appendingPathComponent("helper.log")
         let script = """
@@ -453,9 +448,7 @@ final class BlackoutHideTests: XCTestCase {
     }
 
     func testBlackedOutRemovalSourceExplainsSuspendedAutomation() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-blackout-hide-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = try makeTestDirectory()
         let helper = directory.appendingPathComponent("fake-dp")
         let script = """
         #!/bin/bash
@@ -494,9 +487,7 @@ final class BlackoutHideTests: XCTestCase {
     }
 
     func testAutomationRestartsOnceAfterMultiStepAction() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-action-rearm-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = try makeTestDirectory()
         let helper = directory.appendingPathComponent("fake-dp")
         let log = directory.appendingPathComponent("helper.log")
         let script = """
@@ -618,9 +609,13 @@ final class BlackoutHideTests: XCTestCase {
         keepingDefaults: Bool = false,
         configure: (UserDefaults) throws -> Void = { _ in }
     ) throws -> AppModel {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: Self.suiteName))
-        if !keepingDefaults {
-            defaults.removePersistentDomain(forName: Self.suiteName)
+        let defaults: UserDefaults
+        if keepingDefaults {
+            defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        } else {
+            let made = try makeTestDefaults()
+            suiteName = made.suiteName
+            defaults = made.defaults
         }
         try configure(defaults)
         let fixed = self.displays

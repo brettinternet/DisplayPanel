@@ -3,10 +3,7 @@ import XCTest
 
 final class DisplaySleepTests: XCTestCase {
     func testAutomationSleepGateIssuesOnceUntilWakeAndUsesFakeSleepWriter() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-sleep-gate-\(UUID().uuidString)", isDirectory: true)
-        let marker = directory.appendingPathComponent("sleeping")
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let marker = try makeTestDirectory().appendingPathComponent("gate").appendingPathComponent("sleeping")
         let firstHelper = AutomationSleepGate(markerURL: marker)
         let secondHelper = AutomationSleepGate(markerURL: marker)
         var writes = 0
@@ -25,11 +22,7 @@ final class DisplaySleepTests: XCTestCase {
     }
 
     func testExitedOwnerLeavesStaleMarkerThatDoesNotSuppressNextSleep() throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-sleep-gate-relaunch-\(UUID().uuidString)", isDirectory: true)
-        let marker = directory.appendingPathComponent("sleeping")
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let marker = try makeTestDirectory().appendingPathComponent("sleeping")
         try Data([1]).write(to: marker)
 
         var previousSession: AutomationSleepGate? = AutomationSleepGate(markerURL: marker)
@@ -48,11 +41,8 @@ final class DisplaySleepTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
     }
 
-    func testFailedAutomationSleepClearsItsMarkerForRetry() {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-sleep-gate-failure-\(UUID().uuidString)", isDirectory: true)
-        let marker = directory.appendingPathComponent("sleeping")
-        defer { try? FileManager.default.removeItem(at: directory) }
+    func testFailedAutomationSleepClearsItsMarkerForRetry() throws {
+        let marker = try makeTestDirectory().appendingPathComponent("gate").appendingPathComponent("sleeping")
         let gate = AutomationSleepGate(markerURL: marker)
 
         XCTAssertThrowsError(try gate.sleepOnce { throw TestSleepError.failed })

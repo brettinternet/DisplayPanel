@@ -6,8 +6,7 @@ import Darwin
 final class AppControlServerTests: XCTestCase {
     @MainActor
     func testSameUserClientReceivesBoundedServerResponse() async throws {
-        let directory = try AppControlSocket.userTemporaryDirectory()
-        let path = "\(directory)/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("control.sock").path
         var receivedCommand: AppControlCommand?
         let server = AppControlServer(socketPath: path) { request, _ in
             receivedCommand = request.command
@@ -45,8 +44,7 @@ final class AppControlServerTests: XCTestCase {
 
     @MainActor
     func testStatusRejectsAnUnsupportedResponseFromALiveServer() async throws {
-        let directory = try AppControlSocket.userTemporaryDirectory()
-        let path = "\(directory)/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("control.sock").path
         let server = AppControlServer(socketPath: path) { _, _ in
             AppControlResponse(
                 protocolVersion: AppControlRequest.currentProtocol + 1,
@@ -79,8 +77,7 @@ final class AppControlServerTests: XCTestCase {
 
     @MainActor
     func testStatusRejectsUnavailableResponseFromALiveServer() async throws {
-        let directory = try AppControlSocket.userTemporaryDirectory()
-        let path = "\(directory)/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("control.sock").path
         let server = AppControlServer(socketPath: path) { _, _ in
             .unavailable()
         }
@@ -106,7 +103,7 @@ final class AppControlServerTests: XCTestCase {
 
     @MainActor
     func testDisplayCommandWaitsForItsOperationToFinish() async throws {
-        let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("control.sock").path
         let server = AppControlServer(socketPath: path) { _, _ in
             // Longer than the one second other commands wait.
             try? await Task.sleep(nanoseconds: 1_300_000_000)
@@ -141,8 +138,9 @@ final class AppControlServerTests: XCTestCase {
 
     @MainActor
     func testHideShowAndActionLostResponseNeverLaunchOrRetry() async throws {
-        for command in [AppControlCommand.hide, .show, .toggleHide, .runAction, .runRule, .restoreArrangement] {
-            let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let directory = try makeTestDirectory()
+        for (index, command) in [AppControlCommand.hide, .show, .toggleHide, .runAction, .runRule, .restoreArrangement].enumerated() {
+            let path = directory.appendingPathComponent("\(index).sock").path
             let listener = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
             XCTAssertGreaterThanOrEqual(listener, 0)
             defer { Darwin.close(listener); _ = unlink(path) }
@@ -209,7 +207,7 @@ final class AppControlServerTests: XCTestCase {
 
     @MainActor
     func testOversizedDisplayStatusDoesNotSilentlyReportSuccess() async throws {
-        let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("control.sock").path
         let server = AppControlServer(socketPath: path) { _, _ in
             AppControlResponse(ok: true, running: true, enabled: false, state: "disabled", summary: "fixture",
                 displays: [AppControlDisplayStatus(targetUUID: "target", observedState: "separate", operation: "idle",
@@ -229,8 +227,9 @@ final class AppControlServerTests: XCTestCase {
     func testOversizedOperationResponseKeepsItsResult() async throws {
         // The display already changed, so dropping detail must not turn the result into a refusal.
         let long = String(repeating: "x", count: 8192)
+        let directory = try makeTestDirectory()
         for (outcome, exitCode) in [(AppControlOutcome.done, Int32(0)), (.partial, 5)] {
-            let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+            let path = directory.appendingPathComponent("\(outcome.rawValue).sock").path
             let server = AppControlServer(socketPath: path) { _, _ in
                 AppControlResponse(ok: outcome == .done, running: true, enabled: false, state: "disabled",
                                    summary: "Shown.", detail: long, error: outcome == .done ? nil : long, outcome: outcome,

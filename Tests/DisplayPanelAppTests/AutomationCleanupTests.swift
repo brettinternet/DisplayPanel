@@ -153,10 +153,7 @@ final class AutomationCleanupTests: XCTestCase {
     }
 
     private func withHelper(_ script: String, body: () async throws -> Void) async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-cleanup-helper-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let helper = directory.appendingPathComponent("fake-dp")
         try Data(script.utf8).write(to: helper)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)

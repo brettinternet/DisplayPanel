@@ -9,9 +9,7 @@ final class DisplayArrangementTests: XCTestCase {
     private var operationStore: RecoveryStore!
 
     override func setUpWithError() throws {
-        directory = FileManager.default.temporaryDirectory.appendingPathComponent("displaypanel-arrangement-tests-\(UUID())")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-                                               attributes: [.posixPermissions: 0o700])
+        directory = try makeTestDirectory()
         recoveryStore = RecoveryStore(url: directory.appendingPathComponent("current.json"))
         operationStore = RecoveryStore(url: directory.appendingPathComponent("operation"))
     }
@@ -19,7 +17,6 @@ final class DisplayArrangementTests: XCTestCase {
     override func tearDownWithError() throws {
         recoveryStore.unlock()
         operationStore.unlock()
-        try FileManager.default.removeItem(at: directory)
     }
 
     private func member(_ index: Int, id: UInt32? = nil, x: Int32? = nil, y: Int32 = 0,

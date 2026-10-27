@@ -21,7 +21,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testIdleActionEditorDoesNotTreatNewOrExistingActionAsRunning() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let model = makeModel(defaults: defaults)
         let draft = model.makeNewDisplayAction(selectedDisplayID: targetUUID)
         XCTAssertNil(model.runningDisplayAction)
@@ -38,7 +37,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testNewActionDefaultsToUniqueNameWithoutSavingDraft() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let model = makeModel(defaults: defaults)
         let draft = model.makeNewDisplayAction(selectedDisplayID: targetUUID)
         XCTAssertEqual(draft.name, "New Action")
@@ -62,7 +60,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testActionsPersistVersionedAndRenameKeepsStableIDAndCommand() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(noneStatus())
         let model = makeModel(defaults: defaults, box: box)
         var draft = model.makeNewDisplayAction(selectedDisplayID: targetUUID)
@@ -93,7 +90,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testRemovalReviewDetectsEveryReviewedFieldButIgnoresReturnInput() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let model = makeModel(defaults: defaults)
         let action = try saveRemovalAction(on: model)
 
@@ -122,7 +118,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testConfiguredRemoveNeverFallsBackWhenExperimentalFeaturesAreOff() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var mirrorWrites = 0
         var coverRequests: [Set<UInt32>] = []
         let model = makeModel(
@@ -149,7 +144,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testRepeatedHideAndShowRequestsAreNoOpsWithoutAnotherInputWrite() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(noneStatus())
         var hideWrites = 0
         var showWrites = 0
@@ -186,7 +180,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testRepeatedShowPreservesPartialInputEvidenceWarningAndRecoveryCommand() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(hiddenStatus())
         let undoCommand = "dp ddc-input --display '\(targetUUID)' --set 0x11"
         var showWrites = 0
@@ -239,7 +232,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testRemoveRepeatWithUnverifiedTopologyRequiresRecoveryWithoutWriting() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let status = unverifiedRemovalStatus()
         let box = StatusBox(status)
         var hideWrites = 0
@@ -261,7 +253,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testShowActionWithUnreadableUnknownJournalRequiresRecovery() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(unreadableStatus())
         var showWrites = 0
         let model = makeModel(
@@ -288,7 +279,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testVerifiedStyleMismatchSkipsButStaleRemovalReviewStillRefuses() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(hiddenStatus())
         let inventory = DisplayRecordsBox(displays)
         var hideWrites = 0
@@ -331,7 +321,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testShowUsesOutstandingRecoveryAfterSetupChangesAndExperimentalOff() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(hiddenStatus())
         var showWrites = 0
         let model = makeModel(
@@ -360,7 +349,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testExplicitShowActionReachesInputRecoveryAndPreservesPreciseRefusal() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(unverifiedRemovalStatus())
         var showCalls = 0
         var modeReturned = false
@@ -394,7 +382,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testCleanupFailureAndContentionDoNotStartTheWriter() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var writes = 0
         var delayedQuiescence: ((Bool, String?) -> Void)?
         let failedModel = makeModel(
@@ -408,8 +395,7 @@ final class DisplayActionAppTests: XCTestCase {
         XCTAssertEqual(writes, 0)
         XCTAssertTrue(failedModel.protectionQuiescenceFailure?.contains("fixture cleanup failed") == true)
 
-        let otherDefaults = try makeDefaults()
-        defer { otherDefaults.removePersistentDomain(forName: suiteName(otherDefaults)) }
+        let otherDefaults = try makeDefaults("other")
         let busyModel = makeModel(
             defaults: otherDefaults,
             hide: { _, _, _ in writes += 1; return .notRequested },
@@ -428,7 +414,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testPartialInputOutcomeIsReturnedAndDisplayedSeparatelyFromDesktopResult() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(noneStatus())
         let model = makeModel(
             defaults: defaults,
@@ -449,7 +434,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testDeletingActionLeavesDisplayShowAndRecoveryAvailable() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(hiddenStatus())
         var showWrites = 0
         let model = makeModel(
@@ -469,7 +453,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testRunActionControlRequestRefusesUnknownIDsAndRunsKnownIDsOnce() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(noneStatus())
         var writes = 0
         let model = makeModel(
@@ -492,7 +475,6 @@ final class DisplayActionAppTests: XCTestCase {
     func testEightStepNoOpAndLongBlockerRepliesRetainEvidenceThroughServerEncoding() async throws {
         for blocked in [false, true] {
             let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
             if blocked { defaults.set(String(repeating: "cleanup failure ", count: 200), forKey: "automationCleanupFailure") }
             let records = (0..<8).map { index in
                 display(
@@ -506,7 +488,7 @@ final class DisplayActionAppTests: XCTestCase {
             })
             try model.saveDisplayAction(action)
 
-            let socketPath = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-task46-\(UUID().uuidString.prefix(8)).sock"
+            let socketPath = try makeTestDirectory().appendingPathComponent("control.sock").path
             let server = AppControlServer(socketPath: socketPath) { request, receivedAt in
                 await model.handleDisplayControlRequest(request, receivedAt: receivedAt)
             }
@@ -533,7 +515,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testStartupWakeReconnectPauseRestoreAndActivityDoNotRunSavedActions() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let action = DisplayAction(name: "Never automatic", target: DisplayIdentitySnapshot(try XCTUnwrap(displays.first { $0.uuid == targetUUID })))
         defaults.set(try JSONEncoder().encode(DisplayActionSet(actions: [action])), forKey: "displayActions")
         var hideWrites = 0
@@ -567,7 +548,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testLegacyActionsUpgradeWithoutDowngradeOverwriteAndUnreadableDataIsPreserved() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let identity = DisplayIdentitySnapshot(try XCTUnwrap(displays.first { $0.uuid == targetUUID }))
         let legacyID = UUID()
         let identityJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(identity)) as? [String: Any])
@@ -604,8 +584,7 @@ final class DisplayActionAppTests: XCTestCase {
         defaults.set(legacyJSON, forKey: AppModel.legacyDisplayActionsKey) // simulate an older build writing its key
         XCTAssertEqual(makeModel(defaults: defaults).displayActions, upgraded)
 
-        let newerDefaults = try makeDefaults()
-        defer { newerDefaults.removePersistentDomain(forName: suiteName(newerDefaults)) }
+        let newerDefaults = try makeDefaults("newer")
         let newerBytes = try JSONSerialization.data(withJSONObject: ["version": 99, "actions": []])
         newerDefaults.set(newerBytes, forKey: AppModel.displayActionsKey)
         newerDefaults.set(legacyJSON, forKey: AppModel.legacyDisplayActionsKey)
@@ -615,8 +594,7 @@ final class DisplayActionAppTests: XCTestCase {
         XCTAssertEqual(newerDefaults.data(forKey: AppModel.displayActionsKey), newerBytes)
         XCTAssertEqual(newerDefaults.data(forKey: AppModel.legacyDisplayActionsKey), legacyJSON)
 
-        let corruptDefaults = try makeDefaults()
-        defer { corruptDefaults.removePersistentDomain(forName: suiteName(corruptDefaults)) }
+        let corruptDefaults = try makeDefaults("corrupt")
         let corruptBytes = Data("{not-json".utf8)
         corruptDefaults.set(corruptBytes, forKey: AppModel.legacyDisplayActionsKey)
         let corruptModel = makeModel(defaults: corruptDefaults)
@@ -626,8 +604,7 @@ final class DisplayActionAppTests: XCTestCase {
         XCTAssertEqual(corruptDefaults.data(forKey: AppModel.legacyDisplayActionsKey), corruptBytes)
 
         for nullEffect in [false, true] {
-            let malformedDefaults = try makeDefaults()
-            defer { malformedDefaults.removePersistentDomain(forName: suiteName(malformedDefaults)) }
+            let malformedDefaults = try makeDefaults("malformed-\(nullEffect)")
             let malformedID = UUID()
             var malformedAction: [String: Any] = [
                 "id": malformedID.uuidString,
@@ -668,7 +645,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testStepCountStableUUIDAndDuplicateValidation() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let model = makeModel(defaults: defaults)
         let steps = (0..<8).map { index in
             DisplayActionStep(target: DisplayIdentitySnapshot(
@@ -702,7 +678,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testSaveRejectsOnlyDefinitionTimeConflicts() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let model = makeModel(defaults: defaults)
         let main = DisplayIdentitySnapshot(try XCTUnwrap(displays.first { $0.uuid == mainUUID }))
         let target = DisplayIdentitySnapshot(try XCTUnwrap(displays.first { $0.uuid == targetUUID }))
@@ -738,7 +713,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testWholeRunPreflightsProjectedLastVisibleStateBeforeAnyWrite() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var coverRequests: [Set<UInt32>] = []
         var quiesceCount = 0
         let model = AppModel(
@@ -763,7 +737,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testNoOpPreflightNeverWritesWhenStateChangesBeforeTheStep() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(noneStatus())
         var armed = false
         var quiesceCount = 0
@@ -798,7 +771,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testMultiStepShowThenBlackOutRunsInOrderAndQuiescesOnce() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(hiddenStatus())
         var inspections = 0
         var showWrites = 0
@@ -841,7 +813,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testActionLeaseBlocksCompetingEntryPointsAndKeepsRequestsStaleAfterFinish() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var delayedQuiescence: ((Bool, String?) -> Void)?
         var coverRequests: [Set<UInt32>] = []
         var quiesceCalls = 0
@@ -934,7 +905,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testActionLeaseReplaysDeferredHiddenDisplaySafetyReconciliation() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let inventory = DisplayRecordsBox(displays)
         var quiesceCalls = 0
         var delayedQuiescence: ((Bool, String?) -> Void)?
@@ -981,7 +951,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testPreflightRecoveryDiscoveryQuiescesAutomationAfterRefusal() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let recovery = StatusBox(noneStatus())
         var helperRunning = true
         var quiesceCalls = 0
@@ -1011,7 +980,6 @@ final class DisplayActionAppTests: XCTestCase {
     func testDisplayControlRequestsStayBusyAfterNoOpAndRefusedActions() async throws {
         for refusesWithRecovery in [false, true] {
             let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
             let recovery = StatusBox(noneStatus())
             var hideWrites = 0
             var showWrites = 0
@@ -1050,7 +1018,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testOneStepActionReadinessMatchesTileReadiness() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let records = [try XCTUnwrap(displays.first { $0.uuid == targetUUID })]
         let model = AppModel(
             defaults: defaults, displayProvider: { records }, idleSecondsProvider: { nil },
@@ -1066,7 +1033,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testLaterStepIdentityFailureReturnsHonestPartialWithEveryTargetStatus() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let inventory = DisplayRecordsBox(displays)
         var coverRequests: [Set<UInt32>] = []
         let model = makeModel(
@@ -1097,7 +1063,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testProjectedShowReleasesDisplayPanelMirrorSourceForLaterRemoval() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let target = try XCTUnwrap(displays.first { $0.uuid == targetUUID })
         let main = try XCTUnwrap(displays.first { $0.uuid == mainUUID })
         let alternate = try XCTUnwrap(displays.first { $0.uuid == alternateUUID })
@@ -1157,7 +1122,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testPartialInputStopsLaterStepsAndKeepsPerStepEvidence() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(hiddenStatus())
         var showWrites = 0
         var coverRequests: [Set<UInt32>] = []
@@ -1190,7 +1154,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testActionTopologyNotificationsContinueAfterVerifiedRemoveAndShow() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(noneStatus())
         var model: AppModel!
         var writes: [String] = []
@@ -1240,7 +1203,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testSleepDuringTopologyWriteStillStopsAction() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(noneStatus())
         var model: AppModel!
         model = makeModel(defaults: defaults, box: box, hide: { _, _, _ in
@@ -1263,7 +1225,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testTopologyNotificationDoesNotBypassFreshIdentityChecks() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(noneStatus())
         let inventory = DisplayRecordsBox(displays)
         var model: AppModel!
@@ -1285,7 +1246,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testChangedInventoryNotificationBetweenStepsStillInterrupts() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(noneStatus())
         let inventory = DisplayRecordsBox(displays)
         let model = makeModel(defaults: defaults, box: box, displayProvider: { inventory.value }, hide: { _, _, _ in
@@ -1311,7 +1271,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testInterruptionAfterFinalSuccessfulStepDoesNotContradictSuccess() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var model: AppModel!
         var interrupted = false
         model = makeModel(defaults: defaults, cover: { _ in
@@ -1384,7 +1343,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testDisplayReconfigurationInterruptsAfterCompletedStepWithoutUndoingIt() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var model: AppModel!
         var coverRequests: [Set<UInt32>] = []
         var interrupted = false
@@ -1417,7 +1375,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testNoOpRemovalStillRequiresReviewedSetup() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(noneStatus())
         var hideWrites = 0
         let model = makeModel(
@@ -1450,7 +1407,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testNoOpBlackOutStillChecksCurrentIdentityAndLifecycle() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let inventory = DisplayRecordsBox(displays)
         var coverRequests: [Set<UInt32>] = []
         let model = makeModel(
@@ -1485,7 +1441,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testPreflightNoOpRemovalCannotBecomeWriteAfterSourceReconnects() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let inventory = DisplayRecordsBox(displays)
         let box = StatusBox(hiddenStatus())
         var pendingCleanup: ((Bool, String?) -> Void)?
@@ -1523,7 +1478,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testSavedBlackoutAndShowAllowMatchingZeroSerialButRefuseChangedMetadata() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let inventory = DisplayRecordsBox(displays.filter { $0.uuid != targetUUID } + [
             display(index: 2, id: 202, uuid: targetUUID, name: "No serial", main: false, serial: 0)
         ])
@@ -1555,7 +1509,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testSavedActionRemapsNumericDisplayIDForANewRun() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let inventory = DisplayRecordsBox(displays)
         var coverRequests: [Set<UInt32>] = []
         let model = makeModel(
@@ -1579,7 +1532,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testRunningMultiStepActionDoesNotRebindAfterNumericIDChange() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let inventory = DisplayRecordsBox(displays)
         var coverRequests: [Set<UInt32>] = []
         let model = makeModel(
@@ -1618,7 +1570,6 @@ final class DisplayActionAppTests: XCTestCase {
         ]
         for (name, change, reason) in cases {
             let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
             let inventory = DisplayRecordsBox(displays)
             var coverRequests: [Set<UInt32>] = []
             let model = makeModel(
@@ -1646,7 +1597,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testNoOpBlackOutStillRefusesAfterCleanupFailure() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var cleanupSucceeds = true
         var coverRequests: [Set<UInt32>] = []
         let model = makeModel(
@@ -1674,7 +1624,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testNoOpActionIsBusyWhileAnotherActionOwnsTheLease() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var quiesceCount = 0
         var delayedQuiescence: ((Bool, String?) -> Void)?
         var coverRequests: [Set<UInt32>] = []
@@ -1708,7 +1657,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testNoOpBlackOutStillRefusesWhenRecoveryNeedsAttention() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(noneStatus())
         var coverRequests: [Set<UInt32>] = []
         let model = makeModel(defaults: defaults, box: box, cover: { coverRequests.append($0); return [] })
@@ -1729,7 +1677,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testRemoveNoOpStillRequiresExperimentalConsent() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let box = StatusBox(noneStatus())
         var hideWrites = 0
         let model = makeModel(
@@ -1749,7 +1696,6 @@ final class DisplayActionAppTests: XCTestCase {
     func testUnavailableStepsSkipAndAvailableBlackoutRuns() async throws {
         for removed in [false, true] {
             let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
             let box = StatusBox(removed ? hiddenStatus() : noneStatus())
             let inventory = DisplayRecordsBox(displays)
             var covers: [Set<UInt32>] = []
@@ -1788,7 +1734,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testDisconnectedSkipCannotBypassRecoveryOrLastVisibleGuard() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let inventory = DisplayRecordsBox(displays)
         let box = StatusBox(noneStatus())
         var covers: [Set<UInt32>] = []
@@ -1814,7 +1759,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testSkippedTargetReconnectDuringCleanupNeverBecomesWrite() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let inventory = DisplayRecordsBox(displays)
         var covers: [Set<UInt32>] = []
         let model = makeModel(
@@ -1837,7 +1781,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testRecoveryAppearingAfterSkipPreflightReportsRecoveryWithoutWrites() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let inventory = DisplayRecordsBox(displays)
         let box = StatusBox(noneStatus())
         var covers: [Set<UInt32>] = []
@@ -1866,7 +1809,6 @@ final class DisplayActionAppTests: XCTestCase {
 
     func testBlackoutHiddenRemovalSkipsWithoutChangingStyle() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var hides = 0
         var quiesces = 0
         var failCover = false
@@ -1954,10 +1896,8 @@ final class DisplayActionAppTests: XCTestCase {
         )
     }
 
-    private func makeDefaults() throws -> UserDefaults {
-        let suite = suiteName(nil)
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
+    private func makeDefaults(_ label: String = "") throws -> UserDefaults {
+        let defaults = try makeTestDefaults(label).defaults
         defaults.set(true, forKey: "experimentalFeaturesEnabled")
         var preferences = DisplayHidePreferences()
         preferences[targetUUID] = DisplayHideConfiguration(
@@ -1969,10 +1909,6 @@ final class DisplayActionAppTests: XCTestCase {
         )
         defaults.set(try JSONEncoder().encode(preferences), forKey: "displayHidePreferences")
         return defaults
-    }
-
-    private func suiteName(_ defaults: UserDefaults?) -> String {
-        "displaypanel-display-actions-\(ProcessInfo.processInfo.processIdentifier)"
     }
 
     private func display(index: Int, id: UInt32, uuid: String, name: String, main: Bool, serial: UInt32? = nil) -> DisplayRecord {

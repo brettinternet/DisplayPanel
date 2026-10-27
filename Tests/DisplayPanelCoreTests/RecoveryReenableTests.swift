@@ -6,11 +6,8 @@ import Darwin
 final class RecoveryReenableTests: XCTestCase {
     private var directory: URL!
     override func setUpWithError() throws {
-        directory = FileManager.default.temporaryDirectory.appendingPathComponent("displaypanel-enable-tests-\(UUID())")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-                                               attributes: [.posixPermissions: 0o700])
+        directory = try makeTestDirectory()
     }
-    override func tearDownWithError() throws { try FileManager.default.removeItem(at: directory) }
 
     private func fixture(_ modify: (inout [String: Any]) -> Void = { _ in }) throws -> RecoverySnapshot {
         var value: [String: Any] = ["bootSession": "boot", "osBuild": "build", "userID": getuid(), "hostModel": "synthetic-model",

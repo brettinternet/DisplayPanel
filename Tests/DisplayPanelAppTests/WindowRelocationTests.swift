@@ -359,7 +359,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testStandaloneMoveLeavesHideStateAloneAndRerunDoesNotTouchMovedWindow() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true,
@@ -398,7 +397,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testVerifiedRemovedMoveSourceIsSafelySkippedWithoutExecutor() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false)
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
         let removedIdentity = DisplayHandoffIdentity(DisplayHideIdentity(uuid: sourceUUID, displayID: 1,
@@ -424,7 +422,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testRecoveryBlocksMoveBeforeExecutorAndDoesNotPromptForPermission() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false)
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
         let permission = FakeWindowMovePermission(.missing)
@@ -448,7 +445,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testActionCompositionStableIDsTypedResultsAndStatusExposeMoveCounts() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true,
@@ -503,7 +499,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testMovePermissionRefusalNeverPromptsAndPartialMoveStopsLaterSteps() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true,
@@ -569,7 +564,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testV2MigrationAssignsStableStepUUIDAndV3CorruptEnvelopeDoesNotFallBack() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let identity = DisplayIdentityReference(uuid: sourceUUID, name: "Source", vendor: 1, model: 2, serial: 3)
         let actionID = UUID()
         let old = try JSONSerialization.data(withJSONObject: ["version": 2, "actions": [[
@@ -595,7 +589,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testUnsupportedActionLargeIntegersSurviveSavingValidSibling() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let valid = DisplayAction(name: "Editable", steps: [DisplayActionStep(
             target: DisplayIdentityReference(uuid: sourceUUID, name: "Source", vendor: 1, model: 2, serial: 3),
             effect: .blackOut)])
@@ -629,7 +622,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testKeepWindowsOffDecodesOldHideSettingsAsOffAndPreservesRemovePreference() throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false)
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
         var oldPreferences = DisplayHidePreferences()
@@ -650,7 +642,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testKeepWindowsOffUsesOneSecondFakeClockCadenceAndStopsOnShow() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
@@ -712,7 +703,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testShutdownIsTerminalAgainstQueuedTickHelperCallbackAndPendingSetter() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
@@ -750,7 +740,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testShutdownAfterInflightSetterRejectsNextSetterAndLateCallbacks() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
@@ -789,7 +778,6 @@ final class WindowRelocationTests: XCTestCase {
     func testSleepAndPermissionRevocationWhileAXEnumerationIsPendingPreventSetter() async throws {
         for revokePermission in [false, true] {
             let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName) }
             let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                                  bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
             let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
@@ -838,7 +826,6 @@ final class WindowRelocationTests: XCTestCase {
     func testSleepAndPermissionRevocationCancelPendingEnforcementWrites() async throws {
         for revokePermission in [false, true] {
             let defaults = try makeDefaults()
-            defer { defaults.removePersistentDomain(forName: suiteName) }
             let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                                  bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
             let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
@@ -870,8 +857,7 @@ final class WindowRelocationTests: XCTestCase {
     }
 
     func testEnforcementReacknowledgesNewHelperGenerationBeforeASetter() async throws {
-        let directory = try makeHelperDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let log = directory.appendingPathComponent("helper.log")
         let helper = try writeFakeRelocationHelper(in: directory)
         setenv("DISPLAYPANEL_HELPER", helper.path, 1)
@@ -887,7 +873,6 @@ final class WindowRelocationTests: XCTestCase {
         }
 
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
@@ -970,8 +955,7 @@ final class WindowRelocationTests: XCTestCase {
     }
 
     func testUncertainSetterCompletionIsReportedAsConservativeRelocationProvenance() async throws {
-        let directory = try makeHelperDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let log = directory.appendingPathComponent("helper.log")
         let helper = try writeFakeRelocationHelper(in: directory)
         setenv("DISPLAYPANEL_HELPER", helper.path, 1)
@@ -985,7 +969,6 @@ final class WindowRelocationTests: XCTestCase {
             unsetenv("DISPLAYPANEL_TEST_ACK_DELAY")
         }
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
@@ -1032,8 +1015,7 @@ final class WindowRelocationTests: XCTestCase {
     }
 
     func testCoordinatorFailsClosedWhenCurrentHelperDoesNotAcknowledge() async throws {
-        let directory = try makeHelperDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory()
         let log = directory.appendingPathComponent("helper.log")
         let helper = try writeFakeRelocationHelper(in: directory)
         setenv("DISPLAYPANEL_HELPER", helper.path, 1)
@@ -1070,7 +1052,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testKeepWindowsOffStopsPassBeforeProvenanceLimit() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
@@ -1094,7 +1075,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testKeepWindowsOffActionCoverageAndPermissionRecovery() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
@@ -1145,7 +1125,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testKeepWindowsOffUsesIndependentControllersForMultipleOwnersAndSources() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
@@ -1185,7 +1164,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testAutomationBlackoutNeverMovesWindows() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
@@ -1218,7 +1196,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testKeepWindowsOffFollowsEachHideAndEndsWithIt() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
@@ -1256,7 +1233,6 @@ final class WindowRelocationTests: XCTestCase {
 
     func testKeepWindowsOffCancelsPendingWritesOnDisableAndTopologyChange() async throws {
         let defaults = try makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
         let source = display(index: 1, id: 1, uuid: sourceUUID, main: false,
                              bounds: CGRect(x: -100, y: 0, width: 100, height: 100))
         let destination = display(index: 2, id: 2, uuid: mainUUID, main: true)
@@ -1279,7 +1255,7 @@ final class WindowRelocationTests: XCTestCase {
         XCTAssertEqual(executor.enforcementWrites, 0, "pausing this Hide invalidates the pending setter generation")
         XCTAssertEqual(model.keepWindowsOffStatuses[sourceUUID]?.reason, "Paused for this hide.")
 
-        let secondDefaults = try makeDefaults()
+        let secondDefaults = try makeDefaults("second")
         let alternate = display(index: 3, id: 3, uuid: alternateUUID, main: false)
         let secondScheduler = FakeKeepWindowsOffScheduler()
         let secondExecutor = FakeWindowMoveExecutor(result: AppControlWindowMoveResult(moved: 1))
@@ -1289,10 +1265,7 @@ final class WindowRelocationTests: XCTestCase {
         let reconnecting = FakeDisplayTopology([source, destination, alternate])
         let second = makeModel(defaults: secondDefaults, records: [source, destination, alternate], displayProvider: { reconnecting.records },
             mover: secondExecutor, scheduler: secondScheduler, uptime: { secondScheduler.now }, cover: { _ in [] })
-        defer {
-            second.stopKeepWindowsOff()
-            secondDefaults.removePersistentDomain(forName: suiteName)
-        }
+        defer { second.stopKeepWindowsOff() }
         second.setKeepWindowsOffEnabled(true, for: sourceUUID)
         second.setKeepWindowsOffDestination(.display(DisplayIdentityReference(destination)), for: sourceUUID)
         second.hide(targetUUID: sourceUUID)
@@ -1458,13 +1431,6 @@ final class WindowRelocationTests: XCTestCase {
         return contents.components(separatedBy: needle).count - 1
     }
 
-    private func makeHelperDirectory() throws -> URL {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-relocation-helper-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
-    }
-
     private func writeFakeRelocationHelper(in directory: URL) throws -> URL {
         let helper = directory.appendingPathComponent("fake-dp")
         let script = """
@@ -1492,15 +1458,11 @@ final class WindowRelocationTests: XCTestCase {
         return helper
     }
 
-    private func makeDefaults() throws -> UserDefaults {
-        let name = suiteName
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
-        defaults.removePersistentDomain(forName: name)
+    private func makeDefaults(_ label: String = "") throws -> UserDefaults {
+        let defaults = try makeTestDefaults(label).defaults
         defaults.set(true, forKey: "experimentalFeaturesEnabled")
         return defaults
     }
-
-    private var suiteName: String { "displaypanel-window-relocation-\(ProcessInfo.processInfo.processIdentifier)" }
 }
 
 private extension Result where Success == DisplayRecord, Failure == AppControlWindowMoveReason {

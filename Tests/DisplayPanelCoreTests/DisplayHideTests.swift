@@ -17,13 +17,7 @@ final class DisplayHideTests: XCTestCase {
     private let targetID: UInt32 = 8
 
     override func setUpWithError() throws {
-        directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-display-hide-\(UUID())", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: false,
-            attributes: [.posixPermissions: 0o700]
-        )
+        directory = try makeTestDirectory()
         store = RecoveryStore(url: directory.appendingPathComponent("current.json"))
         operationStore = RecoveryStore(url: directory.appendingPathComponent("operation"))
         topology = FakeTopology(snapshot: try snapshot())
@@ -33,7 +27,6 @@ final class DisplayHideTests: XCTestCase {
     override func tearDownWithError() throws {
         store.unlock()
         operationStore.unlock()
-        try FileManager.default.removeItem(at: directory)
     }
 
     func testStatusReportsEveryRemovalAndAvoidsGuessingForSessionRecovery() throws {

@@ -13,8 +13,7 @@ final class BlackoutDimmingTests: XCTestCase {
     }
 
     func testCleanupVerificationAndRetryUseLockedDurableJournal() throws {
-        let url = temporaryURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let url = try temporaryURL()
         var writes: [String] = []
         var fail = true
         let manager = BlackoutDimming(journalURL: url, set: { uuid, value in
@@ -46,9 +45,8 @@ final class BlackoutDimmingTests: XCTestCase {
         XCTAssertEqual(writes.count, 2)
     }
 
-    func testRepeatedDimCannotWriteAfterJournalPersistenceFails() {
-        let url = temporaryURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    func testRepeatedDimCannotWriteAfterJournalPersistenceFails() throws {
+        let url = try temporaryURL()
         var writes = 0
         var persists = 0
         let manager = BlackoutDimming(
@@ -66,9 +64,8 @@ final class BlackoutDimmingTests: XCTestCase {
         XCTAssertEqual(writes, 0, "empty journal is proof only if every dim durably records its original")
     }
 
-    func testJournalIsWrittenBeforeLuminanceWriteAndUsesExactUUID() {
-        let url = temporaryURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    func testJournalIsWrittenBeforeLuminanceWriteAndUsesExactUUID() throws {
+        let url = try temporaryURL()
         var events: [String] = []
         var selector: String?
         let manager = BlackoutDimming(
@@ -94,10 +91,10 @@ final class BlackoutDimmingTests: XCTestCase {
         XCTAssertEqual(events, ["journal:Exact-UUID:55", "set:Exact-UUID:0"])
     }
 
-    func testPartialDDCFailureDoesNotAbortOtherDisplays() {
+    func testPartialDDCFailureDoesNotAbortOtherDisplays() throws {
         var writes: [(String, UInt16)] = []
         var latestJournal: [BlackoutLuminanceEntry] = []
-        let manager = makeManager(
+        let manager = try makeManager(
             records: [displayRecord(id: 1, uuid: "one"), displayRecord(id: 2, uuid: "two")],
             read: { uuid in
                 DDCLuminanceReading(displayID: uuid == "one" ? 1 : 2, uuid: uuid, current: 40, maximum: 100)
@@ -129,9 +126,8 @@ final class BlackoutDimmingTests: XCTestCase {
         )
     }
 
-    func testResolvedScreenIDsRestrictExistingTargets() {
-        let url = temporaryURL()
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+    func testResolvedScreenIDsRestrictExistingTargets() throws {
+        let url = try temporaryURL()
         var writes: [String] = []
         let manager = BlackoutDimming(
             journalURL: url,
@@ -157,9 +153,9 @@ final class BlackoutDimmingTests: XCTestCase {
         XCTAssertEqual(writes, ["visible:10"], "only displays in the resolved blackout selection may be dimmed")
     }
 
-    func testCommittedScreenIDsDimAllDisplayTargets() {
+    func testCommittedScreenIDsDimAllDisplayTargets() throws {
         var writes: [(String, UInt16)] = []
-        let manager = makeManager(
+        let manager = try makeManager(
             records: [
                 displayRecord(id: 1, uuid: "external"),
                 displayRecord(id: 2, uuid: "builtin", builtin: true)
@@ -193,9 +189,9 @@ final class BlackoutDimmingTests: XCTestCase {
         XCTAssertEqual(writes.first?.1, 0)
     }
 
-    func testRestoreIsIdempotentAfterVerifiedWrite() {
+    func testRestoreIsIdempotentAfterVerifiedWrite() throws {
         var restoreCount = 0
-        let manager = makeManager(
+        let manager = try makeManager(
             read: { DDCLuminanceReading(displayID: 1, uuid: $0, current: 20, maximum: 100) },
             set: { _, value in
                 if value == 20 { restoreCount += 1 }
@@ -212,10 +208,10 @@ final class BlackoutDimmingTests: XCTestCase {
         XCTAssertEqual(restoreCount, 1)
     }
 
-    func testFailedRestoreRetainsJournalEntryForRetry() {
+    func testFailedRestoreRetainsJournalEntryForRetry() throws {
         var shouldFail = true
         var latest: [BlackoutLuminanceEntry] = []
-        let manager = makeManager(
+        let manager = try makeManager(
             read: { DDCLuminanceReading(displayID: 1, uuid: $0, current: 20, maximum: 100) },
             set: { _, value in
                 if value == 20, shouldFail { throw TestError.failed }
@@ -235,9 +231,9 @@ final class BlackoutDimmingTests: XCTestCase {
         XCTAssertTrue(latest.isEmpty)
     }
 
-    func testAlreadyZeroSkipsJournalAndWrite() {
+    func testAlreadyZeroSkipsJournalAndWrite() throws {
         var writes = 0
-        let manager = makeManager(
+        let manager = try makeManager(
             read: { DDCLuminanceReading(displayID: 1, uuid: $0, current: 0, maximum: 100) },
             set: { _, _ in
                 writes += 1
@@ -252,9 +248,9 @@ final class BlackoutDimmingTests: XCTestCase {
         XCTAssertEqual(writes, 0)
     }
 
-    func testPercentageTargetUsesEachMaximumAndFloorRounding() {
+    func testPercentageTargetUsesEachMaximumAndFloorRounding() throws {
         var writes: [(String, UInt16)] = []
-        let manager = makeManager(
+        let manager = try makeManager(
             records: [
                 displayRecord(id: 1, uuid: "one"),
                 displayRecord(id: 2, uuid: "two"),
@@ -310,10 +306,10 @@ final class BlackoutDimmingTests: XCTestCase {
         )
     }
 
-    func testEqualOrHigherTargetNeverBrightensOrJournals() {
+    func testEqualOrHigherTargetNeverBrightensOrJournals() throws {
         var writes: [(String, UInt16)] = []
         var journalWrites = 0
-        let manager = makeManager(
+        let manager = try makeManager(
             read: {
                 DDCLuminanceReading(
                     displayID: 1,
@@ -344,9 +340,9 @@ final class BlackoutDimmingTests: XCTestCase {
         XCTAssertEqual(journalWrites, 0)
     }
 
-    func testZeroPercentageTargetWritesZeroForNonzeroCurrentLuminance() {
+    func testZeroPercentageTargetWritesZeroForNonzeroCurrentLuminance() throws {
         var writes: [(String, UInt16)] = []
-        let manager = makeManager(
+        let manager = try makeManager(
             read: {
                 DDCLuminanceReading(
                     displayID: 1,
@@ -380,9 +376,8 @@ final class BlackoutDimmingTests: XCTestCase {
     }
 
     func testStaleJournalIsRecoveredAtStart() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let directory = try makeTestDirectory().appendingPathComponent("journal")
         let url = directory.appendingPathComponent("blackout-luminance.json")
-        defer { try? FileManager.default.removeItem(at: directory) }
         let first = BlackoutDimming(
             journalURL: url,
             records: { [] },
@@ -415,9 +410,9 @@ final class BlackoutDimmingTests: XCTestCase {
         read: @escaping BlackoutDimming.Read,
         set: @escaping BlackoutDimming.Write,
         journalWriter: BlackoutDimming.JournalWriter? = nil
-    ) -> BlackoutDimming {
+    ) throws -> BlackoutDimming {
         BlackoutDimming(
-            journalURL: temporaryURL(),
+            journalURL: try temporaryURL(),
             records: { records },
             read: read,
             set: set,
@@ -425,10 +420,8 @@ final class BlackoutDimmingTests: XCTestCase {
         )
     }
 
-    private func temporaryURL() -> URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("blackout-luminance.json")
+    private func temporaryURL() throws -> URL {
+        try makeTestDirectory().appendingPathComponent("journal").appendingPathComponent("blackout-luminance.json")
     }
 }
 

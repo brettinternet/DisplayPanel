@@ -9,6 +9,8 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
     private let fixedNow = Date(timeIntervalSince1970: 1_800_000_000)
     private let firstUUID = "00000000-0000-0000-0000-00000000000A"
     private let secondUUID = "00000000-0000-0000-0000-00000000000B"
+    private var modelCount = 0
+    private var helperCount = 0
 
     func testHiddenDisplayRunOnceUsesSafeOverlayAndResumesTimer() async throws {
         let cases: [(Bool, FollowUpAction, Bool)] = [
@@ -24,15 +26,11 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
                 selected.settings.deferBlackoutWhileCameraInUse = true
                 let preferences = AutomationPreferences(isEnabled: enabled, rules: [selected])
                 let status = hiddenStatus()
-                let (model, defaults, suite, journals) = try makeModel(
+                let (model, _, _) = try makeModel(
                     preferences: preferences,
                     snoozeUntil: snoozed ? fixedNow.addingTimeInterval(600) : nil,
                     inspectHandoff: { status }
                 )
-                defer {
-                    defaults.removePersistentDomain(forName: suite)
-                    try? FileManager.default.removeItem(at: journals)
-                }
                 try await wait { !model.protectionQuiescencePending }
                 if enabled && !snoozed {
                     try await wait { launchLines(at: log).contains { $0.contains("--watch") } }
@@ -77,14 +75,10 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
         for status in [hiddenStatus(verified: false), hiddenStatus(state: .recovery), hiddenStatus(sourceID: 99)] {
             try await withHelper(mode: "hold") { log in
                 let selected = rule(id: UUID(), name: "OLED", displayUUID: firstUUID, enabled: false)
-                let (model, defaults, suite, journals) = try makeModel(
+                let (model, _, _) = try makeModel(
                     preferences: AutomationPreferences(isEnabled: false, rules: [selected]),
                     inspectHandoff: { status }
                 )
-                defer {
-                    defaults.removePersistentDomain(forName: suite)
-                    try? FileManager.default.removeItem(at: journals)
-                }
                 try await wait { !model.protectionQuiescencePending }
                 let response = await model.runProtectionRule(id: selected.id)
                 XCTAssertEqual(response.outcome, .recoveryNeeded, response.summary)
@@ -114,13 +108,9 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
         try await withHelper(mode: "hold") { _ in
             let selected = rule(id: UUID(), name: "Original", displayUUID: firstUUID, enabled: false)
             let other = rule(id: UUID(), name: "Other", displayUUID: secondUUID, enabled: false)
-            let (model, defaults, suite, journals) = try makeModel(
+            let (model, _, _) = try makeModel(
                 preferences: AutomationPreferences(isEnabled: false, rules: [selected, other])
             )
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
             let command = try XCTUnwrap(model.protectionRuleCommandLine(id: selected.id))
             XCTAssertEqual(command, AppControlCommand.runRule.commandLine(
                 executable: try ProtectionService.helperExecutableURL().path, ruleID: selected.id
@@ -141,11 +131,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
             let other = rule(id: UUID(), name: "Other", displayUUID: secondUUID, enabled: false)
             let preferences = AutomationPreferences(isEnabled: true, rules: [other, selected])
             let snooze = fixedNow.addingTimeInterval(600)
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences, snoozeUntil: snooze)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, _, _) = try makeModel(preferences: preferences, snoozeUntil: snooze)
             let missing = UUID()
             let priorRefusal = await model.runProtectionRule(id: missing)
             XCTAssertEqual(priorRefusal.outcome, .refused)
@@ -186,11 +172,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
         try await withHelper(mode: "fail") { _ in
             let selected = rule(id: UUID(), name: "Selected", displayUUID: firstUUID, enabled: false)
             let preferences = AutomationPreferences(isEnabled: false, rules: [selected])
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, _, _) = try makeModel(preferences: preferences)
             let missing = UUID()
             let cli = await model.handleProtectionRuleControlRequest(AppControlRequest(command: .runRule, ruleID: missing))
             let ui = await model.runProtectionRule(id: missing)
@@ -211,11 +193,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
             let first = rule(id: UUID(), name: "First", displayUUID: firstUUID, enabled: true)
             let second = rule(id: UUID(), name: "Second", displayUUID: secondUUID, enabled: true)
             let preferences = AutomationPreferences(isEnabled: true, rules: [first, second])
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, defaults, _) = try makeModel(preferences: preferences)
             try await wait { launchLines(at: log).count == 2 }
             try await wait { model.runtimeState == .waiting }
 
@@ -249,11 +227,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
             let disabled = rule(id: UUID(), name: "Disabled rule", displayUUID: firstUUID, enabled: false)
             let preferences = AutomationPreferences(isEnabled: true, rules: [disabled])
             let snoozeExpiry = fixedNow.addingTimeInterval(600)
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences, snoozeUntil: snoozeExpiry)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, defaults, _) = try makeModel(preferences: preferences, snoozeUntil: snoozeExpiry)
 
             let request = Task {
                 await model.handleProtectionRuleControlRequest(
@@ -291,16 +265,12 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
                 guard id == first.id else { return true }
                 return !liveJournalIsLocked
             }
-            let (model, defaults, suite, journals) = try makeModel(
+            let (model, _, journals) = try makeModel(
                 preferences: preferences,
                 snoozeUntil: snoozeExpiry,
                 nowProvider: { currentNow },
                 verifyJournal: verifyJournal
             )
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
             try FileManager.default.createDirectory(
                 at: journals.appendingPathComponent(first.id.uuidString, isDirectory: true),
                 withIntermediateDirectories: true
@@ -342,16 +312,12 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
                 disabled.settings.keepBlackoutOnInput = true
                 disabled.settings.mode = hidden ? .working : .blocking
                 let preferences = AutomationPreferences(isEnabled: snoozed, rules: [disabled])
-                let (model, defaults, suite, journals) = try makeModel(
+                let (model, _, _) = try makeModel(
                     preferences: preferences,
                     snoozeUntil: snoozed ? fixedNow.addingTimeInterval(600) : nil,
                     inspectHandoff: hidden ? { self.hiddenStatus() } : nil
                 )
                 try await wait { !model.protectionQuiescencePending }
-                defer {
-                    defaults.removePersistentDomain(forName: suite)
-                    try? FileManager.default.removeItem(at: journals)
-                }
 
                 let response = await model.handleProtectionRuleControlRequest(
                     AppControlRequest(command: .runRule, ruleID: disabled.id)
@@ -399,11 +365,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
         try await withHelper(mode: "finish") { log in
             let enabled = rule(id: UUID(), name: "Enabled rule", displayUUID: firstUUID, enabled: true)
             let preferences = AutomationPreferences(isEnabled: false, rules: [enabled])
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, _, _) = try makeModel(preferences: preferences)
 
             let response = await model.handleProtectionRuleControlRequest(
                 AppControlRequest(command: .runRule, ruleID: enabled.id)
@@ -422,11 +384,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
             let selected = rule(id: UUID(), name: "One shot", displayUUID: firstUUID, enabled: false)
             let competing = rule(id: UUID(), name: "Competing", displayUUID: firstUUID, enabled: false)
             let preferences = AutomationPreferences(isEnabled: true, rules: [selected, competing])
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, _, _) = try makeModel(preferences: preferences)
             let request = Task {
                 await model.handleProtectionRuleControlRequest(
                     AppControlRequest(command: .runRule, ruleID: selected.id)
@@ -455,11 +413,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
             var other = rule(id: UUID(), name: "Other display", displayUUID: secondUUID, enabled: false)
             other.settings.followUpAction = .untilActivity
             let preferences = AutomationPreferences(isEnabled: true, rules: [selected, other])
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, _, _) = try makeModel(preferences: preferences)
             let otherWatchCount = {
                 self.launchLines(at: log).filter {
                     $0.contains("--displaypanel-rule \(other.id.uuidString)") && $0.contains("--watch")
@@ -493,11 +447,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
             selected.settings.followUpAction = .untilActivity
             selected.settings.keepBlackoutOnInput = true
             let preferences = AutomationPreferences(isEnabled: true, rules: [selected])
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, _, _) = try makeModel(preferences: preferences)
 
             let response = await model.handleProtectionRuleControlRequest(
                 AppControlRequest(command: .runRule, ruleID: selected.id)
@@ -518,11 +468,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
         try await withHelper(mode: "active-watch") { log in
             let selected = rule(id: UUID(), name: "Already active", displayUUID: firstUUID, enabled: true)
             let preferences = AutomationPreferences(isEnabled: true, rules: [selected])
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, _, _) = try makeModel(preferences: preferences)
             try await wait { model.runtimeState == .blackedOut }
             let originalLines = launchLines(at: log)
 
@@ -541,11 +487,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
         try await withHelper(mode: "hold") { log in
             let saved = rule(id: UUID(), name: "Saved", displayUUID: firstUUID, enabled: false)
             let preferences = AutomationPreferences(isEnabled: false, rules: [saved])
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, _, _) = try makeModel(preferences: preferences)
             let response = await model.handleProtectionRuleControlRequest(
                 AppControlRequest(command: .runRule, ruleID: UUID())
             )
@@ -561,11 +503,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
             let first = rule(id: UUID(), name: "First", displayUUID: firstUUID, enabled: true)
             let second = rule(id: UUID(), name: "Conflicting", displayUUID: firstUUID, enabled: true)
             let preferences = AutomationPreferences(isEnabled: true, rules: [first, second])
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, _, _) = try makeModel(preferences: preferences)
             let response = await model.handleProtectionRuleControlRequest(
                 AppControlRequest(command: .runRule, ruleID: first.id)
             )
@@ -580,11 +518,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
         try await withHelper(mode: "hold") { log in
             let selected = rule(id: UUID(), name: "Dispatched", displayUUID: firstUUID, enabled: false)
             let preferences = AutomationPreferences(isEnabled: false, rules: [selected])
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, _, _) = try makeModel(preferences: preferences)
             let app = AppDelegate()
             app.model = model
             let run = await app.handleControlRequest(
@@ -607,11 +541,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
         try await withHelper(mode: "hold") { log in
             let selected = rule(id: UUID(), name: "Running", displayUUID: firstUUID, enabled: false)
             let preferences = AutomationPreferences(isEnabled: false, rules: [selected])
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, _, _) = try makeModel(preferences: preferences)
             let oneShot = Task {
                 await model.handleProtectionRuleControlRequest(
                     AppControlRequest(command: .runRule, ruleID: selected.id)
@@ -640,11 +570,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
         try await withHelper(mode: "fail") { log in
             let selected = rule(id: UUID(), name: "Fails", displayUUID: firstUUID, enabled: true)
             let preferences = AutomationPreferences(isEnabled: true, rules: [selected])
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, _, _) = try makeModel(preferences: preferences)
             try await wait { model.runtimeState == .waiting }
 
             let response = await model.handleProtectionRuleControlRequest(
@@ -667,11 +593,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
         try await withHelper(mode: "crash-after-install") { log in
             let selected = rule(id: UUID(), name: "Crashes later", displayUUID: firstUUID, enabled: false)
             let preferences = AutomationPreferences(isEnabled: false, rules: [selected])
-            let (model, defaults, suite, journals) = try makeModel(preferences: preferences)
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
+            let (model, _, _) = try makeModel(preferences: preferences)
 
             let response = await model.runProtectionRule(id: selected.id)
             XCTAssertEqual(response.outcome, .done, "the effect was installed before the helper failed")
@@ -689,14 +611,10 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
             let selected = rule(id: UUID(), name: "Run once", displayUUID: firstUUID, enabled: false)
             let preferences = AutomationPreferences(isEnabled: false, rules: [selected])
             var currentDisplays = inventory
-            let (model, defaults, suite, journals) = try makeModel(
+            let (model, _, _) = try makeModel(
                 preferences: preferences,
                 displayProvider: { currentDisplays }
             )
-            defer {
-                defaults.removePersistentDomain(forName: suite)
-                try? FileManager.default.removeItem(at: journals)
-            }
             let action = DisplayAction(
                 name: "Black out",
                 target: DisplayIdentitySnapshot(try XCTUnwrap(currentDisplays.first))
@@ -756,13 +674,12 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
         displayProvider: (() -> [DisplayRecord])? = nil,
         verifyJournal: ((UUID?) -> Bool)? = nil,
         inspectHandoff: (() -> DisplayHandoffStatus)? = nil
-    ) throws -> (AppModel, UserDefaults, String, URL) {
-        let suite = "displaypanel-run-rule-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    ) throws -> (AppModel, UserDefaults, URL) {
+        modelCount += 1
+        let defaults = try makeTestDefaults("model-\(modelCount)").defaults
         defaults.set(try JSONEncoder().encode(preferences), forKey: "automationRules")
         if let snoozeUntil { defaults.set(snoozeUntil, forKey: "snoozedUntil") }
-        let journals = temporaryDirectory()
-        try FileManager.default.createDirectory(at: journals, withIntermediateDirectories: true)
+        let journals = try makeTestDirectory("journals-\(modelCount)")
         let coordinator = ProtectionCoordinator(
             verifyJournal: verifyJournal ?? { _ in true },
             ruleJournalDirectory: journals,
@@ -784,7 +701,7 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
             inspectHandoff: inspectHandoff ?? { DisplayHandoffStatus(state: .none, journalPath: "/tmp/no-run-rule-recovery.json") },
             protectionCoordinator: coordinator
         )
-        return (model, defaults, suite, journals)
+        return (model, defaults, journals)
     }
 
     private var inventory: [DisplayRecord] {
@@ -802,8 +719,8 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
     }
 
     private func withHelper(mode: String, body: (URL) async throws -> Void) async throws {
-        let directory = temporaryDirectory()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        helperCount += 1
+        let directory = try makeTestDirectory("helper-\(helperCount)")
         let helper = directory.appendingPathComponent("fake-dp")
         let log = directory.appendingPathComponent("launches.log")
         let script = """
@@ -848,7 +765,6 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
             unsetenv("DISPLAYPANEL_HELPER")
             unsetenv("DISPLAYPANEL_TEST_RUN_RULE_LOG")
             unsetenv("DISPLAYPANEL_TEST_RUN_RULE_MODE")
-            try? FileManager.default.removeItem(at: directory)
         }
         try await body(log)
     }
@@ -856,10 +772,6 @@ final class ProtectionRuleRunOnceTests: XCTestCase {
     private func launchLines(at log: URL) -> [String] {
         (try? String(contentsOf: log, encoding: .utf8))?
             .split(whereSeparator: \.isNewline).map(String.init) ?? []
-    }
-
-    private func temporaryDirectory() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("displaypanel-run-rule-\(UUID().uuidString)", isDirectory: true)
     }
 
     private func wait(_ predicate: () -> Bool) async throws {

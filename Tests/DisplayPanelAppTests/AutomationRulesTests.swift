@@ -7,11 +7,9 @@ final class AutomationRulesTests: XCTestCase {
     @MainActor
     func testVersionedMigrationPreservesLegacySettingsAndLeavesLegacyPayloadAlone() async throws {
         let legacy = Data(#"{"isEnabled":false,"idleSeconds":420,"followUpAction":"restore","followUpSeconds":37,"keepDisplaysAwake":false,"allDisplays":false,"selectedDisplayUUIDs":["00000000-0000-0000-0000-000000000001"],"didChooseDisplays":true,"blackoutEmptyDisplays":true,"mode":"working","workingOverlayEnabled":false,"workingOverlayOpacityPercent":48,"dimDisplaysDuringBlackout":true,"keepBlackoutOnInput":true,"deferBlackoutDuringPlayback":false,"deferBlackoutWhileCameraInUse":true}"#.utf8)
-        let suite = "displaypanel-rules-migration-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try makeTestDefaults().defaults
         defaults.set(legacy, forKey: "blackoutPreferences")
-        let coordinator = makeCoordinator(directory: temporaryDirectory())
+        let coordinator = makeCoordinator(directory: try makeTestDirectory("journals-1"))
         let model = AppModel(
             defaults: defaults,
             displayProvider: { self.inventory },
@@ -46,7 +44,7 @@ final class AutomationRulesTests: XCTestCase {
             defaults: defaults,
             displayProvider: { self.inventory },
             inspectHandoff: { DisplayHandoffStatus(state: .none, journalPath: "/tmp/no-display-recovery.json") },
-            protectionCoordinator: makeCoordinator(directory: temporaryDirectory())
+            protectionCoordinator: makeCoordinator(directory: try makeTestDirectory("journals-2"))
         )
         XCTAssertEqual(secondModel.automationPreferences, migrated, "relaunch uses the versioned key, not a second migration")
         XCTAssertEqual(
@@ -65,14 +63,12 @@ final class AutomationRulesTests: XCTestCase {
 
     @MainActor
     func testFirstRunCreatesDisplayProtectionUsingInitialExternalDisplay() async throws {
-        let suite = "displaypanel-rules-first-run-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try makeTestDefaults().defaults
         let model = AppModel(
             defaults: defaults,
             displayProvider: { self.inventory },
             inspectHandoff: { DisplayHandoffStatus(state: .none, journalPath: "/tmp/no-display-recovery.json") },
-            protectionCoordinator: makeCoordinator(directory: temporaryDirectory())
+            protectionCoordinator: makeCoordinator(directory: try makeTestDirectory("journals"))
         )
         let rule = try XCTUnwrap(model.automationPreferences.rules.first)
         XCTAssertEqual(rule.name, "Display protection")
@@ -324,9 +320,7 @@ final class AutomationRulesTests: XCTestCase {
 
     @MainActor
     func testRuleDraftSavePreservesIdentityAndRefusesConflictingEnableInline() async throws {
-        let suite = "displaypanel-rule-editor-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try makeTestDefaults().defaults
         var firstSettings = ProtectionPreferences()
         firstSettings.selectedDisplayUUIDs = [inventory[0].uuid!]
         firstSettings.followUpAction = .restore
@@ -339,7 +333,7 @@ final class AutomationRulesTests: XCTestCase {
             displayProvider: { self.inventory },
             idleSecondsProvider: { nil },
             inspectHandoff: { DisplayHandoffStatus(state: .none, journalPath: "/tmp/no-display-recovery.json") },
-            protectionCoordinator: makeCoordinator(directory: temporaryDirectory())
+            protectionCoordinator: makeCoordinator(directory: try makeTestDirectory("journals"))
         )
 
         var renamed = try XCTUnwrap(model.automationPreferences.rule(namedID: second.id))
@@ -387,15 +381,12 @@ final class AutomationRulesTests: XCTestCase {
     @MainActor
     func testAdmissionRefusesRuleThatWouldNewlyBlockAnEnabledSibling() async throws {
         let helper = try makeHelper(cleanup: false)
-        defer { try? FileManager.default.removeItem(at: helper.deletingLastPathComponent()) }
         let log = helper.deletingLastPathComponent().appendingPathComponent("events.log")
         setenv("DISPLAYPANEL_HELPER", helper.path, 1)
         setenv("DISPLAYPANEL_TEST_LOG", log.path, 1)
         defer { unsetenv("DISPLAYPANEL_HELPER"); unsetenv("DISPLAYPANEL_TEST_LOG") }
 
-        let suite = "displaypanel-rules-admission-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try makeTestDefaults().defaults
         var waitingSettings = ProtectionPreferences()
         waitingSettings.selectedDisplayUUIDs = [inventory[0].uuid!]
         waitingSettings.followUpAction = .untilActivity
@@ -407,8 +398,7 @@ final class AutomationRulesTests: XCTestCase {
         let initial = AutomationPreferences(isEnabled: true, rules: [waitingRule, candidateRule])
         defaults.set(try JSONEncoder().encode(initial), forKey: "automationRules")
 
-        let coordinatorDirectory = temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: coordinatorDirectory) }
+        let coordinatorDirectory = try makeTestDirectory("journals")
         let model = AppModel(
             defaults: defaults,
             displayProvider: { Array(self.inventory.prefix(2)) },
@@ -451,9 +441,7 @@ final class AutomationRulesTests: XCTestCase {
 
     @MainActor
     func testDeletingActiveRuleLeavesCleanupFailureVisibleAndRetryable() async throws {
-        let directory = temporaryDirectory()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let script = """
         #!/bin/bash
@@ -474,9 +462,7 @@ final class AutomationRulesTests: XCTestCase {
         settings.selectedDisplayUUIDs = [inventory[0].uuid!]
         settings.followUpAction = .restore
         let rule = ProtectionRule(name: "Active rule", isEnabled: true, settings: settings)
-        let suite = "displaypanel-rule-cleanup-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try makeTestDefaults().defaults
         defaults.set(try JSONEncoder().encode(AutomationPreferences(isEnabled: true, rules: [rule])), forKey: "automationRules")
         let coordinator = ProtectionCoordinator(
             verifyJournal: { _ in true },
@@ -506,13 +492,11 @@ final class AutomationRulesTests: XCTestCase {
     @MainActor
     func testCoordinatorRestartsEveryHelperForEffectiveRuleSetChangeAndRestoresAllHelpers() async throws {
         let helper = try makeHelper(cleanup: false)
-        defer { try? FileManager.default.removeItem(at: helper.deletingLastPathComponent()) }
         setenv("DISPLAYPANEL_HELPER", helper.path, 1)
         let log = helper.deletingLastPathComponent().appendingPathComponent("events.log")
         setenv("DISPLAYPANEL_TEST_LOG", log.path, 1)
         defer { unsetenv("DISPLAYPANEL_HELPER"); unsetenv("DISPLAYPANEL_TEST_LOG") }
-        let directory = temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory("journals")
         let coordinator = ProtectionCoordinator(
             verifyJournal: { _ in true },
             ruleJournalDirectory: directory,
@@ -580,14 +564,11 @@ final class AutomationRulesTests: XCTestCase {
     func testLifecycleCompletionResumesAutomationWithoutRefreshAndPreservesUserPauses() async throws {
         let helper = try makeHelper(cleanup: false)
         let directory = helper.deletingLastPathComponent()
-        defer { try? FileManager.default.removeItem(at: directory) }
         let log = directory.appendingPathComponent("events.log")
         setenv("DISPLAYPANEL_HELPER", helper.path, 1)
         setenv("DISPLAYPANEL_TEST_LOG", log.path, 1)
         defer { unsetenv("DISPLAYPANEL_HELPER"); unsetenv("DISPLAYPANEL_TEST_LOG") }
-        let suite = "displaypanel-lifecycle-rearm-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try makeTestDefaults().defaults
         var settings = ProtectionPreferences()
         settings.selectedDisplayUUIDs = [inventory[0].uuid!]
         let rule = ProtectionRule(name: "OLED protection", settings: settings)
@@ -654,14 +635,11 @@ final class AutomationRulesTests: XCTestCase {
     @MainActor
     func testAggregateStatusAndMasterControlsCoverMultipleEnabledRules() async throws {
         let helper = try makeHelper(cleanup: false)
-        defer { try? FileManager.default.removeItem(at: helper.deletingLastPathComponent()) }
         let log = helper.deletingLastPathComponent().appendingPathComponent("events.log")
         setenv("DISPLAYPANEL_HELPER", helper.path, 1)
         setenv("DISPLAYPANEL_TEST_LOG", log.path, 1)
         defer { unsetenv("DISPLAYPANEL_HELPER"); unsetenv("DISPLAYPANEL_TEST_LOG") }
-        let suite = "displaypanel-rules-aggregate-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try makeTestDefaults().defaults
         var quickSettings = ProtectionPreferences()
         quickSettings.selectedDisplayUUIDs = [inventory[0].uuid!]
         quickSettings.idleSeconds = 120
@@ -673,8 +651,7 @@ final class AutomationRulesTests: XCTestCase {
         let quiet = ProtectionRule(name: "Quiet blackout", isEnabled: true, settings: quietSettings)
         let set = AutomationPreferences(isEnabled: true, rules: [quick, quiet])
         defaults.set(try JSONEncoder().encode(set), forKey: "automationRules")
-        let coordinatorDirectory = temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: coordinatorDirectory) }
+        let coordinatorDirectory = try makeTestDirectory("journals")
         let model = AppModel(
             defaults: defaults,
             displayProvider: { self.inventory },
@@ -717,11 +694,9 @@ final class AutomationRulesTests: XCTestCase {
     @MainActor
     func testUnresolvedDeletedRuleJournalBlocksAndRetryRemovesOnlyVerifiedEmptyDirectory() async throws {
         let helper = try makeHelper(cleanup: true)
-        defer { try? FileManager.default.removeItem(at: helper.deletingLastPathComponent()) }
         setenv("DISPLAYPANEL_HELPER", helper.path, 1)
         defer { unsetenv("DISPLAYPANEL_HELPER") }
-        let journalDirectory = temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: journalDirectory) }
+        let journalDirectory = try makeTestDirectory("journals")
         let deletedID = UUID()
         let deletedDirectory = journalDirectory.appendingPathComponent(deletedID.uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: deletedDirectory, withIntermediateDirectories: true)
@@ -787,10 +762,6 @@ final class AutomationRulesTests: XCTestCase {
         )
     }
 
-    private func temporaryDirectory() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("displaypanel-rules-\(UUID().uuidString)", isDirectory: true)
-    }
-
     @MainActor
     private func makeCoordinator(directory: URL) -> ProtectionCoordinator {
         ProtectionCoordinator(
@@ -802,8 +773,7 @@ final class AutomationRulesTests: XCTestCase {
     }
 
     private func makeHelper(cleanup: Bool) throws -> URL {
-        let directory = temporaryDirectory()
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let body: String
         if cleanup {

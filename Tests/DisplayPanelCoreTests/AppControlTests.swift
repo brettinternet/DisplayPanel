@@ -17,7 +17,7 @@ final class AppControlTests: XCTestCase {
     }
 
     func testWatchUnavailableEmitsOneSequencedDocumentAndNeverLaunches() throws {
-        let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-test-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("control.sock").path
         var frames: [AppControlResponse] = []
         let client = try AppControlClient(socketPath: path, launch: { XCTFail("watch must not launch") })
         XCTAssertEqual(try client.watchStatus { frames.append($0) }, 3)

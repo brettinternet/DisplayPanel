@@ -37,8 +37,7 @@ final class SettingsWindowTests: XCTestCase {
             app.windowsMenu = originalWindowsMenu
             app.helpMenu = originalHelpMenu
         }
-        let (model, defaults) = try makeModel()
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
+        let (model, _) = try makeModel()
         let delegate = AppDelegate()
         delegate.model = model
         delegate.configureMainMenu()
@@ -87,8 +86,7 @@ final class SettingsWindowTests: XCTestCase {
         try requireInteractiveUI()
         let app = NSApplication.shared
         let originalPolicy = app.activationPolicy()
-        let (model, defaults) = try makeModel()
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
+        let (model, _) = try makeModel()
         let controller = SettingsWindowController(model: model)
         controller.present()
         XCTAssertEqual(app.activationPolicy(), originalPolicy)
@@ -100,8 +98,7 @@ final class SettingsWindowTests: XCTestCase {
         try requireInteractiveUI()
         let app = NSApplication.shared
         let originalPolicy = app.activationPolicy()
-        let (model, defaults) = try makeModel()
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
+        let (model, _) = try makeModel()
         var presentations: [Bool] = []
         let delegate = AppDelegate { presentations.append($0) }
         delegate.model = model
@@ -121,8 +118,7 @@ final class SettingsWindowTests: XCTestCase {
 
     func testToolbarTabsAndKeyboardShortcutsReachEveryTab() throws {
         try requireInteractiveUI()
-        let (model, defaults) = try makeModel()
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
+        let (model, _) = try makeModel()
         let controller = SettingsWindowController(model: model)
         controller.present()
         let window = try XCTUnwrap(controller.window)
@@ -166,7 +162,7 @@ final class SettingsWindowTests: XCTestCase {
     func testMigratedRuleAndPausedScopeFeedAutomationsControls() throws {
         _ = NSApplication.shared
         let resumeDate = Date().addingTimeInterval(3600)
-        let (model, defaults) = try makeModel(configure: { defaults in
+        let (model, _) = try makeModel(configure: { defaults in
             var legacy = ProtectionPreferences()
             legacy.isEnabled = true
             legacy.didChooseDisplays = true
@@ -174,7 +170,6 @@ final class SettingsWindowTests: XCTestCase {
             defaults.set(try JSONEncoder().encode(legacy), forKey: "blackoutPreferences")
             defaults.set(resumeDate, forKey: "snoozedUntil")
         })
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
         let original = model.automationPreferences
         let rule = try XCTUnwrap(original.rules.first)
         XCTAssertEqual(SettingsTab.automation.title, "Automations")
@@ -215,10 +210,9 @@ final class SettingsWindowTests: XCTestCase {
         var settings = ProtectionPreferences()
         settings.selectedDisplayUUIDs = [Self.sideUUID]
         let rule = ProtectionRule(name: "Desk", isEnabled: true, settings: settings)
-        let (model, defaults) = try makeModel(status: { handoff }, configure: { defaults in
+        let (model, _) = try makeModel(status: { handoff }, configure: { defaults in
             defaults.set(try JSONEncoder().encode(AutomationPreferences(isEnabled: true, rules: [rule])), forKey: "automationRules")
         })
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
 
         XCTAssertTrue(model.protectionRuleNeedsDisplayReview(rule))
         XCTAssertEqual(model.protectionRuleReviewDisplayUUID(rule)?.lowercased(), Self.sideUUID.lowercased())
@@ -232,8 +226,7 @@ final class SettingsWindowTests: XCTestCase {
 
     func testHiddenAutomationChoicesIncludeInactiveAndDisconnectedTargets() throws {
         for inventory in [hiddenDisplays, [displays[0], displays[2]]] {
-            let (model, defaults) = try makeModel(displays: inventory, status: { self.hiddenStatus() })
-            defer { defaults.removePersistentDomain(forName: Self.suiteName) }
+            let (model, _) = try makeModel(displays: inventory, status: { self.hiddenStatus() })
             let choices = model.automationDisplayChoices
             XCTAssertEqual(choices.compactMap { $0.uuid?.uppercased() }, [Self.mainUUID, Self.laptopUUID, Self.sideUUID])
             let hidden = try XCTUnwrap(choices.last)
@@ -268,7 +261,6 @@ final class SettingsWindowTests: XCTestCase {
                 forKey: "automationRules"
             )
         })
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
         let original = model.automationPreferences
         let originalData = try XCTUnwrap(defaults.data(forKey: "automationRules"))
         var editorParents: [NSWindow] = []
@@ -336,7 +328,6 @@ final class SettingsWindowTests: XCTestCase {
         defer { app.setActivationPolicy(originalPolicy) }
 
         let (model, defaults) = try makeModel(displays: hiddenDisplays, status: { self.hiddenStatus() })
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
         let navigation = SettingsNavigation()
         navigation.selectedDisplayID = Self.sideUUID.lowercased()
 
@@ -410,8 +401,7 @@ final class SettingsWindowTests: XCTestCase {
         app.setActivationPolicy(.accessory)
         app.activate(ignoringOtherApps: true)
         defer { app.setActivationPolicy(originalPolicy) }
-        let (model, defaults) = try makeModel()
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
+        let (model, _) = try makeModel()
         let step = DisplayActionStep(target: DisplayIdentitySnapshot(displays[1]), effect: .moveWindows,
                                      moveWindows: MoveWindowsConfiguration())
         let action = DisplayAction(name: "Move test windows", steps: [step])
@@ -447,8 +437,8 @@ final class SettingsWindowTests: XCTestCase {
         app.setActivationPolicy(.accessory)
         app.activate(ignoringOtherApps: true)
         defer { app.setActivationPolicy(originalPolicy) }
-        let (model, defaults) = try makeModel()
-        defer { model.shutdown {}; defaults.removePersistentDomain(forName: Self.suiteName) }
+        let (model, _) = try makeModel()
+        defer { model.shutdown {} }
         let controller = SettingsWindowController(model: model)
         controller.selectDisplay(uuid: Self.sideUUID)
         controller.present()
@@ -512,14 +502,11 @@ final class SettingsWindowTests: XCTestCase {
 
     func testKeepWindowsOffSettingsToggleDestinationAndStatusWithoutMoving() throws {
         try requireInteractiveUI()
-        let (model, defaults) = try makeModel(windowMovePermission: SettingsGrantedWindowMovePermission())
+        let (model, _) = try makeModel(windowMovePermission: SettingsGrantedWindowMovePermission())
         // The initially rendered main display must differ from the selected target.
         // Otherwise an off switch can still belong to the old page on slower runners.
         model.setKeepWindowsOffEnabled(true, for: Self.mainUUID)
-        defer {
-            model.stopKeepWindowsOff()
-            defaults.removePersistentDomain(forName: Self.suiteName)
-        }
+        defer { model.stopKeepWindowsOff() }
         let controller = SettingsWindowController(model: model)
         controller.selectDisplay(uuid: Self.sideUUID)
         controller.present()
@@ -570,11 +557,8 @@ final class SettingsWindowTests: XCTestCase {
     func testHiddenKeepWindowsOffSwitchPausesOnlyThisHide() throws {
         try requireInteractiveUI()
         // Missing permission keeps enforcement paused, so no real window can move.
-        let (model, defaults) = try makeModel(windowMovePermission: SettingsWindowMovePermission())
-        defer {
-            model.stopKeepWindowsOff()
-            defaults.removePersistentDomain(forName: Self.suiteName)
-        }
+        let (model, _) = try makeModel(windowMovePermission: SettingsWindowMovePermission())
+        defer { model.stopKeepWindowsOff() }
         model.setKeepWindowsOffEnabled(true, for: Self.sideUUID)
         model.hide(targetUUID: Self.sideUUID)
         XCTAssertTrue(model.isBlackoutHidden(Self.sideUUID))
@@ -617,8 +601,7 @@ final class SettingsWindowTests: XCTestCase {
         app.setActivationPolicy(.accessory)
         app.activate(ignoringOtherApps: true)
         defer { app.setActivationPolicy(originalPolicy) }
-        let (model, defaults) = try makeModel()
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
+        let (model, _) = try makeModel()
         let step = DisplayActionStep(target: DisplayIdentitySnapshot(displays[1]), effect: .blackOut)
         let action = DisplayAction(name: "Hide and keep clear", steps: [step])
         let (parent, sheet) = try presentProductionDisplayActionEditor(
@@ -654,11 +637,8 @@ final class SettingsWindowTests: XCTestCase {
     func testWindowMovePermissionIsExplicitAndAvailableInBothSettingsPages() throws {
         try requireInteractiveUI()
         let permission = SettingsWindowMovePermission()
-        let (model, defaults) = try makeModel(windowMovePermission: permission)
-        defer {
-            model.stopKeepWindowsOff()
-            defaults.removePersistentDomain(forName: Self.suiteName)
-        }
+        let (model, _) = try makeModel(windowMovePermission: permission)
+        defer { model.stopKeepWindowsOff() }
         let controller = SettingsWindowController(model: model)
         controller.present()
         controller.selectDisplay(uuid: Self.sideUUID)
@@ -714,10 +694,9 @@ final class SettingsWindowTests: XCTestCase {
         app.activate(ignoringOtherApps: true)
         defer { app.setActivationPolicy(originalPolicy) }
 
-        let (model, defaults) = try makeModel(configure: {
+        let (model, _) = try makeModel(configure: {
             $0.set(true, forKey: "experimentalFeaturesEnabled")
         })
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
         let navigation = SettingsNavigation()
         navigation.tab = .automation
         var action = model.makeNewDisplayAction(selectedDisplayID: Self.sideUUID)
@@ -813,8 +792,7 @@ final class SettingsWindowTests: XCTestCase {
         ])
 
         for width in [680, 440] {
-            let suite = "displaypanel-display-action-fixture-\(UUID().uuidString)"
-            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            let defaults = try makeTestDefaults("fixture-\(width)").defaults
             defaults.set(try JSONEncoder().encode(actions), forKey: AppModel.displayActionsKey)
             let model = AppModel(
                 defaults: defaults,
@@ -838,9 +816,7 @@ final class SettingsWindowTests: XCTestCase {
             window.setContentSize(NSSize(width: width, height: 1080))
             try writeSnapshot(of: window, to: output, name: "actions-list-\(width)")
 
-            let successSuite = "displaypanel-display-action-success-\(UUID().uuidString)"
-            let successDefaults = try XCTUnwrap(UserDefaults(suiteName: successSuite))
-            defer { successDefaults.removePersistentDomain(forName: successSuite) }
+            let successDefaults = try makeTestDefaults("success-\(width)").defaults
             let successAction = DisplayAction(name: "Show displays — verified input", steps: [
                 DisplayActionStep(target: target, effect: .show),
                 DisplayActionStep(target: main, effect: .show)
@@ -893,9 +869,7 @@ final class SettingsWindowTests: XCTestCase {
             try writeSnapshot(of: successWindow, to: output, name: "actions-success-\(width)")
             successWindow.close()
 
-            let progressSuite = "displaypanel-display-action-progress-\(UUID().uuidString)"
-            let progressDefaults = try XCTUnwrap(UserDefaults(suiteName: progressSuite))
-            defer { progressDefaults.removePersistentDomain(forName: progressSuite) }
+            let progressDefaults = try makeTestDefaults("progress-\(width)").defaults
             progressDefaults.set(try JSONEncoder().encode(actions), forKey: AppModel.displayActionsKey)
             var delayedActionQuiescence: ((Bool, String?) -> Void)?
             let progressModel = AppModel(
@@ -921,9 +895,7 @@ final class SettingsWindowTests: XCTestCase {
             await fulfillment(of: [progressFinished], timeout: 2)
             progressWindow.close()
 
-            let partialSuite = "displaypanel-display-action-partial-\(UUID().uuidString)"
-            let partialDefaults = try XCTUnwrap(UserDefaults(suiteName: partialSuite))
-            defer { partialDefaults.removePersistentDomain(forName: partialSuite) }
+            let partialDefaults = try makeTestDefaults("partial-\(width)").defaults
             let partialAction = DisplayAction(name: "Focus mode — partial", steps: [
                 DisplayActionStep(target: target),
                 DisplayActionStep(target: main, effect: .show),
@@ -959,8 +931,7 @@ final class SettingsWindowTests: XCTestCase {
             try writeSnapshot(of: partialWindow, to: output, name: "actions-partial-\(width)")
             partialWindow.close()
 
-            let firstUseSuite = "displaypanel-display-action-first-use-\(UUID().uuidString)"
-            let firstUseDefaults = try XCTUnwrap(UserDefaults(suiteName: firstUseSuite))
+            let firstUseDefaults = try makeTestDefaults("first-use-\(width)").defaults
             firstUseDefaults.set(true, forKey: "experimentalFeaturesEnabled")
             let firstUseModel = AppModel(
                 defaults: firstUseDefaults,
@@ -989,7 +960,6 @@ final class SettingsWindowTests: XCTestCase {
             try writeSnapshot(of: setupEditor, to: output, name: "action-editor-remove-setup-\(width)")
             window.endSheet(setupEditor)
             spin { window.attachedSheet == nil }
-            firstUseDefaults.removePersistentDomain(forName: firstUseSuite)
 
             var preferences = DisplayHidePreferences()
             preferences[Self.sideUUID] = DisplayHideConfiguration(
@@ -999,8 +969,7 @@ final class SettingsWindowTests: XCTestCase {
                 awayInput: 0x11,
                 returnInput: 0x0F
             )
-            let configuredSuite = "displaypanel-display-action-editor-fixture-\(UUID().uuidString)"
-            let configuredDefaults = try XCTUnwrap(UserDefaults(suiteName: configuredSuite))
+            let configuredDefaults = try makeTestDefaults("editor-fixture-\(width)").defaults
             configuredDefaults.set(true, forKey: "experimentalFeaturesEnabled")
             configuredDefaults.set(try JSONEncoder().encode(preferences), forKey: "displayHidePreferences")
             let configuredModel = AppModel(
@@ -1050,15 +1019,12 @@ final class SettingsWindowTests: XCTestCase {
             )
             try writeSnapshot(of: disabledEditor, to: output, name: "action-editor-remove-disabled-\(width)")
             window.close()
-            defaults.removePersistentDomain(forName: suite)
-            configuredDefaults.removePersistentDomain(forName: configuredSuite)
         }
     }
 
     func testRunRuleMenuIncludesDisabledRulesAndExplainsEmptyRules() throws {
         _ = NSApplication.shared
-        let (model, defaults) = try makeModel()
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
+        let (model, _) = try makeModel()
         let delegate = AppDelegate()
         delegate.model = model
         var rules = model.automationPreferences.rules
@@ -1101,7 +1067,6 @@ final class SettingsWindowTests: XCTestCase {
             )
             defaults.set(try JSONEncoder().encode(hidePreferences), forKey: "displayHidePreferences")
         })
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
         let delegate = AppDelegate()
         delegate.model = model
 
@@ -1145,8 +1110,7 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertTrue(lines.allSatisfy { ($0 as NSString).size(withAttributes: [.font: font]).width <= 240 })
         XCTAssertEqual(AppDelegate.wrap("Short", width: 240, font: font, maxLines: 3), ["Short"])
 
-        let (model, defaults) = try makeModel()
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
+        let (model, _) = try makeModel()
         let delegate = AppDelegate()
         delegate.model = model
         XCTAssertEqual(delegate.makeMenu().size.width, AppDelegate.menuWidth)
@@ -1162,10 +1126,9 @@ final class SettingsWindowTests: XCTestCase {
             journalID: "disclosure-interaction-fixture",
             reason: "Synthetic recovery details for disclosure interaction."
         )
-        let (model, defaults) = try makeModel(status: { status }, configure: {
+        let (model, _) = try makeModel(status: { status }, configure: {
             $0.set(true, forKey: "experimentalFeaturesEnabled")
         })
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
         let controller = SettingsWindowController(model: model)
         controller.present()
         controller.selectDisplay(uuid: Self.sideUUID)
@@ -1207,8 +1170,7 @@ final class SettingsWindowTests: XCTestCase {
 
     func testBlackedOutDisplayStaysHiddenAfterSettingsCloses() throws {
         try requireInteractiveUI()
-        let (model, defaults) = try makeModel()
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
+        let (model, _) = try makeModel()
         let controller = SettingsWindowController(model: model)
         controller.present()
         controller.selectDisplay(uuid: Self.sideUUID)
@@ -1230,7 +1192,6 @@ final class SettingsWindowTests: XCTestCase {
         app.setActivationPolicy(.accessory)
         defer { app.setActivationPolicy(originalPolicy) }
         let (model, defaults) = try makeModel()
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
         let controller = SettingsWindowController(model: model)
         controller.present()
         controller.select(.general)
@@ -1295,8 +1256,7 @@ final class SettingsWindowTests: XCTestCase {
     }
 
     func testMenuUsesAutomationWording() throws {
-        let (model, defaults) = try makeModel()
-        defer { defaults.removePersistentDomain(forName: Self.suiteName) }
+        let (model, _) = try makeModel()
         let delegate = AppDelegate()
         delegate.model = model
 
@@ -1378,13 +1338,8 @@ final class SettingsWindowTests: XCTestCase {
         ]
 
         for scenario in scenarios {
-            let suite = "displaypanel-automation-fixture-\(UUID().uuidString)"
-            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-            defer { defaults.removePersistentDomain(forName: suite) }
-            let fakeDirectory = FileManager.default.temporaryDirectory
-                .appendingPathComponent("displaypanel-automation-fixture-\(UUID().uuidString)", isDirectory: true)
-            try FileManager.default.createDirectory(at: fakeDirectory, withIntermediateDirectories: true)
-            defer { try? FileManager.default.removeItem(at: fakeDirectory) }
+            let defaults = try makeTestDefaults(scenario.name).defaults
+            let fakeDirectory = try makeTestDirectory(scenario.name)
             if let activeRuleID = scenario.activeRuleID {
                 let helper = try writeAutomationFixtureHelper(in: fakeDirectory)
                 setenv("DISPLAYPANEL_HELPER", helper.path, 1)
@@ -1489,7 +1444,6 @@ final class SettingsWindowTests: XCTestCase {
                 spin(timeout: 4) { stopped }
             }
             window.close()
-            defaults.removePersistentDomain(forName: suite)
             unsetenv("DISPLAYPANEL_HELPER")
             unsetenv("DISPLAYPANEL_FIXTURE_ACTIVE_RULE_ID")
         }
@@ -1540,13 +1494,12 @@ final class SettingsWindowTests: XCTestCase {
             ("variant", variant, true)
         ]
         for scenario in scenarios {
-            let (model, defaults) = try makeModel(configure: { defaults in
+            let (model, _) = try makeModel(configure: { defaults in
                 if let preferences = scenario.preferences {
                     defaults.set(try JSONEncoder().encode(preferences), forKey: "blackoutPreferences")
                 }
                 defaults.set(scenario.experimental, forKey: "experimentalFeaturesEnabled")
             })
-            defer { defaults.removePersistentDomain(forName: Self.suiteName) }
             let controller = SettingsWindowController(model: model)
             controller.present()
             let window = try XCTUnwrap(controller.window)
@@ -1653,7 +1606,7 @@ final class SettingsWindowTests: XCTestCase {
             let partial = scenario.name == "partial"
             // "no-switch" doesn't switch inputs; "mac-input" then chooses this Mac's own input.
             let switches = !["no-switch", "mac-input"].contains(scenario.name)
-            let (model, defaults) = try makeModel(
+            let (model, _) = try makeModel(
                 status: { scenario.status },
                 hideDisplay: { _, _, input in
                     guard partial else {
@@ -1690,7 +1643,6 @@ final class SettingsWindowTests: XCTestCase {
                     defaults.set(try JSONEncoder().encode(hidePreferences), forKey: "displayHidePreferences")
                 }
             )
-            defer { defaults.removePersistentDomain(forName: Self.suiteName) }
             spin { !model.protectionQuiescencePending }
             if scenario.name == "main-target-setup" {
                 model.setHideEnabled(true, for: displays[0])
@@ -1727,7 +1679,7 @@ final class SettingsWindowTests: XCTestCase {
                 main: false, portrait: portrait)]
             var status: DisplayHandoffStatus? = hiddenStatus()
             var writes = 0
-            let (model, defaults) = try makeModel(
+            let (model, _) = try makeModel(
                 displays: records,
                 status: { status },
                 showDisplay: { _, _ in
@@ -1744,7 +1696,6 @@ final class SettingsWindowTests: XCTestCase {
                         source: DisplayIdentitySnapshot(records[0]), awayInput: 17, returnInput: 15)
                     defaults.set(try JSONEncoder().encode(preferences), forKey: "displayHidePreferences")
                 })
-            defer { defaults.removePersistentDomain(forName: Self.suiteName) }
             spin { !model.protectionQuiescencePending }
             model.show(targetUUID: Self.sideUUID)
             spin { !model.hideOperation.isBusy }
@@ -1789,7 +1740,8 @@ final class SettingsWindowTests: XCTestCase {
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
     }
 
-    private static let suiteName = "displaypanel-settings-window-\(ProcessInfo.processInfo.processIdentifier)"
+    // The suite makeModel opened, so keepingDefaults reopens it without clearing.
+    private var suiteName: String?
     private static let journalPath = "/tmp/displaypanel-settings-fixture/current.json"
 
     private func spin(timeout: TimeInterval = 2, until condition: () -> Bool) {
@@ -2011,9 +1963,13 @@ final class SettingsWindowTests: XCTestCase {
         windowMovePermission: WindowMovePermissionProviding? = nil,
         configure: (UserDefaults) throws -> Void = { _ in }
     ) throws -> (AppModel, UserDefaults) {
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: Self.suiteName))
-        if !keepingDefaults {
-            defaults.removePersistentDomain(forName: Self.suiteName)
+        let defaults: UserDefaults
+        if keepingDefaults, let suiteName {
+            defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        } else {
+            let made = try makeTestDefaults()
+            defaults = made.defaults
+            suiteName = made.suiteName
         }
         try configure(defaults)
         let displays = displays ?? self.displays

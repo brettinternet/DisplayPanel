@@ -7,11 +7,9 @@ final class AutomationSafetyTests: XCTestCase {
     private let sourceAUUID = "00000000-0000-0000-0000-00000000000a"
     private let sourceBUUID = "00000000-0000-0000-0000-00000000000b"
     private let thirdUUID = "00000000-0000-0000-0000-00000000000c"
-    private var defaultsSuiteNames: [ObjectIdentifier: String] = [:]
 
     func testCoordinatorIgnoresOwnedLiveJournalLockAndVerifiesCleanStop() async throws {
         let fixture = try makeLockedJournalCoordinator()
-        defer { try? FileManager.default.removeItem(at: fixture.directory) }
         defer { fixture.dimming.stop() }
         setenv("DISPLAYPANEL_HELPER", fixture.helper.path, 1)
         setenv("DISPLAYPANEL_TEST_LOG", fixture.log.path, 1)
@@ -38,7 +36,6 @@ final class AutomationSafetyTests: XCTestCase {
 
     func testCoordinatorFailsClosedWhenOwnedJournalStillCannotVerifyAfterStop() async throws {
         let fixture = try makeLockedJournalCoordinator()
-        defer { try? FileManager.default.removeItem(at: fixture.directory) }
         defer { fixture.dimming.stop() }
         setenv("DISPLAYPANEL_HELPER", fixture.helper.path, 1)
         setenv("DISPLAYPANEL_TEST_LOG", fixture.log.path, 1)
@@ -72,8 +69,7 @@ final class AutomationSafetyTests: XCTestCase {
     }
 
     func testJournalDiscoveryFailureBlocksAutomationAndHideDespiteCleanLegacyJournal() async throws {
-        let directory = try makeDirectory("displaypanel-discovery-failure")
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory("discovery-failure")
         let orphanID = UUID()
         let orphanDirectory = directory.appendingPathComponent(orphanID.uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: orphanDirectory, withIntermediateDirectories: true)
@@ -86,7 +82,6 @@ final class AutomationSafetyTests: XCTestCase {
         let rule = ProtectionRule(name: "Current rule", isEnabled: true, settings: settings)
         let preferences = AutomationPreferences(isEnabled: true, rules: [rule])
         let defaults = try makeDefaults("discovery")
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         defaults.set(try JSONEncoder().encode(preferences), forKey: "automationRules")
         let coordinator = ProtectionCoordinator(
             verifyJournal: { _ in true },
@@ -117,8 +112,7 @@ final class AutomationSafetyTests: XCTestCase {
     }
 
     func testOneRuleCleanupFailureStopsSiblingHelpers() async throws {
-        let directory = try makeDirectory("displaypanel-sibling-cleanup-failure")
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory("sibling-cleanup-failure")
         let log = directory.appendingPathComponent("events.log")
         let helper = try writeHelper(in: directory, script: """
         #!/bin/bash
@@ -139,7 +133,6 @@ final class AutomationSafetyTests: XCTestCase {
         setenv("DISPLAYPANEL_TEST_LOG", log.path, 1)
         defer { unsetenv("DISPLAYPANEL_HELPER"); unsetenv("DISPLAYPANEL_TEST_LOG") }
         let defaults = try makeDefaults("sibling-cleanup")
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         let rules = [rule("Failing", uuid: sourceAUUID, mode: .working), rule("Sibling", uuid: sourceBUUID, mode: .blocking)]
         defaults.set(
             try JSONEncoder().encode(AutomationPreferences(isEnabled: true, rules: rules)),
@@ -160,8 +153,7 @@ final class AutomationSafetyTests: XCTestCase {
     }
 
     func testRetryAutomationRelaunchesHelperThatExitedWithUnchangedArguments() async throws {
-        let directory = try makeDirectory("displaypanel-retry-failed-helper")
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory("retry-failed-helper")
         let log = directory.appendingPathComponent("events.log")
         let helper = try writeHelper(in: directory, script: """
         #!/bin/bash
@@ -175,7 +167,6 @@ final class AutomationSafetyTests: XCTestCase {
         setenv("DISPLAYPANEL_TEST_LOG", log.path, 1)
         defer { unsetenv("DISPLAYPANEL_HELPER"); unsetenv("DISPLAYPANEL_TEST_LOG") }
         let defaults = try makeDefaults("retry-failed")
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         defaults.set(
             try JSONEncoder().encode(AutomationPreferences(isEnabled: true, rules: [rule("One", uuid: sourceAUUID, mode: .blocking)])),
             forKey: "automationRules"
@@ -195,8 +186,7 @@ final class AutomationSafetyTests: XCTestCase {
     }
 
     func testBlockingFocusMembershipAndRestoreFanOutFollowEachRule() async throws {
-        let helperDirectory = try makeDirectory("displaypanel-rule-focus-helper")
-        defer { try? FileManager.default.removeItem(at: helperDirectory) }
+        let helperDirectory = try makeTestDirectory("rule-focus-helper")
         let helper = try writeHelper(in: helperDirectory, script: perDisplayBlackoutHelperScript)
         defer { unsetenv("DISPLAYPANEL_HELPER"); unsetenv("DISPLAYPANEL_TEST_LOG") }
         let enabledCases: [(String, [ProtectionRule], Set<UInt32>, Int)] = [
@@ -206,13 +196,11 @@ final class AutomationSafetyTests: XCTestCase {
         ]
 
         for (suffix, rules, expectedFocusIDs, enabledCount) in enabledCases {
-            let directory = try makeDirectory("displaypanel-rule-focus-\(suffix)")
-            defer { try? FileManager.default.removeItem(at: directory) }
+            let directory = try makeTestDirectory("rule-focus-\(suffix)")
             let log = directory.appendingPathComponent("events.log")
             setenv("DISPLAYPANEL_HELPER", helper.path, 1)
             setenv("DISPLAYPANEL_TEST_LOG", log.path, 1)
             let defaults = try makeDefaults(suffix)
-            defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
             defaults.set(
                 try JSONEncoder().encode(AutomationPreferences(isEnabled: true, rules: rules)),
                 forKey: "automationRules"
@@ -238,15 +226,13 @@ final class AutomationSafetyTests: XCTestCase {
     }
 
     func testPartialVerifiedMirrorSourceSelectionLaunchesOnlySelectedOverlay() async throws {
-        let directory = try makeDirectory("displaypanel-partial-source-selection")
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory("partial-source-selection")
         let log = directory.appendingPathComponent("events.log")
         let helper = try writeHelper(in: directory, script: perDisplayBlackoutHelperScript)
         setenv("DISPLAYPANEL_HELPER", helper.path, 1)
         setenv("DISPLAYPANEL_TEST_LOG", log.path, 1)
         defer { unsetenv("DISPLAYPANEL_HELPER"); unsetenv("DISPLAYPANEL_TEST_LOG") }
         let defaults = try makeDefaults("partial-source")
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var settings = ProtectionPreferences()
         settings.selectedDisplayUUIDs = [sourceAUUID]
         let preferences = AutomationPreferences(isEnabled: true, rules: [ProtectionRule(name: "Partial", isEnabled: true, settings: settings)])
@@ -273,15 +259,13 @@ final class AutomationSafetyTests: XCTestCase {
     }
 
     func testSiblingSourceCoverageMakesOverlayCountdownAbsoluteAndArgumentsComplete() async throws {
-        let directory = try makeDirectory("displaypanel-sibling-source-coverage")
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory("sibling-source-coverage")
         let log = directory.appendingPathComponent("events.log")
         let helper = try writeHelper(in: directory, script: perDisplayBlackoutHelperScript)
         setenv("DISPLAYPANEL_HELPER", helper.path, 1)
         setenv("DISPLAYPANEL_TEST_LOG", log.path, 1)
         defer { unsetenv("DISPLAYPANEL_HELPER"); unsetenv("DISPLAYPANEL_TEST_LOG") }
         let defaults = try makeDefaults("sibling-sources")
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var firstSettings = ProtectionPreferences()
         firstSettings.selectedDisplayUUIDs = [sourceAUUID]
         firstSettings.mode = .working
@@ -352,10 +336,8 @@ final class AutomationSafetyTests: XCTestCase {
     }
 
     func testMissingDisplayRefreshSettlesUntilTopologyChanges() async throws {
-        let directory = try makeDirectory("displaypanel-waiting-refresh")
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = try makeTestDirectory("waiting-refresh")
         let defaults = try makeDefaults("waiting-refresh")
-        defer { defaults.removePersistentDomain(forName: suiteName(defaults)) }
         var settings = ProtectionPreferences()
         settings.selectedDisplayUUIDs = [thirdUUID]
         let rule = ProtectionRule(name: "Missing display", isEnabled: true, settings: settings)
@@ -454,7 +436,7 @@ final class AutomationSafetyTests: XCTestCase {
         coordinator: ProtectionCoordinator,
         verifyRuleJournal: () -> Bool
     ) {
-        let directory = try makeDirectory("displaypanel-live-journal")
+        let directory = try makeTestDirectory("live-journal")
         let id = UUID()
         let journalDirectory = directory.appendingPathComponent(id.uuidString, isDirectory: true)
         let journalURL = journalDirectory.appendingPathComponent("blackout-luminance.json")
@@ -517,21 +499,7 @@ final class AutomationSafetyTests: XCTestCase {
     }
 
     private func makeDefaults(_ suffix: String) throws -> UserDefaults {
-        let name = "displaypanel-automation-safety-\(suffix)-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
-        defaultsSuiteNames[ObjectIdentifier(defaults)] = name
-        return defaults
-    }
-
-    private func suiteName(_ defaults: UserDefaults) -> String {
-        defaultsSuiteNames[ObjectIdentifier(defaults)]!
-    }
-
-    private func makeDirectory(_ prefix: String) throws -> URL {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory
+        try makeTestDefaults(suffix).defaults
     }
 
     private func writeHelper(in directory: URL, script: String) throws -> URL {

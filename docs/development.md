@@ -15,7 +15,11 @@ task build:release            # universal .build/DisplayPanel.app (https://taskf
 ```
 
 Tests use fake display writers and DDC channels; they never change real
-displays. Opt-in environment variables:
+displays. Create test UserDefaults suites and temp directories (including
+sockets and helper-process output) with `makeTestDefaults` and
+`makeTestDirectory` from `TestIsolation.swift`. Their names are fixed per
+test and they are cleared in teardown, so reruns don't leave files behind.
+Opt-in environment variables:
 
 | Variable | Effect |
 | --- | --- |

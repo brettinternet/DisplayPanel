@@ -8,19 +8,11 @@ import XCTest
 final class DisplayDisconnectIntegrationTests: XCTestCase {
     private var directory: URL!
     private var defaults: UserDefaults!
-    private var suite: String!
 
     override func setUpWithError() throws {
-        directory = FileManager.default.temporaryDirectory.appendingPathComponent("displaypanel-disconnect-tests-\(UUID())")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-                                               attributes: [.posixPermissions: 0o700])
-        suite = "displaypanel-disconnect-\(UUID())"
-        defaults = UserDefaults(suiteName: suite)!
+        directory = try makeTestDirectory()
+        defaults = try makeTestDefaults().defaults
         defaults.set(true, forKey: "experimentalFeaturesEnabled")
-    }
-    override func tearDownWithError() throws {
-        defaults.removePersistentDomain(forName: suite)
-        try FileManager.default.removeItem(at: directory)
     }
 
     private final class Fixture {

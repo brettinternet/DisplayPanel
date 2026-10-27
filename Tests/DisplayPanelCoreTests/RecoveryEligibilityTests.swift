@@ -108,10 +108,7 @@ final class RecoveryEligibilityTests: XCTestCase {
         // after begin or staging must cancel; no commit can occur.
         for boundary in ["begin", "stage"] {
             for race in ["topology", "lid", "sleep", "physical"] {
-                let directory = FileManager.default.temporaryDirectory.appendingPathComponent("displaypanel-eligibility-tests-\(UUID())")
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-                                                       attributes: [.posixPermissions: 0o700])
-                defer { try? FileManager.default.removeItem(at: directory) }
+                let directory = try makeTestDirectory("\(boundary)-\(race)")
                 let store = RecoveryStore(url: directory.appendingPathComponent("journal.json"))
                 try store.lock()
                 defer { store.unlock() }

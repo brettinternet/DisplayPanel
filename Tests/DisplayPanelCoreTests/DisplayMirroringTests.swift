@@ -11,15 +11,12 @@ final class DisplayMirroringTests: XCTestCase {
     private let sourceUUID = "00000000-0000-0000-0000-000000000001"
 
     override func setUpWithError() throws {
-        directory = FileManager.default.temporaryDirectory.appendingPathComponent("displaypanel-mirror-tests-\(UUID())")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
-                                               attributes: [.posixPermissions: 0o700])
+        directory = try makeTestDirectory()
         store = RecoveryStore(url: directory.appendingPathComponent("current.json"))
     }
 
     override func tearDownWithError() throws {
         store.unlock()
-        try FileManager.default.removeItem(at: directory)
     }
 
     private func snapshot(_ modify: (inout [[String: Any]]) -> Void = { _ in }) throws -> RecoverySnapshot {

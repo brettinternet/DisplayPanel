@@ -5,6 +5,8 @@ import Darwin
 @testable import DisplayPanelCore
 
 final class ProtectionPreferencesTests: XCTestCase {
+    private var recoveryDirectoryCount = 0
+
     func testSleepDisplayDefaultsEmitBoundedDisplayAssertion() throws {
         var preferences = ProtectionPreferences()
         preferences.selectedDisplayUUIDs = ["AAAA-UUID"]
@@ -482,12 +484,10 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testFirstRunDoesNotInferAllDisplayPermission() throws {
-        let suiteName = "displaypanel-first-run-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = try makeTestDefaults().defaults
 
         let onlyDisplay = try XCTUnwrap(displays.first)
-        let model = isolatedModel(
+        let model = try isolatedModel(
             defaults: defaults,
             displayProvider: { [onlyDisplay] }
         )
@@ -502,11 +502,9 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testMenuBarIconPreferenceDefaultsVisibleAndIsStoredSeparately() throws {
-        let suiteName = "displaypanel-menu-bar-icon-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = try makeTestDefaults().defaults
 
-        let model = isolatedModel(defaults: defaults, displayProvider: { [] })
+        let model = try isolatedModel(defaults: defaults, displayProvider: { [] })
         XCTAssertTrue(model.showMenuBarIcon)
         XCTAssertEqual(defaults.object(forKey: "showMenuBarIcon") as? Bool, true)
         let protectionData = defaults.data(forKey: "blackoutPreferences")
@@ -520,9 +518,7 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testDeferredActivityStatusPropagatesFromHelper() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-playback-status-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let script = """
         #!/bin/bash
@@ -550,15 +546,7 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testControlCommandIsQueuedAcrossWatcherRestart() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "displaypanel-control-restart-\(UUID().uuidString)",
-                isDirectory: true
-            )
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let log = directory.appendingPathComponent("control.log")
         let script = """
@@ -613,15 +601,7 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testLatestControlCommandWinsAcrossWatcherRestart() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "displaypanel-control-latest-\(UUID().uuidString)",
-                isDirectory: true
-            )
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let log = directory.appendingPathComponent("control.log")
         let script = """
@@ -669,15 +649,7 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testAcknowledgedControlIntentSurvivesWatcherRestart() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "displaypanel-control-intent-\(UUID().uuidString)",
-                isDirectory: true
-            )
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let log = directory.appendingPathComponent("control.log")
         let script = """
@@ -779,15 +751,7 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testBlackoutCommandSurvivesCleanExitWhileWatcherStarts() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "displaypanel-control-exited-\(UUID().uuidString)",
-                isDirectory: true
-            )
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let log = directory.appendingPathComponent("control.log")
         let marker = directory.appendingPathComponent("first-launch")
@@ -846,15 +810,7 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testControlRecoveryStopsAfterOneCleanExitRetry() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "displaypanel-control-retry-limit-\(UUID().uuidString)",
-                isDirectory: true
-            )
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let log = directory.appendingPathComponent("control.log")
         let marker = directory.appendingPathComponent("first-launch")
@@ -912,12 +868,7 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testStoppingIgnoresLateStatusFromOldWatcher() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-late-status-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let script = """
         #!/bin/bash
@@ -952,12 +903,7 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testManagedWatcherReconfiguresForAvailableSelectedDisplays() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-display-recovery-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let log = directory.appendingPathComponent("launches.log")
         let script = """
@@ -977,9 +923,7 @@ final class ProtectionPreferencesTests: XCTestCase {
             ofItemAtPath: helper.path
         )
 
-        let suiteName = "displaypanel-display-recovery-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = try makeTestDefaults().defaults
         var preferences = ProtectionPreferences()
         preferences.isEnabled = true
         preferences.didChooseDisplays = true
@@ -994,7 +938,7 @@ final class ProtectionPreferencesTests: XCTestCase {
             unsetenv("DISPLAYPANEL_TEST_LOG")
         }
 
-        let model = isolatedModel(
+        let model = try isolatedModel(
             defaults: defaults,
             displayProvider: { currentDisplays }
         )
@@ -1047,12 +991,7 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testForcedRestartAndLatestConfigurationWinWhileWatcherIsStopping() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-service-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let log = directory.appendingPathComponent("launches.log")
         let script = """
@@ -1102,15 +1041,7 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testWatcherFreshInputGateHasDistinctRuntimeState() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "displaypanel-waiting-input-\(UUID().uuidString)",
-                isDirectory: true
-            )
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let script = """
         #!/bin/bash
@@ -1137,12 +1068,10 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testSnoozePersistsAcrossRestartAndAutoResumesAtExpiry() throws {
-        let suiteName = "displaypanel-snooze-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = try makeTestDefaults().defaults
         var current = Date(timeIntervalSince1970: 1_800_000_000)
 
-        let model = isolatedModel(
+        let model = try isolatedModel(
             defaults: defaults,
             displayProvider: { [] },
             now: { current }
@@ -1164,7 +1093,7 @@ final class ProtectionPreferencesTests: XCTestCase {
         XCTAssertTrue(menuTitles.contains("Resume Automation"))
         XCTAssertFalse(menuTitles.contains("Pause Automation"))
 
-        let restarted = isolatedModel(
+        let restarted = try isolatedModel(
             defaults: defaults,
             displayProvider: { [] },
             now: { current }
@@ -1183,9 +1112,7 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testUntilTomorrowUsesNextLocalEightAM() throws {
-        let suiteName = "displaypanel-until-tomorrow-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = try makeTestDefaults().defaults
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Denver"))
         let current = try XCTUnwrap(
@@ -1205,7 +1132,7 @@ final class ProtectionPreferencesTests: XCTestCase {
                 hour: 8
             ))
         )
-        let model = isolatedModel(
+        let model = try isolatedModel(
             defaults: defaults,
             displayProvider: { [] },
             now: { current }
@@ -1219,11 +1146,9 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testSleepNowPreservesProtectionStateAndCancelsSnooze() throws {
-        let suiteName = "displaypanel-sleep-now-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = try makeTestDefaults().defaults
         var sleepRequests = 0
-        let model = isolatedModel(
+        let model = try isolatedModel(
             defaults: defaults,
             displayProvider: { [] },
             sleepDisplays: { sleepRequests += 1 }
@@ -1248,9 +1173,7 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testWorkingCountdownResetsPartialButNotFullSelection() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-countdown-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let blackoutTrigger = directory.appendingPathComponent("blackout-trigger")
         let script = """
@@ -1268,9 +1191,7 @@ final class ProtectionPreferencesTests: XCTestCase {
         try Data(script.utf8).write(to: helper)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helper.path)
 
-        let suiteName = "displaypanel-countdown-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = try makeTestDefaults().defaults
         var preferences = ProtectionPreferences()
         preferences.isEnabled = true
         preferences.didChooseDisplays = true
@@ -1287,7 +1208,7 @@ final class ProtectionPreferencesTests: XCTestCase {
         setenv("DISPLAYPANEL_TEST_TRIGGER", blackoutTrigger.path, 1)
         defer { unsetenv("DISPLAYPANEL_HELPER"); unsetenv("DISPLAYPANEL_TEST_TRIGGER") }
 
-        let model = isolatedModel(
+        let model = try isolatedModel(
             defaults: defaults,
             displayProvider: { [self.displays[0], self.displays[1]] },
             now: { current },
@@ -1317,9 +1238,7 @@ final class ProtectionPreferencesTests: XCTestCase {
         model.shutdown { stopped.fulfill() }
         await fulfillment(of: [stopped], timeout: 3)
 
-        let fullSuiteName = "displaypanel-full-countdown-\(UUID().uuidString)"
-        let fullDefaults = try XCTUnwrap(UserDefaults(suiteName: fullSuiteName))
-        defer { fullDefaults.removePersistentDomain(forName: fullSuiteName) }
+        let fullDefaults = try makeTestDefaults("full").defaults
         var fullPreferences = preferences
         fullPreferences.allDisplays = true
         fullPreferences.selectedDisplayUUIDs = []
@@ -1331,7 +1250,7 @@ final class ProtectionPreferencesTests: XCTestCase {
         var fullIdle: TimeInterval = 100
         let fullBlackoutTrigger = directory.appendingPathComponent("full-blackout-trigger")
         setenv("DISPLAYPANEL_TEST_TRIGGER", fullBlackoutTrigger.path, 1)
-        let fullModel = isolatedModel(
+        let fullModel = try isolatedModel(
             defaults: fullDefaults,
             displayProvider: { [self.displays[0], self.displays[1]] },
             now: { fullCurrent },
@@ -1352,12 +1271,7 @@ final class ProtectionPreferencesTests: XCTestCase {
 
     @MainActor
     func testPartialMembershipUpdatesModelAndRestoreWithoutFullLifecycle() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-membership-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
+        let directory = try makeTestDirectory("helper")
         let helper = directory.appendingPathComponent("fake-dp")
         let log = directory.appendingPathComponent("control.log")
         let allowReblackout = directory.appendingPathComponent("allow-reblackout")
@@ -1382,9 +1296,7 @@ final class ProtectionPreferencesTests: XCTestCase {
             ofItemAtPath: helper.path
         )
 
-        let suiteName = "displaypanel-membership-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = try makeTestDefaults().defaults
         var preferences = ProtectionPreferences()
         preferences.isEnabled = true
         preferences.didChooseDisplays = true
@@ -1404,7 +1316,7 @@ final class ProtectionPreferencesTests: XCTestCase {
             unsetenv("DISPLAYPANEL_TEST_ALLOW_REBLACKOUT")
         }
 
-        let model = isolatedModel(
+        let model = try isolatedModel(
             defaults: defaults,
             displayProvider: { [self.displays[0], self.displays[1]] },
             idleSecondsProvider: { 0 }
@@ -1479,15 +1391,9 @@ final class ProtectionPreferencesTests: XCTestCase {
         now: @escaping () -> Date = Date.init,
         idleSecondsProvider: @escaping () -> TimeInterval? = { nil },
         sleepDisplays: @escaping () throws -> Void = { XCTFail("unexpected display sleep") }
-    ) -> AppModel {
-        let recoveryDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("displaypanel-protection-recovery-\(UUID())", isDirectory: true)
-        try? FileManager.default.createDirectory(
-            at: recoveryDirectory,
-            withIntermediateDirectories: false,
-            attributes: [.posixPermissions: 0o700]
-        )
-        addTeardownBlock { try? FileManager.default.removeItem(at: recoveryDirectory) }
+    ) throws -> AppModel {
+        recoveryDirectoryCount += 1
+        let recoveryDirectory = try makeTestDirectory("recovery-\(recoveryDirectoryCount)")
         return AppModel(
             defaults: defaults,
             displayProvider: displayProvider,

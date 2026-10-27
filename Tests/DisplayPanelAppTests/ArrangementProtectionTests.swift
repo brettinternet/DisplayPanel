@@ -5,14 +5,12 @@ import CoreGraphics
 
 @MainActor
 final class ArrangementProtectionTests: XCTestCase {
-    private var suites: [String] = []
+    private var suiteCount = 0
     private var models: [AppModel] = []
 
     override func tearDown() {
         for model in models { model.shutdown {} }
-        for suite in suites { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
         models = []
-        suites = []
         super.tearDown()
     }
 
@@ -68,9 +66,8 @@ final class ArrangementProtectionTests: XCTestCase {
         let defaults: UserDefaults
         if let existing { defaults = existing }
         else {
-            let suite = "displaypanel-arrangement-app-\(UUID().uuidString)"
-            suites.append(suite)
-            defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            suiteCount += 1
+            defaults = try makeTestDefaults("\(suiteCount)").defaults
         }
         if let preferences {
             defaults.set(try JSONEncoder().encode(preferences), forKey: AppModel.arrangementPreferencesKey)
@@ -596,7 +593,7 @@ final class ArrangementProtectionTests: XCTestCase {
         state.layout.members[1].x += 100
         let delegate = AppDelegate()
         delegate.model = model
-        let path = "\(try AppControlSocket.userTemporaryDirectory())/displaypanel-arrange-\(UUID().uuidString.prefix(8)).sock"
+        let path = try makeTestDirectory().appendingPathComponent("arrange.sock").path
         let server = AppControlServer(socketPath: path) { request, received in
             await delegate.handleControlRequest(request, receivedAt: received)
         }
