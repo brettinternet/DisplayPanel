@@ -74,7 +74,8 @@ notarized.
 
 General settings shows the packaged release version. When HEAD is not at the
 matching release tag, packaging appends the short Git SHA (for example,
-`1.2.3 (abc1234)`) to distinguish development builds. Packaging requires a Git
+`1.2.3 (abc1234)`) to distinguish development builds, with `-dirty` when the
+working tree has uncommitted changes. Packaging requires a Git
 checkout; bundle marketing and build numbers remain unchanged.
 
 Release builds pass the SDK to the linker (`-Xclang-linker -isysroot`).

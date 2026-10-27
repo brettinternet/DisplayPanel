@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034 # Sets RELEASE_* variables for the scripts that source it.
 
-# Display the validated release version, identifying builds not at that tag.
+# Display the validated release version, identifying builds not at that tag
+# or with uncommitted changes.
 release_version_display() {
-	local repo=$1 tag=$2 head tagged_head
+	local repo=$1 tag=$2 head tagged_head changes
 	head=$(git -C "$repo" rev-parse --verify HEAD) || return 1
 	tagged_head=$(git -C "$repo" rev-parse --verify "refs/tags/$tag^{commit}" 2>/dev/null) || tagged_head=
-	if [[ "$head" == "$tagged_head" ]]; then
+	changes=$(git -C "$repo" status --porcelain) || return 1
+	if [[ "$head" == "$tagged_head" && -z "$changes" ]]; then
 		printf '%s\n' "${tag#v}"
 	else
 		local sha
 		sha=$(git -C "$repo" rev-parse --short HEAD) || return 1
+		[[ -z "$changes" ]] || sha+=-dirty
 		printf '%s (%s)\n' "${tag#v}" "$sha"
 	fi
 }

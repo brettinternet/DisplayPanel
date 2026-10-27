@@ -84,6 +84,9 @@ with tempfile.TemporaryDirectory(prefix="displaypanel-version-") as repo:
     check("v0.3.0-beta.1", f"0.3.0-beta.1 ({sha})")
     git("checkout", "--quiet", "--detach", "v0.3.0")
     check("v0.3.0", "0.3.0")
+    sha = git("rev-parse", "--short", "HEAD")
+    Path(repo, "untracked").write_text("")
+    check("v0.3.0", f"0.3.0 ({sha}-dirty)")
 PY
 
 echo "release version checks passed"
