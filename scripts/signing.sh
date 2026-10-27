@@ -37,6 +37,7 @@ displaypanel_check_requirement() {
 	requirement=$(codesign -d -r- "$code_path" 2>/dev/null) || return 1
 	if [[ "$requirement" != "$(displaypanel_developer_id_requirement "$identifier")" ]]; then
 		echo "signing: $code_path is not Developer ID signed as $identifier for team $DISPLAYPANEL_SIGNING_TEAM_ID: $requirement" >&2
+		echo 'signing: set DISPLAYPANEL_SIGNING_IDENTITY to the Developer ID Application certificate SHA-1 (locally in .env; see example.env)' >&2
 		return 1
 	fi
 }
