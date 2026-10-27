@@ -69,9 +69,10 @@ class SigningTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name)
         self.log = self.directory / "commands.jsonl"
+        # The release job exports real signing and notary settings; ignore them.
         self.env = {key: value for key, value in os.environ.items()
-                    if not key.startswith("DISPLAYPANEL_SIGNING_")
-                    and key != "DISPLAYPANEL_REQUIRE_SIGNING"}
+                    if not key.startswith(("DISPLAYPANEL_SIGNING_", "DISPLAYPANEL_NOTARY_",
+                                           "DISPLAYPANEL_REQUIRE_"))}
         self.env.update(PATH=f"{self.directory}:{os.environ['PATH']}",
                         SIGNING_TEST_LOG=str(self.log))
         for name in ("codesign", "security", "lipo", "xcrun", "vtool", "spctl"):
