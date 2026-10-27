@@ -69,8 +69,24 @@ scripts/package-release.sh v1.2.3
 This writes universal app and CLI archives with SHA-256 files to `dist/`.
 Release CI requires the Developer ID Application identity and signs with the
 hardened runtime and a secure timestamp. Local packaging uses the same identity
-when configured; otherwise it prints an ad-hoc warning. Releases are not yet
-notarized.
+when configured; otherwise it prints an ad-hoc warning.
+
+With notary credentials, packaging submits both archives with
+`xcrun notarytool submit --wait`, staples the app and builds the final app
+archive and checksums from the stapled bundle. Before publishing it requires
+`xcrun stapler validate`, `codesign --verify --deep --strict` and
+`spctl -a -vv -t exec` reporting `source=Notarized Developer ID`. A rejection
+prints the notary log and fails. A bare Mach-O cannot be stapled, so the CLI
+archive is notarized and Gatekeeper finds its ticket online; a downloaded `dp`
+needs network access on first run. Without credentials, local
+packaging prints a note and skips notarization unless
+`DISPLAYPANEL_REQUIRE_NOTARIZATION=1`, as in release CI.
+
+```sh
+export DISPLAYPANEL_NOTARY_KEY_PATH=/path/to/AuthKey_KEYID.p8
+export DISPLAYPANEL_NOTARY_KEY_ID=KEYID
+export DISPLAYPANEL_NOTARY_ISSUER_ID=ISSUER_UUID
+```
 
 General settings shows the packaged release version. When HEAD is not at the
 matching release tag, packaging appends the short Git SHA (for example,
@@ -147,7 +163,21 @@ Apple Developer Program Account Holder role.
    `always()` step. Missing secrets, import failures or signing failures prevent
    publication. PR jobs do not receive these secrets. The ephemeral runner is the
    final cleanup boundary if a job is forcibly terminated. Run the **CI**
-   workflow manually (`workflow_dispatch`) to check the import and sign a probe.
+   workflow manually (`workflow_dispatch`) to check the import, sign a probe and
+   validate notary credentials with `notarytool history` (no submission).
+
+4. Create an App Store Connect API key with the Developer role (App Store
+   Connect → Users and Access → Integrations) and upload it with its key ID and
+   issuer ID:
+
+   ```sh
+   base64 -i /path/to/AuthKey_KEYID.p8 | tr -d '\n' | gh secret set DISPLAYPANEL_NOTARY_KEY_BASE64 --repo brettinternet/DisplayPanel
+   gh secret set DISPLAYPANEL_NOTARY_KEY_ID --repo brettinternet/DisplayPanel
+   gh secret set DISPLAYPANEL_NOTARY_ISSUER_ID --repo brettinternet/DisplayPanel
+   ```
+
+   Release CI writes the key with mode 0600 under `$RUNNER_TEMP` and removes it
+   in an `always()` step.
 
 The app identifier is `com.brettinternet.displaypanel`; the CLI/helper uses
 `com.brettinternet.displaypanel.cli`. Nested code is signed before the app, using
@@ -185,7 +215,7 @@ With explicit owner approval for desktop interaction, install the app using
 verify opening it and Launch at Login registration, then confirm the bundled
 helper executes and the installed signature still verifies. The installer copies
 the signed bundle without re-signing. Do not run blackout or recovery commands to
-test signing. Until notarization, Gatekeeper may still require **Open Anyway**.
+test signing.
 
 To rotate (renewal or expiry), create a new Developer ID Application
 certificate for the same team, then replace the three `DISPLAYPANEL_SIGNING_*`

@@ -7,7 +7,8 @@ usage() {
 Usage: scripts/package-release.sh TAG [OUTPUT_DIR]
 
 Builds arm64 and x86_64 release products, then creates universal CLI and
-DisplayPanel.app archives with SHA-256 checksums.
+DisplayPanel.app archives with SHA-256 checksums. With notary credentials, it
+notarizes both archives and staples the app before archiving it.
 EOF
 }
 
@@ -21,6 +22,9 @@ output_dir=${2:-dist}
 # shellcheck source=signing.sh
 source "$(dirname "${BASH_SOURCE[0]}")/signing.sh"
 displaypanel_signing_configure
+# shellcheck source=notarize.sh
+source "$(dirname "${BASH_SOURCE[0]}")/notarize.sh"
+displaypanel_notary_configure
 # shellcheck source=release-version.sh
 source "$(dirname "${BASH_SOURCE[0]}")/release-version.sh"
 if ! release_version_parse "$tag"; then
@@ -117,6 +121,10 @@ zip -q -j "$output_dir/$cli_archive" \
 	cd "$repo_root"
 	zip -q "$output_dir/$cli_archive" examples/com.brettinternet.displaypanel.blackout.plist
 )
+# A bare Mach-O cannot be stapled; Gatekeeper finds the CLI's ticket online.
+if [[ "$DISPLAYPANEL_NOTARIZE" == 1 ]]; then
+	displaypanel_notarize "$output_dir/$cli_archive"
+fi
 (
 	cd "$output_dir"
 	shasum -a 256 "$cli_archive" > "$cli_archive.sha256"
@@ -124,6 +132,12 @@ zip -q -j "$output_dir/$cli_archive" \
 
 "$repo_root/scripts/package-app.sh" "$tag" "$arm64_ui" "$x86_64_ui" "$arm64_cli" "$x86_64_cli" \
 	"$universal_staging/DisplayPanel.app"
+if [[ "$DISPLAYPANEL_NOTARIZE" == 1 ]]; then
+	ditto -c -k --keepParent "$universal_staging/DisplayPanel.app" "$universal_staging/notarize.zip"
+	displaypanel_notarize "$universal_staging/notarize.zip"
+	xcrun stapler staple "$universal_staging/DisplayPanel.app"
+	displaypanel_verify_notarized_app "$universal_staging/DisplayPanel.app"
+fi
 app_archive_staging="$universal_staging/archive"
 mkdir "$app_archive_staging"
 ditto "$universal_staging/DisplayPanel.app" "$app_archive_staging/DisplayPanel.app"

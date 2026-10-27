@@ -51,6 +51,13 @@ elif name == "lipo":
         print("arm64 x86_64")
 elif name == "xcrun" and args == ["--show-sdk-version"]:
     print("15.0")
+elif name == "xcrun" and args[:2] == ["notarytool", "submit"]:
+    print(json.dumps({"id": "fake-id", "status": os.environ.get("FAKE_NOTARY_STATUS", "Accepted")}))
+elif name == "xcrun" and args[:2] == ["notarytool", "log"]:
+    print("fake notary log")
+elif name == "spctl":
+    print("accepted\\nsource=" +os.environ.get("FAKE_SPCTL_SOURCE", "Notarized Developer ID"),
+          file=sys.stderr)
 elif name == "vtool":
     print("sdk 15.0")
 '''
@@ -67,7 +74,7 @@ class SigningTests(unittest.TestCase):
                     and key != "DISPLAYPANEL_REQUIRE_SIGNING"}
         self.env.update(PATH=f"{self.directory}:{os.environ['PATH']}",
                         SIGNING_TEST_LOG=str(self.log))
-        for name in ("codesign", "security", "lipo", "xcrun", "vtool"):
+        for name in ("codesign", "security", "lipo", "xcrun", "vtool", "spctl"):
             tool = self.directory / name
             tool.write_text(FAKE_TOOL)
             tool.chmod(0o755)
@@ -129,6 +136,48 @@ class SigningTests(unittest.TestCase):
         self.assertEqual(self.sign().returncode, 42)
         self.assertEqual(len(self.calls()), 1)
 
+    def notary(self, script):
+        return self.run_command("bash", "-euc",
+            'source "$1/signing.sh"; displaypanel_signing_configure; '
+            'source "$1/notarize.sh"; displaypanel_notary_configure; ' + script,
+            "bash", str(ROOT / "scripts"), str(self.directory / "App with spaces.zip"))
+
+    def configure_notary(self):
+        key = self.directory / "notary.p8"
+        key.write_text("fake key")
+        self.env.update(DISPLAYPANEL_SIGNING_IDENTITY=IDENTITY,
+                        DISPLAYPANEL_NOTARY_KEY_PATH=str(key),
+                        DISPLAYPANEL_NOTARY_KEY_ID="KEYID", DISPLAYPANEL_NOTARY_ISSUER_ID="issuer")
+
+    def test_local_notarization_skips_with_note_and_required_refuses(self):
+        result = self.notary('[[ "$DISPLAYPANEL_NOTARIZE" == 0 ]]')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("notarization skipped", result.stderr)
+        self.env["DISPLAYPANEL_REQUIRE_NOTARIZATION"] = "1"
+        self.assertNotEqual(self.notary("true").returncode, 0)
+        self.configure_notary()
+        del self.env["DISPLAYPANEL_NOTARY_ISSUER_ID"]
+        self.assertNotEqual(self.notary("true").returncode, 0)
+        self.assertEqual(self.calls(), [])
+
+    def test_rejected_notarization_prints_log_and_fails(self):
+        self.configure_notary()
+        self.env["FAKE_NOTARY_STATUS"] = "Invalid"
+        result = self.notary('displaypanel_notarize "$2"')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("fake notary log", result.stderr)
+        self.assertEqual([call[1:3] for call in self.calls()],
+                         [["notarytool", "submit"], ["notarytool", "log"]])
+        self.assertEqual(self.calls()[1][3], "fake-id")
+
+    def test_app_verification_requires_gatekeeper_notarized_source(self):
+        self.configure_notary()
+        self.assertEqual(self.notary('displaypanel_verify_notarized_app "$2"').returncode, 0)
+        self.env["FAKE_SPCTL_SOURCE"] = "Developer ID"
+        result = self.notary('displaypanel_verify_notarized_app "$2"')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not report", result.stderr)
+
     def package_app(self):
         binary = self.directory / "binary"
         binary.write_text("fake input")
@@ -162,6 +211,10 @@ class SigningTests(unittest.TestCase):
         result = self.run_command("bash", str(ROOT / "scripts/package-release.sh"), "v0.3.0")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("release requires", result.stderr)
+        self.env.update(DISPLAYPANEL_SIGNING_IDENTITY=IDENTITY, DISPLAYPANEL_REQUIRE_NOTARIZATION="1")
+        result = self.run_command("bash", str(ROOT / "scripts/package-release.sh"), "v0.3.0")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("release requires DISPLAYPANEL_NOTARY", result.stderr)
         self.assertEqual(self.calls(), [])
 
     def import_identity(self):

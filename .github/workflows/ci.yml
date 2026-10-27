@@ -24,9 +24,12 @@ env:
 
 jobs:
   signing-check:
-    name: Check configured release signing identity
+    name: Check release signing identity and notary credentials
     if: github.event_name == 'workflow_dispatch'
     runs-on: macos-26
+    env:
+      DISPLAYPANEL_NOTARY_KEY_ID: ${{ secrets.DISPLAYPANEL_NOTARY_KEY_ID }}
+      DISPLAYPANEL_NOTARY_ISSUER_ID: ${{ secrets.DISPLAYPANEL_NOTARY_ISSUER_ID }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -45,6 +48,31 @@ jobs:
           displaypanel_signing_configure
           displaypanel_sign "$RUNNER_TEMP/displaypanel-signing-probe" com.brettinternet.displaypanel.signing-probe
           codesign --verify --strict "$RUNNER_TEMP/displaypanel-signing-probe"
+      - name: Write notary API key
+        env:
+          DISPLAYPANEL_NOTARY_KEY_BASE64: ${{ secrets.DISPLAYPANEL_NOTARY_KEY_BASE64 }}
+        run: |
+          if [[ -z "$DISPLAYPANEL_NOTARY_KEY_BASE64" ]]; then
+            echo 'Notary API key secret is missing' >&2
+            exit 1
+          fi
+          key_path="$RUNNER_TEMP/displaypanel-notary.p8"
+          echo "DISPLAYPANEL_NOTARY_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          (umask 077 && base64 --decode <<<"$DISPLAYPANEL_NOTARY_KEY_BASE64" > "$key_path")
+      - name: Check notary credentials without submitting
+        timeout-minutes: 2
+        env:
+          DISPLAYPANEL_SIGNING_IDENTITY: ${{ secrets.DISPLAYPANEL_SIGNING_IDENTITY }}
+          DISPLAYPANEL_REQUIRE_NOTARIZATION: "1"
+        run: |
+          source scripts/signing.sh
+          displaypanel_signing_configure
+          source scripts/notarize.sh
+          displaypanel_notary_configure
+          displaypanel_notary_check
+      - name: Remove notary API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/displaypanel-notary.p8"
       - name: Remove signing keychain
         if: always()
         run: python3 scripts/import-signing.py --cleanup
@@ -87,6 +115,9 @@ jobs:
     env:
       DISPLAYPANEL_REQUIRE_SIGNING: "1"
       DISPLAYPANEL_SIGNING_IDENTITY: ${{ secrets.DISPLAYPANEL_SIGNING_IDENTITY }}
+      DISPLAYPANEL_REQUIRE_NOTARIZATION: "1"
+      DISPLAYPANEL_NOTARY_KEY_ID: ${{ secrets.DISPLAYPANEL_NOTARY_KEY_ID }}
+      DISPLAYPANEL_NOTARY_ISSUER_ID: ${{ secrets.DISPLAYPANEL_NOTARY_ISSUER_ID }}
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -111,8 +142,23 @@ jobs:
           export DISPLAYPANEL_SIGNING_KEYCHAIN="$RUNNER_TEMP/displaypanel-signing.keychain-db"
           echo "DISPLAYPANEL_SIGNING_KEYCHAIN=$DISPLAYPANEL_SIGNING_KEYCHAIN" >> "$GITHUB_ENV"
           python3 scripts/import-signing.py
-      - name: Package release
+      - name: Write notary API key
+        env:
+          DISPLAYPANEL_NOTARY_KEY_BASE64: ${{ secrets.DISPLAYPANEL_NOTARY_KEY_BASE64 }}
+        run: |
+          if [[ -z "$DISPLAYPANEL_NOTARY_KEY_BASE64" ]]; then
+            echo 'Notary API key secret is missing' >&2
+            exit 1
+          fi
+          key_path="$RUNNER_TEMP/displaypanel-notary.p8"
+          echo "DISPLAYPANEL_NOTARY_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+          (umask 077 && base64 --decode <<<"$DISPLAYPANEL_NOTARY_KEY_BASE64" > "$key_path")
+      - name: Package, notarize and staple release
+        timeout-minutes: 60
         run: ./scripts/package-release.sh "$GITHUB_REF_NAME"
+      - name: Remove notary API key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/displaypanel-notary.p8"
       - name: Remove release signing keychain
         if: always()
         run: python3 scripts/import-signing.py --cleanup
@@ -124,7 +170,7 @@ jobs:
             - **DisplayPanel menu-bar app** — `DisplayPanel-….app.zip`
             - **Standalone dp CLI** — `dp-…-macos-universal.zip`
 
-            Both archives are universal arm64/x86_64 and signed with Developer ID, but not yet notarized. Verify the matching SHA-256 checksum; macOS may require Privacy & Security → Open Anyway.
+            Both archives are universal arm64/x86_64, Developer ID signed and notarized. The app is stapled; the CLI's first run checks its notarization online. Verify the matching SHA-256 checksum.
         run: |
           source scripts/release-version.sh
           release_version_parse "$GITHUB_REF_NAME"
