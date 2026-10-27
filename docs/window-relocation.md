@@ -1,9 +1,9 @@
 # Window relocation contract
 
-Contract for TASK-64 (one-shot Move windows) and TASK-65 (ongoing keep-off),
-as revised by TASK-74 (keep-off belongs to one blackout Hide).
-The shared direction was approved during TASK-63. TASK-64 depends on stable app
-signing (TASK-66).
+Contract for DP-64 (one-shot Move windows) and DP-65 (ongoing keep-off),
+as revised by DP-74 (keep-off belongs to one blackout Hide).
+The shared direction was approved during DP-63. DP-64 depends on stable app
+signing (DP-66).
 Neither task authorizes native window movement without
 separate approval, DDC writes, or private display setters.
 
@@ -106,7 +106,7 @@ explicit unavailable destination refuses, never falls back. Resolve identities
 strictly and revalidate topology, recovery and destination eligibility before
 every write. Geometry preserves size and relative placement in destination
 visible bounds, clamps to those bounds, and resizes only oversized windows;
-TASK-64 owns the detailed geometry and minimum-size behavior/tests. No layout
+DP-64 owns the detailed geometry and minimum-size behavior/tests. No layout
 restore is saved, and re-running ignores windows already off the source.
 
 ## 3. Honest results
@@ -128,11 +128,11 @@ Keep input fields reserved for DDC outcomes.
 | No verified move and execution fails | `failed`; stop |
 | Permission missing/stale, no destination, invalid identity before writes | `refused`; stop, actionable reason |
 | Unresolved recovery | `recovery-needed`; stop, preserve recovery evidence |
-| Safely disconnected or verified removed source | `skipped` under TASK-62; continue |
+| Safely disconnected or verified removed source | `skipped` under DP-62; continue |
 | Remaining steps after a stop | `not-run` |
 
 A source that is blacked out is **not** unavailable for Move: moving windows
-from it is the purpose. Keep TASK-62's frozen skips and strict ambiguity/recovery
+from it is the purpose. Keep DP-62's frozen skips and strict ambiguity/recovery
 refusals. Extend the aggregate's “changed” evidence to include verified window
 moves, not just display changes. No-op/skipped-only Actions report Nothing to do;
 existing outcome exit codes remain. No Move, prior step, or successful window is
@@ -149,7 +149,7 @@ counts with blanket success.
 
 ## 4. Keep-off ownership and lifetime
 
-TASK-74: keep-off is the intent of one blackout Hide. An idle rule that blacked
+DP-74: keep-off is the intent of one blackout Hide. An idle rule that blacked
 out an opted-in display used to move every window off it, and Show never moves
 them back. `DisplayHideConfiguration.keepWindowsOff` (nil = off) is now the
 *remembered choice* used by the next manual Hide (Settings, menu, `app hide`).
@@ -202,7 +202,7 @@ Moves must not call the app's manual-activity hooks, reset idle timers, send inp
 or extend blackout. Empty-display detection continues to observe real geometry,
 but DisplayPanel-authored relocation must not count as new user occupancy that clears
 `requiresOccupiedBeforeRearming`, nor may transient relocation samples initiate
-or prolong empty-display blackout. TASK-65 must carry a session-only relocation
+or prolong empty-display blackout. DP-65 must carry a session-only relocation
 suppression signal to affected managed helpers before writes and acknowledge it
 before proceeding: suppress empty-policy transitions for affected displays during
 the pass, and do not clear a restored-display rearm latch solely from moved-window
@@ -229,13 +229,13 @@ also expose controllable pending completion for cancellation tests.
 
 | Owner | Required fake-backed checks |
 | --- | --- |
-| TASK-64 persistence | v1/v2 → v3; stable Action/step UUIDs on reload/edit; same-source Hide + Move; duplicate class refusal; unknown-effect sibling survives edits; corrupt envelope preserved; result alignment/cache invalidation |
-| TASK-64 selection | strict identity and recovery; automatic ordering; explicit no fallback; blacked-out source; unavailable destination; frozen source skips; topology/permission changes between setters |
-| TASK-64 windows | negative origins, mixed scale, spanning/tied frames, oversized/minimum-size; unique/ambiguous CG matching; minimized/fullscreen/other-Space uncertainty, vanished and nonmovable windows |
-| TASK-64 execution | no background prompt; denial/revocation; hung app does not block another; per-element timeout; timed-out write uncertainty; partial counts/exit codes/not-run; no rollback, watchers or input events |
-| TASK-65 lifecycle | manual/Action/Automation entry and exit; multiple owners, one controller; armed/enforcing/paused; disable/snooze only via coverage; new/returning windows, missed ticks/events; sleep/wake, reconnect, quit/relaunch |
-| TASK-65 races | coverage/config change before setter and during pending call; no stale publication; manual Move deduplicated; bounded per-window backoff/drag deferral; permission/destination recovery without prompts |
-| TASK-65 policy | fake-clock cadence bound; no self-generated idle reset; helper suppression acknowledged before move; no empty-display rearm/feedback; genuine input still restores; no blackout extension |
+| DP-64 persistence | v1/v2 → v3; stable Action/step UUIDs on reload/edit; same-source Hide + Move; duplicate class refusal; unknown-effect sibling survives edits; corrupt envelope preserved; result alignment/cache invalidation |
+| DP-64 selection | strict identity and recovery; automatic ordering; explicit no fallback; blacked-out source; unavailable destination; frozen source skips; topology/permission changes between setters |
+| DP-64 windows | negative origins, mixed scale, spanning/tied frames, oversized/minimum-size; unique/ambiguous CG matching; minimized/fullscreen/other-Space uncertainty, vanished and nonmovable windows |
+| DP-64 execution | no background prompt; denial/revocation; hung app does not block another; per-element timeout; timed-out write uncertainty; partial counts/exit codes/not-run; no rollback, watchers or input events |
+| DP-65 lifecycle | manual/Action/Automation entry and exit; multiple owners, one controller; armed/enforcing/paused; disable/snooze only via coverage; new/returning windows, missed ticks/events; sleep/wake, reconnect, quit/relaunch |
+| DP-65 races | coverage/config change before setter and during pending call; no stale publication; manual Move deduplicated; bounded per-window backoff/drag deferral; permission/destination recovery without prompts |
+| DP-65 policy | fake-clock cadence bound; no self-generated idle reset; helper suppression acknowledged before move; no empty-display rearm/feedback; genuine input still restores; no blackout extension |
 
 A later window effect adds an effect case, typed payload, executor and reason
 codes plus its focused tests; add an effect class only if its composition rules
@@ -245,7 +245,7 @@ Native validation, when separately approved, uses narrow tests gated by
 
 ## Evidence
 
-TASK-63 design-time evidence: `DisplayActions.swift` (then v2 and result alignment),
+DP-63 design-time evidence: `DisplayActions.swift` (then v2 and result alignment),
 `AppControlDisplayStatus.swift` (outcomes), `AppModel.swift` (storage preservation,
 Action aggregation and manual coverage), `ProtectionService.swift` /
 `ProtectionCoordinator.swift` (helper membership), `ProtectionPreferences.swift`

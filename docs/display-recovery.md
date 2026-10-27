@@ -225,7 +225,7 @@ verification without feedback loops. **Hardware limit:** the reported monitor's
 actual input-return flags and driver timing remain unverified. A return that emits
 only mode/mirror/move flags is intentionally not repaired. Passive logging needs
 no display writes; a live repair trial still requires separate scoped approval.
-No live trial was performed for TASK-78.
+No live trial was performed for DP-78.
 
 ## Protected display modes
 
@@ -266,7 +266,7 @@ remember the desired current mode again rather than allowing an approximation.
 Hardware status: fake-backed tests cover reduced-mode input return, late/missing
 modes, exclusions, ordering, lock and topology races, own notifications, and failed
 verification. No live mode-write, monitor-input, wake or native Settings interaction
-trial was performed for TASK-81; hardware behavior remains unverified.
+trial was performed for DP-81; hardware behavior remains unverified.
 
 ## Remembered arrangements
 
@@ -341,7 +341,7 @@ only public CoreGraphics origins with session scope, and verifies the result.
 It does not write modes, mirroring, private setters, DDC, permanent preferences,
 windows or Spaces. Recovery journals are never overwritten by Remember.
 
-**Hardware status:** TASK-79 and TASK-80 have fake-backed writer, lifecycle, CLI,
+**Hardware status:** DP-79 and DP-80 have fake-backed writer, lifecycle, CLI,
 Action and resized-layout coverage only. Real reconnect/wake timing, input-return flags and CoreGraphics
 layout acceptance remain unverified. No live arrangement trial was performed;
 hardware writes still require separate scoped approval.

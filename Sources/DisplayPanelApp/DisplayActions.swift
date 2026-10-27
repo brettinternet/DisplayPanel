@@ -201,7 +201,7 @@ struct DisplayAction: Codable, Equatable, Identifiable {
         if values.contains(.steps) {
             steps = try values.decode([DisplayActionStep].self, forKey: .steps)
         } else {
-            // TASK-36 stored a single target/effect directly on the Action.
+            // DP-36 stored a single target/effect directly on the Action.
             steps = [DisplayActionStep(
                 target: try values.decodeIfPresent(DisplayIdentityReference.self, forKey: .target),
                 effect: try values.decode(DisplayActionEffect.self, forKey: .effect),

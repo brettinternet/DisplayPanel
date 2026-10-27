@@ -2,7 +2,7 @@ import Foundation
 import CoreGraphics
 
 /// Production observations use the bounded capture/current contract on the
-/// TASK-1 host/build. They do not prove fresh sink acquisition or rule out
+/// DP-1 host/build. They do not prove fresh sink acquisition or rule out
 /// cached same-port replacement/CG-ID reuse. This inventory is never journal data.
 struct RecoveryEnableIdentity: Equatable {
     let uuid: String?

@@ -37,14 +37,14 @@ alone do not enable interactive tests. See `docs/development.md`.
 ## Display-disable work
 
 Read `docs/display-disable.md` for canonical direction and
-`docs/display-disable-tool-survey.md` for evidence. Start with TASK-1, bounded
+`docs/display-disable-tool-survey.md` for evidence. Start with DP-1, bounded
 offline ABI verification. The unadopted `recovery-enable`
 research branch is preserved only as the tag `archive/recovery-enable`.
 
-TASK-1 through TASK-8 authorize offline implementation/validation only, using
+DP-1 through DP-8 authorize offline implementation/validation only, using
 fake writers and no-write rehearsals. No private setter invocation (even enable
 of an online display), live restoration trial, DDC write, or disruptive recovery
-is authorized by a green test suite or task completion. TASK-9 and TASK-10 require
+is authorized by a green test suite or task completion. DP-9 and DP-10 require
 explicit scoped human approval before hardware writes. Preserve strict identity
 refusal, unresolved journals and session-only transactions. Never guess IDs,
 relax checks to unblock a trial, or silently escalate to logout/reboot.

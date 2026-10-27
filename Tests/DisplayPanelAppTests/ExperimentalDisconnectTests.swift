@@ -106,7 +106,7 @@ final class ExperimentalDisconnectTests: XCTestCase {
         let originalBytes = try Data(contentsOf: url)
 
         // A test-only projection, not a production provider/schema. App-facing
-        // private journal and lease observations remain TASK-20 integration work.
+        // private journal and lease observations remain DP-20 integration work.
         func relaunch() throws -> ExperimentalDisconnectPresentation {
             let reopened = try RecoveryStore(url: url).load()
             let captured = try XCTUnwrap(reopened.snapshot.displays.first { $0.id == reopened.disabledByUsID })

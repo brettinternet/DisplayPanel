@@ -3,7 +3,7 @@ import CoreGraphics
 import Darwin
 import MachO
 
-/// TASK-1's canonical C ABI. Never import the private symbol at link time.
+/// DP-1's canonical C ABI. Never import the private symbol at link time.
 typealias ConfigureDisplayEnabled = @convention(c)
     (CGDisplayConfigRef, CGDirectDisplayID, Bool) -> CGError
 

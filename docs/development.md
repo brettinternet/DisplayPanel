@@ -191,7 +191,7 @@ old-line rebuilds. Rotation changes the designated requirement. Users must
 remove/re-add DisplayPanel's privacy grant once after rotation **or the first upgrade
 from an ad-hoc build**; a stale enabled switch in System Settings does not prove
 permission is valid. Builds signed with the unchanged identity are intended to
-retain grants. TASK-64 checks Accessibility in the app process and requests it
+retain grants. DP-64 checks Accessibility in the app process and requests it
 only from the explicit in-app button. Fake-backed tests never open the
 permission prompt or move native windows; real window movement and grant-retention
 validation still require separate explicit user approval.
