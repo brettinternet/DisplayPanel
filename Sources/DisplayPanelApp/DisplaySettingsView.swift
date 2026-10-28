@@ -449,7 +449,14 @@ struct DisplaySettingsView: View {
             HStack(spacing: 8) {
                 Text(model.macInput(for: uuid).map(MonitorInput.name) ?? "Unknown")
                 switch model.macInputDetections[tileID] {
-                case .unavailable?, .onSwitchInput?:
+                case .onSwitchInput?:
+                    if let mac = model.macInput(for: uuid) {
+                        Button("Switch to \(MonitorInput.name(mac))") { model.switchToMacInput(for: uuid) }
+                            .disabled(frozen || model.hideOperation.isBusy)
+                    }
+                    Button("Detect Again") { model.detectMacInput(for: uuid) }
+                        .disabled(frozen)
+                case .unavailable?:
                     Button("Detect Again") { model.detectMacInput(for: uuid) }
                         .disabled(frozen)
                 case .detected?, nil:

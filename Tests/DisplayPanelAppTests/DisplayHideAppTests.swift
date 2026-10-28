@@ -916,12 +916,19 @@ final class DisplayHideAppTests: XCTestCase {
         let defaults = try makeDefaults()
         var checkCalls = 0
         var current: UInt8 = 0x0F
+        var writes: [UInt8] = []
         let model = makeModel(
             defaults: defaults,
             displays: displays,
             checkDDCInput: { identity in
                 checkCalls += 1
                 return DDCInputReading(displayID: identity.displayID, uuid: identity.uuid, current: current)
+            },
+            selectDDCInput: { identity, input in
+                writes.append(input)
+                current = input
+                return DDCInputSelection(displayID: identity.displayID, uuid: identity.uuid, original: 0x11,
+                                         requested: input, observed: input, outcome: .verified, detail: nil)
             }
         )
         model.detectMacInput(for: Self.targetUUID)
@@ -944,6 +951,14 @@ final class DisplayHideAppTests: XCTestCase {
         model.detectMacInput(for: Self.targetUUID)
         XCTAssertEqual(model.macInputDetections[Self.targetKey], .onSwitchInput(0x11))
         XCTAssertEqual(model.hidePreferences[Self.targetUUID]?.returnInput, 0x0F)
+        // The fallback writes only the saved Mac input, and only from that state.
+        model.switchToMacInput(for: Self.targetUUID)
+        XCTAssertEqual(writes, [0x0F])
+        XCTAssertEqual(model.macInputDetections[Self.targetKey], .detected(0x0F))
+        model.switchToMacInput(for: Self.targetUUID)
+        XCTAssertEqual(writes, [0x0F], "no write once the Mac input is detected")
+        current = 0x11
+        model.detectMacInput(for: Self.targetUUID)
         model.setHideSwitchInput(0x12, for: Self.targetUUID)
         XCTAssertEqual(model.hidePreferences[Self.targetUUID]?.returnInput, 0x0F, "an untrusted reading never becomes the Mac input")
         model.setHideSwitchInput(0x11, for: Self.targetUUID)
@@ -988,7 +1003,7 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(model.hidePreferences[Self.targetUUID]?.returnInput, 0x0F)
         model.setHideSwitchInput(0x0F, for: Self.targetUUID)
         XCTAssertNil(model.hidePreferences[Self.targetUUID]?.returnInput, "Show never switches back to the input Hide switches to")
-        XCTAssertEqual(checkCalls, 2)
+        XCTAssertEqual(checkCalls, 3)
     }
 
     func testTheMacInputStaysKnownWhenHideIsSetToSwitchToIt() throws {
@@ -4095,6 +4110,9 @@ final class DisplayHideAppTests: XCTestCase {
         displayWakeSettleDelay: TimeInterval = 1,
         checkDDCInput: @escaping (DisplayHideIdentity) throws -> DDCInputReading = { _ in
             DDCInputReading(displayID: 0, uuid: "", current: 1)
+        },
+        selectDDCInput: @escaping (DisplayHideIdentity, UInt8) throws -> DDCInputSelection = { _, _ in
+            XCTFail("unexpected DDC input write"); throw RecoveryError.unsafe("no DDC writes in tests")
         }
     ) -> AppModel {
         let fallback = handoffStatus(.none, target: nil, source: nil)
@@ -4112,6 +4130,7 @@ final class DisplayHideAppTests: XCTestCase {
             showDisplay: showDisplay,
             recoverDisplaySession: recoverDisplaySession,
             checkDDCInput: checkDDCInput,
+            selectDDCInput: selectDDCInput,
             // Black out never draws over a real screen in tests.
             coverDisplays: coverDisplays,
             quiesceProtection: useManagedProtectionService ? nil : quiesceProtection,

@@ -267,6 +267,7 @@ final class AppModel: ObservableObject {
     private var sessionRecoveryInterrupted = false
     @Published private(set) var sessionRecoveryResult: String?
     private let checkDDCInput: (DisplayHideIdentity) throws -> DDCInputReading
+    private let selectDDCInput: (DisplayHideIdentity, UInt8) throws -> DDCInputSelection
     private let coverDisplays: @MainActor (Set<UInt32>) -> Set<UInt32>
     private let quiesceProtection: ProtectionQuiesce?
     private let protectionCoordinator: ProtectionCoordinator
@@ -336,6 +337,9 @@ final class AppModel: ObservableObject {
         },
         checkDDCInput: @escaping (DisplayHideIdentity) throws -> DDCInputReading = {
             try DisplayHideController().checkInputAvailability(target: $0)
+        },
+        selectDDCInput: @escaping (DisplayHideIdentity, UInt8) throws -> DDCInputSelection = {
+            try DisplayHideController().selectInput(target: $0, input: $1)
         },
         coverDisplays: (@MainActor (Set<UInt32>) -> Set<UInt32>)? = nil,
         quiesceProtection: ProtectionQuiesce? = nil,
@@ -416,6 +420,7 @@ final class AppModel: ObservableObject {
         self.showDisplay = showDisplay
         self.recoverDisplaySession = recoverDisplaySession
         self.checkDDCInput = checkDDCInput
+        self.selectDDCInput = selectDDCInput
         self.coverDisplays = coverDisplays ?? HiddenDisplayOverlays().cover
         self.quiesceProtection = quiesceProtection
         self.showMenuBarIcon = defaults.object(forKey: Self.showMenuBarIconKey) as? Bool ?? true
@@ -3471,6 +3476,27 @@ final class AppModel: ObservableObject {
             saved.returnInput = reading.current
             updated[targetUUID] = saved
             hidePreferences = updated
+        }
+    }
+
+    /// Fallback for a monitor left on the other computer's input: one DDC
+    /// write to the saved Mac input, offered only after a read found it there.
+    func switchToMacInput(for targetUUID: String) {
+        let key = targetUUID.lowercased()
+        guard !hideConfigurationFrozen(for: targetUUID), !hideOperation.isBusy,
+              case .onSwitchInput? = macInputDetections[key],
+              let configuration = hidePreferences[targetUUID], configuration.enabled,
+              let input = configuration.returnInput,
+              let display = matchingSavedDisplay(configuration.target),
+              isEligibleHideTarget(display), !isDisplayMirrored(display.id) else { return }
+        defer { onStatusChange?() }
+        do {
+            let selection = try selectDDCInput(coreIdentity(DisplayIdentitySnapshot(display)), input)
+            // An unverified write is expected when the monitor stops answering
+            // during its relink; Detect Again confirms later.
+            macInputDetections[key] = selection.outcome == .unverified ? nil : .detected(input)
+        } catch {
+            macInputDetections[key] = .unavailable(Self.sentence(error.localizedDescription))
         }
     }
 

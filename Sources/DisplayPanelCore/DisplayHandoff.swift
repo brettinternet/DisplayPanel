@@ -33,6 +33,9 @@ public struct DisplayInputOutcome: Codable, Equatable, Sendable {
         case alreadySelected
         case unverified
         case failed
+
+        /// A write may have been sent, so the monitor may relink.
+        var mayHaveSwitched: Bool { self == .verified || self == .unverified || self == .failed }
     }
 
     public let state: State
@@ -446,9 +449,10 @@ struct HandoffController {
         } ?? .notRequested
         do {
             var inputAttempted = false
-            let returnInput: ((RecoveryDisplay) throws -> Void)? = input == nil ? nil : { target in
+            let returnInput: ((RecoveryDisplay) throws -> Bool)? = input == nil ? nil : { target in
                 inputAttempted = true
                 inputOutcome = selectInput(input, target: target, returning: true)
+                return inputOutcome.state.mayHaveSwitched
             }
             _ = try mirror.unmirror(
                 store: store,
@@ -493,10 +497,14 @@ struct HandoffController {
 
     func back(selector: String, input: UInt8?, store: RecoveryStore) throws {
         var inputFailure: Error?
-        let returnInput: ((RecoveryDisplay) throws -> Void)? = input == nil ? nil : { target in
+        let returnInput: ((RecoveryDisplay) throws -> Bool)? = input == nil ? nil : { target in
             do {
-                try switchInput(input, target: target, returning: true) { report("Input recovery: \($0)") }
-            } catch { inputFailure = error }
+                return try switchInput(input, target: target, returning: true) { report("Input recovery: \($0)") }
+                    .mayHaveSwitched
+            } catch {
+                inputFailure = error
+                return true
+            }
         }
         let journal: RecoveryJournal
         do {
@@ -617,8 +625,9 @@ struct HandoffController {
         )
     }
 
+    @discardableResult
     private func switchInput(_ input: UInt8?, target: RecoveryDisplay, returning: Bool = false,
-                             recovery: (String) -> Void) throws {
+                             recovery: (String) -> Void) throws -> DisplayInputOutcome.State {
         let outcome = selectInput(input, target: target, returning: returning, willSelect: { command in
             recovery(command + ", or use the monitor's input button")
             report("To reverse input selection: \(command), or use the monitor's input button.")
@@ -638,6 +647,7 @@ struct HandoffController {
         case .failed:
             throw RecoveryError.unsafe("\(outcome.detail ?? "DDC selection failed")\(outcome.recoveryCommand.map { ". Input recovery: \($0), or use the monitor's input button" } ?? "")")
         }
+        return outcome.state
     }
 
     private func shellQuote(_ value: String) -> String {

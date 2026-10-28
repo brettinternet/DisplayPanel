@@ -292,6 +292,22 @@ public struct DisplayHideController {
         return reading
     }
 
+    /// Writes one input select to the exact saved display, then polls read-only.
+    public func selectInput(target: DisplayHideIdentity, input: UInt8) throws -> DDCInputSelection {
+        let operation = operationLock()
+        try operation.lock()
+        defer { operation.unlock() }
+        guard Self.matches(target, records: try mirror.records()) else {
+            throw RecoveryError.unsafe("Input switch refused because the saved target identity changed. Refresh Displays and reconnect the exact display.")
+        }
+        let session = try DDC.open(selector: target.uuid)
+        guard session.display.id == target.displayID,
+              session.display.uuid.caseInsensitiveCompare(target.uuid) == .orderedSame else {
+            throw RecoveryError.unsafe("Input switch resolved a different display identity. Refresh Displays; no input was changed.")
+        }
+        return try DDCInput.select(input, channel: session.channel, displayID: session.display.id, uuid: session.display.uuid)
+    }
+
     private static func matches(_ expected: DisplayHideIdentity, records: [DisplayRecord]) -> Bool {
         let matches = records.filter { $0.uuid?.caseInsensitiveCompare(expected.uuid) == .orderedSame }
         guard matches.count == 1, let record = matches.first else { return false }

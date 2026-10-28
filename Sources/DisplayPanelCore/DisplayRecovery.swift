@@ -6,14 +6,22 @@ import Darwin
 public enum RecoveryError: Error, CustomStringConvertible, LocalizedError {
     case unsafe(String)
     case modeUnavailable(displayUUID: String, mode: String)
-    public var description: String {
+    public var description: String { "display recovery: \(reason)" }
+    public var errorDescription: String? { description }
+
+    /// The message without the "display recovery:" prefix, for wrapping.
+    var reason: String {
         switch self {
-        case .unsafe(let reason): return "display recovery: \(reason)"
+        case .unsafe(let reason): return reason
         case .modeUnavailable(let uuid, let mode):
-            return "display recovery: original mode unavailable for \(uuid): \(mode). Switch this monitor to its Mac input, then retry Show. The journal is retained."
+            return "original mode unavailable for \(uuid): \(mode). Switch this monitor to its Mac input, then retry Show. The journal is retained."
         }
     }
-    public var errorDescription: String? { description }
+
+    /// Wrap any error as .unsafe without repeating the prefix.
+    static func reason(of error: Error) -> String {
+        (error as? RecoveryError)?.reason ?? String(describing: error)
+    }
 }
 
 public struct RecoveryMode: Codable, Equatable {

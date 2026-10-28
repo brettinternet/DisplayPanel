@@ -702,7 +702,7 @@ struct MirrorController {
 
     func unmirror(store: RecoveryStore, selector: String? = nil, expectedID: UUID? = nil,
                   noOpWhenAlreadyResolved: Bool = false,
-                  returnInputBeforeRestore: ((RecoveryDisplay) throws -> Void)? = nil) throws -> RecoveryJournal {
+                  returnInputBeforeRestore: ((RecoveryDisplay) throws -> Bool)? = nil) throws -> RecoveryJournal {
         do {
             let operation = operationLock()
             try operation.lock()
@@ -770,7 +770,7 @@ struct MirrorController {
 
     private func unmirrorSession(_ journal: inout RecoveryJournal, selector: String?, expectedID: UUID?,
                                  noOpWhenAlreadyResolved: Bool, store: RecoveryStore,
-                                 returnInputBeforeRestore: ((RecoveryDisplay) throws -> Void)?) throws -> RecoveryJournal {
+                                 returnInputBeforeRestore: ((RecoveryDisplay) throws -> Bool)?) throws -> RecoveryJournal {
         guard var session = journal.publicMirrorSession else {
             throw RecoveryError.unsafe("missing public-mirror session")
         }
@@ -910,7 +910,7 @@ struct MirrorController {
         } catch {
             markRemovalNeedsAttention(&journal, removalID: selected.id, reason: String(describing: error))
             try? store.save(journal)
-            throw RecoveryError.unsafe(String(describing: error))
+            throw RecoveryError.unsafe(RecoveryError.reason(of: error))
         }
     }
 
@@ -919,7 +919,7 @@ struct MirrorController {
     /// remain held across the one input attempt and all read-only observations.
     private func prepareShow(_ journal: RecoveryJournal, baseline: RecoverySnapshot,
                              target: RecoveryDisplay, source: RecoveryDisplay, store: RecoveryStore,
-                             returnInputBeforeRestore: ((RecoveryDisplay) throws -> Void)?) throws -> RecoverySnapshot {
+                             returnInputBeforeRestore: ((RecoveryDisplay) throws -> Bool)?) throws -> RecoverySnapshot {
         let current = try engine.capture()
         try baseline.validateRestoration(to: current)
         try validateShowAvailability(target: target, source: source)
@@ -936,13 +936,22 @@ struct MirrorController {
         guard Self.sameStoredJournal(journal, try store.load()) else {
             throw RecoveryError.unsafe("journal changed before input return; inspect recovery status")
         }
-        try returnInputBeforeRestore(target)
+        let switched = try returnInputBeforeRestore(target)
 
-        // At most five seconds, with two matching ready observations. Input
-        // return can reconnect the target and reinstate *both* mirrors; never
-        // restore from the pre-input topology or consider mirror return a Show.
+        // Input return can reconnect the target and reinstate *both* mirrors;
+        // never restore from the pre-input topology or consider mirror return
+        // a Show. An unchanged input settles on two matching ready samples
+        // within five seconds. A switched input makes the monitor relink some
+        // seconds later (Auto Select off), so within 15 seconds it also needs
+        // relink evidence (target unready or topology changed) or five seconds
+        // of continuous ready stability.
+        let preInputIdentity = current.stableTopologyIdentity()
+        let lastAttempt = switched ? 74 : 25
+        let quietMatches = 25
+        var relinked = !switched
         var previous: String?
-        for attempt in 0..<26 {
+        var matches = 0
+        for attempt in 0...lastAttempt {
             guard Self.sameStoredJournal(journal, try store.load()) else {
                 throw RecoveryError.unsafe("journal changed during input return; inspect recovery status")
             }
@@ -952,19 +961,23 @@ struct MirrorController {
                 try validateShowAvailability(target: target, source: source)
                 try preflightModes(baseline)
                 let identity = observed.stableTopologyIdentity()
-                if let identity, identity == previous {
+                if identity != preInputIdentity { relinked = true }
+                matches = identity != nil && identity == previous ? matches + 1 : 0
+                previous = identity
+                if matches > 0, relinked || matches >= quietMatches {
                     guard Self.sameStoredJournal(journal, try store.load()) else {
                         throw RecoveryError.unsafe("journal changed during input return; inspect recovery status")
                     }
                     return observed
                 }
-                previous = identity
-                if attempt == 25 {
+                if attempt == lastAttempt {
                     throw RecoveryError.unsafe("display topology did not settle after input return; retry Show when stable; journal retained")
                 }
             } catch {
+                relinked = true
                 previous = nil
-                if attempt == 25 { throw error }
+                matches = 0
+                if attempt == lastAttempt { throw error }
             }
             engine.convergencePause()
         }
@@ -1179,7 +1192,7 @@ struct MirrorController {
 
     private func fallback(_ error: Error, store: RecoveryStore, selector: String? = nil) -> RecoveryError {
         let path = "'" + store.url.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        let failure = String(describing: error)
+        let failure = RecoveryError.reason(of: error)
         let session = try? store.load().publicMirrorSession
         let removals = session?.removals ?? []
         let activeCount = MirrorSessionTopology.activeRemovals(removals).count
