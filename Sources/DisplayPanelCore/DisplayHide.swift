@@ -464,7 +464,12 @@ public struct DisplayHideController {
         do { try session.baseline.validateRestoration(to: current); restorationFailure = nil }
         catch { restorationFailure = error.localizedDescription }
         let modeFailure: String?
-        do { try mirror.preflightModes(session.baseline); modeFailure = nil }
+        do {
+            try mirror.preflightModes(MirrorSessionTopology.showModeBaseline(
+                session.baseline, removals: session.removals, showing: nil, current: current
+            ))
+            modeFailure = nil
+        }
         catch { modeFailure = error.localizedDescription }
         let removals = session.removals.map { removal -> DisplayHideRemovalSummary in
             let savedTarget = session.baseline.displays.first { $0.uuid == removal.targetUUID }

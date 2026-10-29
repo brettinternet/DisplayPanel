@@ -221,6 +221,22 @@ enum MirrorSessionTopology {
         return showSurvivorsUnchanged(baseline: baseline, targetUUID: removal.targetUUID, before: before, current: current)
     }
 
+    /// Saved modes a Show needs. A target still mirrored by another removal
+    /// keeps its follower mode until its own Show; its monitor may be on another
+    /// computer's input, offering fewer modes (for example 60 Hz, not 240 Hz).
+    static func showModeBaseline(_ baseline: RecoverySnapshot, removals: [PublicMirrorRemoval],
+                                 showing targetUUID: String?, current: RecoverySnapshot) -> RecoverySnapshot {
+        let followers = Set(activeRemovals(removals).filter { removal in
+            removal.targetUUID != targetUUID && current.displays.contains {
+                $0.uuid == removal.targetUUID && !$0.active &&
+                    $0.mirrorUUID?.caseInsensitiveCompare(removal.sourceUUID) == .orderedSame
+            }
+        }.map(\.targetUUID))
+        return RecoverySnapshot(bootSession: baseline.bootSession, osBuild: baseline.osBuild, userID: baseline.userID,
+                                displays: baseline.displays.filter { !followers.contains($0.uuid) },
+                                hostModel: baseline.hostModel)
+    }
+
     /// The final *physical* Show restores the full baseline even if a previous
     /// Show cleared its mirror but retained unresolved layout recovery. Every
     /// other display must already be separate; never replay a sibling mirror.
@@ -923,8 +939,12 @@ struct MirrorController {
         let current = try engine.capture()
         try baseline.validateRestoration(to: current)
         try validateShowAvailability(target: target, source: source)
+        let removals = journal.publicMirrorSession?.removals ?? []
+        func showModes(_ observed: RecoverySnapshot) -> RecoverySnapshot {
+            MirrorSessionTopology.showModeBaseline(baseline, removals: removals, showing: target.uuid, current: observed)
+        }
         do {
-            try preflightModes(baseline)
+            try preflightModes(showModes(current))
         } catch let error as RecoveryError {
             // Only the selected monitor's missing mode can be addressed by
             // this input return. Never switch another removal's input.
@@ -959,7 +979,7 @@ struct MirrorController {
                 let observed = try engine.capture()
                 try baseline.validateRestoration(to: observed)
                 try validateShowAvailability(target: target, source: source)
-                try preflightModes(baseline)
+                try preflightModes(showModes(observed))
                 let identity = observed.stableTopologyIdentity()
                 if identity != preInputIdentity { relinked = true }
                 matches = identity != nil && identity == previous ? matches + 1 : 0

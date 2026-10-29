@@ -78,8 +78,9 @@ If the original layout came back exactly, it mirrors the hidden displays again.
 For a multi-display journal with layout drift, it reapplies the captured mirrors
 and saved visible-display origins/main together in one session transaction.
 It never switches inputs on wake. Follower modes are negotiated by mirroring;
-a missing saved follower mode does not prevent re-hide, but still blocks Show
-until that exact mode returns. The original layout and modes remain journaled.
+a hidden display missing its saved mode stays **Hidden**, not **Needs recovery**,
+and does not block another display's Show. Only its own Show needs that exact
+mode back. The original layout and modes remain journaled.
 
 Changed identities, unrelated mirrors, changed visible-display modes, interrupted
 Show operations or failed verification remain in recovery. There is no write

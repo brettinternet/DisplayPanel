@@ -67,6 +67,63 @@ final class DisplayHideTests: XCTestCase {
                       "session-level guidance inspects the journal instead of guessing a target")
     }
 
+    func testHiddenFollowerOnAnotherInputStaysHiddenAndDoesNotBlockSiblingShow() throws {
+        let baseline = topology.snapshot
+        let bothHidden = try snapshot { displays in
+            for index in [1, 2] {
+                displays[index]["mirrorUUID"] = self.sourceUUID
+                displays[index]["active"] = false
+            }
+        }
+        var journal = RecoveryJournal(snapshot: baseline, publicMirrorSession: PublicMirrorSession(
+            baseline: baseline, removals: [
+                PublicMirrorRemoval(target: baseline.displays[1], source: baseline.displays[0],
+                                    beforeOperation: baseline, state: .mirrored),
+                PublicMirrorRemoval(target: baseline.displays[2], source: baseline.displays[0],
+                                    beforeOperation: baseline, state: .mirrored)
+            ]))
+        journal.state = .mirrored
+        try save(journal)
+        topology.snapshot = bothHidden
+        var restores = 0
+        // The target's monitor is on another computer's input: its saved mode
+        // is not offered while it follows the mirror.
+        var mirror = MirrorController(
+            records: { self.topology.records }, operationLock: { self.operationStore },
+            engine: RecoveryEngine(capture: { self.topology.snapshot }, apply: { _ in
+                XCTFail("a partial Show restores only its target")
+            }, convergencePause: {}),
+            preflightModes: { saved in
+                if let missing = saved.displays.first(where: { $0.uuid == self.targetUUID }) {
+                    throw RecoveryError.modeUnavailable(displayUUID: missing.uuid, mode: missing.mode.description)
+                }
+            })
+        mirror.restoreTarget = { saved, uuid, revalidate, _ in
+            try revalidate()
+            restores += 1
+            self.topology.snapshot = RecoverySnapshot(bootSession: saved.bootSession, osBuild: saved.osBuild,
+                userID: saved.userID, displays: self.topology.snapshot.displays.map {
+                    $0.uuid == uuid ? saved.displays.first { $0.uuid == uuid }! : $0
+                })
+        }
+        let backend = DisplayHideController(store: store, mirror: mirror, operationLock: { self.operationStore })
+
+        let inspected = try backend.inspect()
+        XCTAssertTrue(inspected.removals.allSatisfy { $0.canShow && $0.topologyVerified })
+        XCTAssertTrue(inspected.observations.filter(\.isJournalTarget).allSatisfy { $0.state == .hiddenByDisplayPanel })
+        XCTAssertEqual(DisplayHandoff.handoffStatus(from: inspected).state, .hidden)
+
+        _ = try backend.show(expectedJournalID: journal.id.uuidString, targetUUID: otherUUID)
+        XCTAssertEqual(restores, 1)
+        XCTAssertEqual(try backend.inspect().removals.filter(\.isUnresolved).map(\.target.uuid), [targetUUID])
+
+        XCTAssertThrowsError(try backend.show(expectedJournalID: journal.id.uuidString, targetUUID: targetUUID)) {
+            XCTAssertTrue($0.localizedDescription.contains("original mode unavailable"), "\($0)")
+        }
+        XCTAssertEqual(restores, 1, "its own Show still requires the exact saved mode")
+        XCTAssertFalse(try store.load().state.resolved)
+    }
+
     func testStableTopologyIdentityIgnoresFreshCaptureAndDiagnosticFields() throws {
         let saved = try timestampedSnapshot(Date(timeIntervalSince1970: 1_700_000_000))
         let rawObserved = try timestampedSnapshot(Date(timeIntervalSince1970: 1_800_000_000))
