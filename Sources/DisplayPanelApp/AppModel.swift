@@ -4,6 +4,7 @@ import DisplayPanelCore
 import OSLog
 
 private let inputReturnLogger = Logger(subsystem: "com.brettinternet.displaypanel", category: "display-reconfiguration")
+private let displayHideLogger = Logger(subsystem: "com.brettinternet.displaypanel", category: "display-hide")
 
 struct AppNotice: Identifiable, Equatable {
     let id = UUID()
@@ -6346,6 +6347,8 @@ final class AppModel: ObservableObject {
             automationStopUnconfirmed: automationStopUnconfirmed
         )
         displayResults[targetUUID.lowercased()] = result
+        // Notice level persists, so a failed Show stays diagnosable after info logs age out.
+        displayHideLogger.notice("\(action == .hide ? "hide" : "show", privacy: .public) target=\(targetUUID, privacy: .public) succeeded=\(succeeded) message=\(message, privacy: .public) input=\(line?.text ?? "-", privacy: .public)")
         lastHideOrShowFinished = .now
         onStatusChange?()
         completion?(result)
@@ -6367,6 +6370,7 @@ final class AppModel: ObservableObject {
             inputOutcome: nil,
             inputNeedsAttention: false
         )
+        displayHideLogger.notice("\(action == .hide ? "hide" : "show", privacy: .public) target=\(targetUUID, privacy: .public) refused=\(result.message, privacy: .public)")
         if case .actionInProgress? = error as? DisplayHideError {
             completion?(result)
             return
