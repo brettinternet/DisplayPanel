@@ -1,5 +1,8 @@
 import Foundation
 import CoreGraphics
+import OSLog
+
+private let showSettleLogger = Logger(subsystem: "com.brettinternet.displaypanel", category: "display-hide")
 
 /// Public mirroring only. A successful mirror is NOT a signal disconnect and
 /// does not qualify firmware input switching or private display recovery.
@@ -971,6 +974,16 @@ struct MirrorController {
         var relinked = !switched
         var previous: String?
         var matches = 0
+        // Persisted per-attempt outcome changes, e.g. "0:ready#1a2b3c4d | 9:<error reason>".
+        var trace: [String] = []
+        func note(_ attempt: Int, _ outcome: String) {
+            if trace.last.map({ $0.drop(while: { $0 != ":" }).dropFirst() == outcome }) != true {
+                trace.append("\(attempt):\(outcome)")
+            }
+        }
+        defer {
+            showSettleLogger.notice("show-settle target=\(target.uuid, privacy: .public) switched=\(switched) relinked=\(relinked) pre=\(preInputIdentity?.prefix(8) ?? "none", privacy: .public) trace=\(trace.joined(separator: " | "), privacy: .public)")
+        }
         for attempt in 0...lastAttempt {
             guard Self.sameStoredJournal(journal, try store.load()) else {
                 throw RecoveryError.unsafe("journal changed during input return; inspect recovery status")
@@ -982,6 +995,7 @@ struct MirrorController {
                 try preflightModes(showModes(observed))
                 let identity = observed.stableTopologyIdentity()
                 if identity != preInputIdentity { relinked = true }
+                note(attempt, "ready#\(identity?.prefix(8) ?? "none")")
                 matches = identity != nil && identity == previous ? matches + 1 : 0
                 previous = identity
                 if matches > 0, relinked || matches >= quietMatches {
@@ -994,6 +1008,7 @@ struct MirrorController {
                     throw RecoveryError.unsafe("display topology did not settle after input return; retry Show when stable; journal retained")
                 }
             } catch {
+                note(attempt, RecoveryError.reason(of: error))
                 relinked = true
                 previous = nil
                 matches = 0
