@@ -547,7 +547,7 @@ final class CLIParserTests: XCTestCase {
         XCTAssertEqual(try CLIParser.parse(["help", "blackout"]), .help(command: "blackout"))
         XCTAssertEqual(try CLIParser.parse(["blackout", "-h"]), .help(command: "blackout"))
         XCTAssertEqual(try CLIParser.parse(["--version"]), .version)
-        XCTAssertEqual(CLIHelp.version, "dp 0.9.0")
+        XCTAssertEqual(CLIHelp.version, "dp 0.9.1")
         XCTAssertTrue(CLIHelp.text(for: "app").contains("snooze --for <duration>"))
         XCTAssertTrue(CLIHelp.text(for: "app").contains("toggle-hide --display <UUID> [--style black-out]"))
         XCTAssertTrue(CLIHelp.text(for: "app").contains(AppControlCommand.blackoutNowMigrationGuidance))

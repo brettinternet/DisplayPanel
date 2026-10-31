@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.1
+
+- Wait for monitor input switches to settle before Show restores the desktop.
+- Keep off-input hidden displays marked Hidden instead of incorrectly reporting Needs recovery.
+- Offer Switch to Mac input in Settings when a monitor is on its configured alternate input.
+- Remove repeated recovery error prefixes and persist Hide/Show outcomes and input-return traces for troubleshooting.
+
 ## 0.9.0
 
 - Rename PanelCtl to DisplayPanel and the `panelctl` CLI to `dp`. The bundle ID, Application Support folder, defaults domain and release asset names change too; re-grant privacy permissions after upgrading.
