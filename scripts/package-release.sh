@@ -44,7 +44,7 @@ if [[ "$source_version" != "$marketing_version" ]]; then
 fi
 output_dir=$(mkdir -p "$output_dir" && cd "$output_dir" && pwd)
 cli_archive="dp-${tag}-macos-universal.zip"
-app_archive="DisplayPanel-${tag}.app.zip"
+app_archive="DisplayPanel.app.zip"
 for output in "$output_dir/$cli_archive" "$output_dir/$cli_archive.sha256" \
 	"$output_dir/$app_archive" "$output_dir/$app_archive.sha256"; do
 	if [[ -e "$output" ]]; then
