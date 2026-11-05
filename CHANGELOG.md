@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.2
+
+- Clear a failed wake recovery journal when its exact hidden layout returns, instead of leaving the display flagged for recovery.
+- Publish the app archive as `DisplayPanel.app.zip` so its download URL stays stable across releases.
+
 ## 0.9.1
 
 - Wait for monitor input switches to settle before Show restores the desktop.
