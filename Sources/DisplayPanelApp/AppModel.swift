@@ -267,6 +267,8 @@ final class AppModel: ObservableObject {
     private var sessionRecoveryInProgress = false
     private var sessionRecoveryInterrupted = false
     @Published private(set) var sessionRecoveryResult: String?
+    /// The recovery problem Check Again last found unchanged, and when.
+    @Published private var unchangedRecoveryCheck: (problem: String, at: Date)?
     private let checkDDCInput: (DisplayHideIdentity) throws -> DDCInputReading
     private let selectDDCInput: (DisplayHideIdentity, UInt8) throws -> DDCInputSelection
     private let coverDisplays: @MainActor (Set<UInt32>) -> Set<UInt32>
@@ -5712,6 +5714,25 @@ final class AppModel: ObservableObject {
         reconcileProtection(restartWatcher: restartWatcher)
         runtimeState = aggregateRuntimeState
         onStatusChange?()
+    }
+
+    /// Rechecks displays for a recovery fixed elsewhere, and says so when nothing changed.
+    func checkRecoveryAgain() {
+        let before = recoveryCheckProblem
+        refreshDisplays()
+        let after = recoveryCheckProblem
+        unchangedRecoveryCheck = after.flatMap { $0 == before ? ($0, Date.now) : nil }
+    }
+
+    /// The last Check Again result, while the problem it found remains.
+    var recoveryCheckNote: String? {
+        guard let check = unchangedRecoveryCheck, check.problem == recoveryCheckProblem else { return nil }
+        return "No change as of \(check.at.formatted(date: .omitted, time: .standard))."
+    }
+
+    private var recoveryCheckProblem: String? {
+        let problems = [displayRecoveryProblem, handoffStatus?.sessionRecovery == nil ? nil : sessionRecoveryBlocker].compactMap { $0 }
+        return problems.isEmpty ? nil : problems.joined(separator: "\n")
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {

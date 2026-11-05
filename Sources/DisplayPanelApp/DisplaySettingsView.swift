@@ -122,6 +122,9 @@ struct DisplaySettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if tile.status == .needsRecovery, let note = model.recoveryCheckNote {
+                resultLabel(note, attention: true)
+            }
             if model.pageRecoveryProblem == nil, isJournalTarget(tile), let status = model.handoffStatus {
                 recoveryDetails(status, targetUUID: tile.uuid)
             }
@@ -180,7 +183,7 @@ struct DisplaySettingsView: View {
             .accessibilityLabel("\(title) \(tile.name)")
         } else if tile.status == .needsRecovery {
             // Display changes are checked automatically; this is for fixes made elsewhere.
-            Button("Check Again") { model.refreshDisplays() }
+            Button("Check Again") { model.checkRecoveryAgain() }
                 .accessibilityLabel("Check \(tile.name) again")
         }
     }
@@ -546,7 +549,10 @@ struct DisplaySettingsView: View {
             .disabled(!recovery.canRecover || model.sessionRecoveryBlocker != nil)
             if let blocker = model.sessionRecoveryBlocker {
                 Text(blocker).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                Button("Check Again") { model.refreshDisplays() }
+                Button("Check Again") { model.checkRecoveryAgain() }
+                if let note = model.recoveryCheckNote {
+                    resultLabel(note, attention: true)
+                }
             }
         } header: {
             Text("Recover previous session")
@@ -564,7 +570,10 @@ struct DisplaySettingsView: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
             }
-            Button("Check Again") { model.refreshDisplays() }
+            Button("Check Again") { model.checkRecoveryAgain() }
+            if let note = model.recoveryCheckNote {
+                resultLabel(note, attention: true)
+            }
             if let status = model.handoffStatus {
                 recoveryDetails(status)
             }
@@ -582,7 +591,7 @@ struct DisplaySettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Button("Open Displays Settings") { openDisplaysSettings() }
-                    Button("Check Again") { model.refreshDisplays() }
+                    Button("Check Again") { model.checkRecoveryAgain() }
                 }
             }
             CommandCopyRow("Journal", command: status.journalPath)

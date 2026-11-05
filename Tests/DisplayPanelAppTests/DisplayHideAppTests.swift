@@ -1766,6 +1766,17 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertFalse(hideOther.isEnabled, "a Hide that can't run is dimmed")
         XCTAssertEqual(hideOther.toolTip, other.actionBlocker)
         XCTAssertFalse(items.contains { $0.title == "Hide Target" })
+        let target = try XCTUnwrap(items.first { $0.title == "Target" })
+        XCTAssertTrue(target.isEnabled, "a display that needs recovery is never a dimmed no-op")
+        XCTAssertEqual(target.action, #selector(AppDelegate.reviewDisplayRecovery(_:)))
+        XCTAssertEqual(target.representedObject as? String, Self.targetUUID, "opens Settings on that display")
+        XCTAssertFalse(items.contains { $0.title == "Review Display Recovery…" }, "the display row covers the problem")
+
+        model.checkRecoveryAgain()
+        XCTAssertNotNil(model.recoveryCheckNote, "Check Again says when nothing changed")
+        box.value = handoffStatus(.recovery, target: displays[1], source: displays[0], journalID: "fake-journal", canShow: false, reason: "a different problem")
+        model.refreshDisplays()
+        XCTAssertNil(model.recoveryCheckNote, "an old check result doesn't describe a new problem")
     }
 
     func testBlackOutAndRemovalStayOffEachOthersDisplays() throws {
@@ -2705,9 +2716,16 @@ final class DisplayHideAppTests: XCTestCase {
         let tile = try XCTUnwrap(model.displayTiles.first { $0.id == Self.targetKey })
         XCTAssertEqual(tile.status, .needsRecovery)
         XCTAssertEqual(tile.action, .show)
+        XCTAssertNil(tile.actionBlocker)
+        let delegate = AppDelegate()
+        delegate.model = model
+        let restore = try XCTUnwrap(delegate.makeMenu().items.first { $0.title == "Restore Target" })
+        XCTAssertTrue(restore.isEnabled)
+        XCTAssertEqual(restore.representedObject as? String, Self.targetUUID)
         XCTAssertNil(try model.makeShowRequest(targetUUID: Self.targetUUID).returnInput)
         let result = try await showAndWait(model)
         XCTAssertFalse(result.succeeded)
+        XCTAssertEqual(model.displayResults[Self.targetKey], result, "Settings shows the refused Restore's reason")
         XCTAssertEqual(showCalls, 1)
         XCTAssertEqual(model.handoffStatus?.state, .recovery)
     }

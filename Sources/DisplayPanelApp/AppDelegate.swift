@@ -455,7 +455,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if model.runningDisplayAction != nil {
             let busy = model.displayActionBusyMessage
             for menuItem in menu.items where menuItem.isEnabled &&
-                menuItem.action != #selector(openSettings) && menuItem.action != #selector(reviewDisplayRecovery) {
+                menuItem.action != #selector(openSettings) && menuItem.action != #selector(reviewDisplayRecovery(_:)) {
                 menuItem.isEnabled = false
                 menuItem.toolTip = busy
                 for child in menuItem.submenu?.items ?? [] where child.isEnabled {
@@ -468,15 +468,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Each display with its Hide or Show and its state. An action that can't
-    /// run is dimmed, and its tooltip says why.
+    /// run is dimmed, and its tooltip says why. A display that needs recovery
+    /// is never dimmed: it restores, or else opens in Settings.
     private func addDisplayMenuSection(to menu: NSMenu) {
         var items: [NSMenuItem] = []
-        if model.displayRecoveryProblem != nil {
-            items.append(item("Review Display Recovery…", action: #selector(reviewDisplayRecovery)))
+        if model.pageRecoveryProblem != nil {
+            items.append(item("Review Display Recovery…", action: #selector(reviewDisplayRecovery(_:))))
         }
         for tile in model.displayTiles {
             let display: NSMenuItem
             switch tile.action {
+            case .show? where tile.status == .needsRecovery && tile.actionBlocker == nil:
+                display = item("Restore \(tile.name)", action: #selector(showDisplayFromMenu(_:)))
+            case _ where tile.status == .needsRecovery:
+                display = item(tile.name, action: #selector(reviewDisplayRecovery(_:)))
             case .hide?:
                 display = item("Hide \(tile.name)", action: #selector(hideDisplayFromMenu(_:)))
             case .show?:
@@ -485,7 +490,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 display = disabledItem(tile.name)
             }
             display.representedObject = tile.uuid
-            if tile.action != nil {
+            if tile.status == .needsRecovery {
+                display.toolTip = tile.actionBlocker
+            } else if tile.action != nil {
                 display.isEnabled = tile.actionBlocker == nil
                 display.toolTip = tile.actionBlocker
             }
@@ -636,8 +643,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         showSettings(displayUUID: displayUUID)
     }
 
-    @objc private func reviewDisplayRecovery() {
-        if let uuid = model.handoffStatus?.target?.uuid {
+    /// Opens the display a recovery item names, else the journal's display.
+    @objc func reviewDisplayRecovery(_ sender: NSMenuItem) {
+        if let uuid = sender.representedObject as? String ?? model.handoffStatus?.target?.uuid {
             showSettings(displayUUID: uuid)
         } else {
             showSettings(tab: .displays)
