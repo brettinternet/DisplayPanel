@@ -3468,7 +3468,7 @@ final class DisplayHideAppTests: XCTestCase {
         delegate.model = model
         let menu = delegate.makeMenu()
         let titles = menu.items.map(\.title)
-        XCTAssertTrue(titles.contains("Review Display Recovery…"))
+        XCTAssertFalse(titles.contains("Review Display Recovery…"), "the display row covers the problem")
         XCTAssertFalse(titles.contains("Show Target"), "Show needs a restorable journal")
 
         XCTAssertFalse(delegate.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false))
@@ -3481,7 +3481,7 @@ final class DisplayHideAppTests: XCTestCase {
 
         controller.selectDisplay(uuid: Self.mainUUID)
         controller.select(.automation)
-        let review = try XCTUnwrap(menu.items.firstIndex { $0.title == "Review Display Recovery…" })
+        let review = try XCTUnwrap(menu.items.firstIndex { $0.title == "Target" })
         menu.performActionForItem(at: review)
         XCTAssertEqual(controller.selectedTab, .displays)
         XCTAssertEqual(controller.selectedDisplayID, Self.targetKey, "review selects the affected display")
