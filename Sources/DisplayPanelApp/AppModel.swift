@@ -2941,6 +2941,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A hidden display that came back connected but unmirrored and without a
+    /// desktop is showing another input; only the monitor's own menu brings it back.
+    func offInputRecoveryNote(for tile: DisplayTile) -> String? {
+        guard tile.status == .needsRecovery, let display = tile.display,
+              display.online, !display.active, !display.asleep,
+              !isDisplayMirrored(display.id) else { return nil }
+        return "On another input. Switch it to this Mac from the monitor’s own menu."
+    }
+
     /// A recovery problem that no display shows, such as an inspection failure
     /// or a journal without a target display; Displays shows it above the displays.
     var pageRecoveryProblem: String? {

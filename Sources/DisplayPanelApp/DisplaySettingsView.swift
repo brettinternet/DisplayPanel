@@ -158,7 +158,7 @@ struct DisplaySettingsView: View {
         case .unavailable:
             return "Disconnected"
         case .needsRecovery:
-            return model.displayRecoveryProblem ?? "Needs recovery."
+            return model.offInputRecoveryNote(for: tile) ?? model.displayRecoveryProblem ?? "Needs recovery."
         }
     }
 

@@ -2722,7 +2722,9 @@ final class DisplayHideAppTests: XCTestCase {
                                    name: "Offline", main: false, online: false)
         let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
         var connected = [right, offline, asleep, main, left]
-        let model = makeModel(defaults: defaults, displays: [], displayProvider: { connected }, status: { box.value })
+        var mirroredIDs: Set<UInt32> = []
+        let model = makeModel(defaults: defaults, displays: [], displayProvider: { connected }, status: { box.value },
+                              isDisplayMirrored: { mirroredIDs.contains($0) })
 
         // Left to right, numbering identical names as macOS does.
         var tiles = model.displayTiles
@@ -2752,6 +2754,19 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(tiles.last?.status, .needsRecovery)
         XCTAssertNil(tiles.last?.display)
         XCTAssertEqual(model.displayRecoveryProblem, "Reconnect Dell.")
+        XCTAssertNil(model.offInputRecoveryNote(for: try XCTUnwrap(tiles.last)), "a missing display isn't on another input")
+
+        // Back online without a desktop or a mirror, it is showing another input.
+        let offInput = Self.display(index: 2, id: 202, uuid: Self.targetUUID, name: "Dell", main: false, active: false)
+        connected = [offInput, asleep, main, left]
+        model.refreshDisplays()
+        let offInputTile = try XCTUnwrap(model.displayTiles.first { $0.id == Self.targetKey })
+        XCTAssertEqual(offInputTile.status, .needsRecovery)
+        XCTAssertNotNil(model.offInputRecoveryNote(for: offInputTile))
+        mirroredIDs = [offInput.id]
+        model.refreshDisplays()
+        XCTAssertNil(model.offInputRecoveryNote(for: try XCTUnwrap(model.displayTiles.first { $0.id == Self.targetKey })),
+                     "a mirror follower is still on this Mac's input")
 
         // Inspection failures are problems even without a journal.
         box.value = handoffStatus(.none, target: nil, source: nil, inspectionFailure: "unreadable journal")
