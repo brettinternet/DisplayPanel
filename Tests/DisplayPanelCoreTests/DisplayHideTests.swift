@@ -321,6 +321,18 @@ final class DisplayHideTests: XCTestCase {
                 XCTAssertEqual(retained.state, .needsAttention)
                 XCTAssertEqual(try core.inspect().journal?.state, "needsAttention",
                                "inspection cannot replace the stronger wake postcondition with mirror-only verification")
+                if scenario == "wrong-visible-origin" {
+                    // e.g. an off-input monitor returns into its mirror after wake.
+                    topology.snapshot = try snapshot { displays in
+                        for index in displays.indices
+                        where staged.contains((displays[index]["id"] as! NSNumber).uint32Value) {
+                            displays[index]["mirrorUUID"] = self.sourceUUID
+                            displays[index]["active"] = false
+                        }
+                    }
+                    XCTAssertTrue(try core.inspect().removals.allSatisfy { $0.isUnresolved && $0.state == "mirrored" },
+                                  "the exact wake layout clears a failed wake transaction")
+                }
                 if scenario.hasPrefix("wrong-visible-") {
                     var interrupted = retained
                     interrupted.state = .captured

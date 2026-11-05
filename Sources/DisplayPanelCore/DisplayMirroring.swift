@@ -167,6 +167,27 @@ enum MirrorSessionTopology {
         return true
     }
 
+    /// Postcondition of a wake resume: matches() plus the exact visible main,
+    /// origins relative to it, and modes. Mirror-only matches() is weaker and
+    /// must not clear a failed wake transaction.
+    static func matchesWakeLayout(baseline: RecoverySnapshot, removals: [PublicMirrorRemoval],
+                                  current: RecoverySnapshot) -> Bool {
+        let active = activeRemovals(removals)
+        let targets = Set(active.map(\.targetUUID))
+        guard matches(baseline: baseline, removals: removals, current: current),
+              let savedMain = baseline.displays.first(where: \.main),
+              let mainUUID = targets.contains(savedMain.uuid)
+                ? active.first(where: { $0.targetUUID == savedMain.uuid })?.sourceUUID : savedMain.uuid,
+              let main = baseline.displays.first(where: { $0.uuid == mainUUID }),
+              current.displays.first(where: \.main)?.uuid == mainUUID else { return false }
+        return baseline.displays.filter { !targets.contains($0.uuid) && $0.active }.allSatisfy { saved in
+            current.displays.contains {
+                $0.id == saved.id && $0.mode == saved.mode &&
+                    Int64($0.x) == Int64(saved.x) - Int64(main.x) && Int64($0.y) == Int64(saved.y) - Int64(main.y)
+            }
+        }
+    }
+
     /// Postcondition of a Show that leaves other displays removed. With other
     /// displays still mirrored, the saved origin may not be a layout macOS
     /// accepts (recorded on 26A434: requested (3440,-4), placed at (3440,0)),
@@ -579,9 +600,7 @@ struct MirrorController {
         // A repeated/own-write notification is not another write. Mirror-only
         // verification is insufficient here: visible origins/main must match too.
         if journal.state == .mirrored,
-           MirrorSessionTopology.matches(baseline: session.baseline, removals: session.removals, current: before),
-           before.displays.first(where: \.main)?.uuid == mainUUID,
-           origins.allSatisfy({ id, x, y in before.displays.contains { $0.id == id && $0.x == x && $0.y == y } }) {
+           MirrorSessionTopology.matchesWakeLayout(baseline: session.baseline, removals: session.removals, current: before) {
             return journal
         }
         // Keep the original journal/baseline/removal IDs. Intent is durable
@@ -605,13 +624,10 @@ struct MirrorController {
                 }
             }
             try engine.converge {
-                let observed = try engine.capture()
-                guard MirrorSessionTopology.matches(baseline: session.baseline, removals: session.removals, current: observed),
-                      observed.displays.first(where: \.main)?.uuid == mainUUID,
-                      origins.allSatisfy({ id, x, y in
-                          observed.displays.contains { $0.id == id && $0.x == x && $0.y == y &&
-                              $0.mode == before.displays.first(where: { $0.id == id })?.mode }
-                      }) else { throw RecoveryError.unsafe("wake resume mirrors or visible layout did not verify") }
+                guard MirrorSessionTopology.matchesWakeLayout(baseline: session.baseline, removals: session.removals,
+                                                              current: try engine.capture()) else {
+                    throw RecoveryError.unsafe("wake resume mirrors or visible layout did not verify")
+                }
             }
             guard Self.sameStoredJournal(pending, try store.load()) else {
                 throw RecoveryError.unsafe("wake resume journal changed during verification")
@@ -1113,8 +1129,14 @@ struct MirrorController {
         }
         // A wake transaction also promises exact visible modes/origins. The
         // ordinary mirror predicate is weaker and must not erase its failed
-        // verification or an interrupted commit on the next inspection.
-        if journal.trigger == "wake-resume", journal.state != .mirrored, !journal.state.resolved { return }
+        // verification or an interrupted commit on the next inspection. A
+        // failed one clears only once its full wake layout is observed, e.g.
+        // after an off-input monitor returns into its mirror.
+        if journal.trigger == "wake-resume", journal.state != .mirrored, !journal.state.resolved,
+           !(journal.state == .needsAttention &&
+             MirrorSessionTopology.activeRemovals(session.removals).allSatisfy({ $0.restoreFrom == nil }) &&
+             MirrorSessionTopology.matchesWakeLayout(baseline: session.baseline, removals: session.removals,
+                                                     current: current)) { return }
         var changed = false
         if MirrorSessionTopology.matches(baseline: session.baseline, removals: session.removals, current: current) {
             for index in session.removals.indices where !session.removals[index].state.resolved {
