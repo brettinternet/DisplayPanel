@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.3
+
+- Give displays that need recovery a working click action instead of a dead menu item.
+- Open Settings when Show is blocked instead of dimming it.
+- Tell you to switch inputs by hand for off-input hidden monitors.
+
 ## 0.9.2
 
 - Clear a failed wake recovery journal when its exact hidden layout returns, instead of leaving the display flagged for recovery.
