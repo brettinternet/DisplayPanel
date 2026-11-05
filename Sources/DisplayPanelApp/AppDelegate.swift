@@ -467,9 +467,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return menu
     }
 
-    /// Each display with its Hide or Show and its state. An action that can't
-    /// run is dimmed, and its tooltip says why. A display that needs recovery
-    /// is never dimmed: it restores, or else opens in Settings.
+    /// Each display with its Hide or Show and its state. A Hide that can't run
+    /// is dimmed, and its tooltip says why. A display you can't get back is never
+    /// dimmed: a blocked Show or a display that needs recovery opens in Settings.
     private func addDisplayMenuSection(to menu: NSMenu) {
         var items: [NSMenuItem] = []
         if model.pageRecoveryProblem != nil {
@@ -480,7 +480,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             switch tile.action {
             case .show? where tile.status == .needsRecovery && tile.actionBlocker == nil:
                 display = item("Restore \(tile.name)", action: #selector(showDisplayFromMenu(_:)))
-            case _ where tile.status == .needsRecovery:
+            case _ where tile.status == .needsRecovery, .show? where tile.actionBlocker != nil:
                 display = item(tile.name, action: #selector(reviewDisplayRecovery(_:)))
             case .hide?:
                 display = item("Hide \(tile.name)", action: #selector(hideDisplayFromMenu(_:)))
@@ -490,11 +490,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 display = disabledItem(tile.name)
             }
             display.representedObject = tile.uuid
-            if tile.status == .needsRecovery {
-                display.toolTip = tile.actionBlocker
-            } else if tile.action != nil {
+            display.toolTip = tile.actionBlocker
+            if tile.action == .hide {
                 display.isEnabled = tile.actionBlocker == nil
-                display.toolTip = tile.actionBlocker
             }
             let enforcement = model.keepWindowsOffStatuses[tile.id]
             let subtitle = enforcement.map { "\(tile.status.label) · Keep windows \($0.label)" } ?? tile.status.label

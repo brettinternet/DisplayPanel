@@ -1779,6 +1779,27 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertNil(model.recoveryCheckNote, "an old check result doesn't describe a new problem")
     }
 
+    func testBlockedShowOpensSettingsInsteadOfDimming() throws {
+        let defaults = try makeDefaults()
+        let hidden = handoffStatus(.hidden, target: displays[1], source: displays[0], journalID: "fixture-journal", canShow: true)
+        // Automation never confirms it stopped, so Show stays blocked.
+        let model = makeModel(defaults: defaults, displays: displays, status: { hidden }, quiesceProtection: { _ in })
+        XCTAssertTrue(model.protectionQuiescencePending)
+        let tile = try XCTUnwrap(model.displayTiles.first { $0.id == Self.targetKey })
+        XCTAssertEqual(tile.status, .hidden)
+        XCTAssertEqual(tile.action, .show)
+        let blocker = try XCTUnwrap(tile.actionBlocker)
+        let delegate = AppDelegate()
+        delegate.model = model
+        let items = delegate.makeMenu().items
+        XCTAssertFalse(items.contains { $0.title == "Show Target" })
+        let target = try XCTUnwrap(items.first { $0.title == "Target" })
+        XCTAssertTrue(target.isEnabled, "a hidden display you can't show isn't a dimmed dead end")
+        XCTAssertEqual(target.action, #selector(AppDelegate.reviewDisplayRecovery(_:)))
+        XCTAssertEqual(target.representedObject as? String, Self.targetUUID)
+        XCTAssertEqual(target.toolTip, blocker)
+    }
+
     func testBlackOutAndRemovalStayOffEachOthersDisplays() throws {
         let defaults = try makeDefaults()
         let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
