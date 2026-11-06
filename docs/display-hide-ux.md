@@ -218,8 +218,10 @@ Desktop and input results are reported separately on the selected display:
 
 Show switches the monitor back to the Mac first, then restores and verifies the
 layout. A display coming online never triggers Show by itself. If a saved mode
-is missing, the message names it; switch the input manually if DDC is
-unavailable, then retry Show.
+is missing, the message names the monitor, which may be another display still
+on the other computer. If a Show couldn't switch a monitor back, its **This
+Mac's input** row in Displays reads it again and offers **Switch to _input_**;
+otherwise use the monitor's buttons, then retry Show.
 
 ## Scripting
 

@@ -1073,6 +1073,7 @@ final class DisplayHideAppTests: XCTestCase {
         let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
         var awayInputs: [UInt8?] = []
         var returnInputs: [UInt8?] = []
+        var monitorInput: UInt8 = 0x0F
         let model = makeModel(
             defaults: defaults,
             displays: displays,
@@ -1081,6 +1082,7 @@ final class DisplayHideAppTests: XCTestCase {
                 awayInputs.append(input)
                 ownReconfiguration()
                 box.value = hidden
+                monitorInput = input ?? monitorInput
                 return DisplayInputOutcome(
                     state: .verified, requestedInput: input, observedInput: input,
                     recoveryCommand: "dp ddc-input --display '\(Self.targetUUID)' --set 0x0F"
@@ -1099,7 +1101,7 @@ final class DisplayHideAppTests: XCTestCase {
                 )
             },
             checkDDCInput: { identity in
-                DDCInputReading(displayID: identity.displayID, uuid: identity.uuid, current: 0x0F)
+                DDCInputReading(displayID: identity.displayID, uuid: identity.uuid, current: monitorInput)
             }
         )
         model.setHideEnabled(true, for: displays[1])
@@ -1142,6 +1144,11 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertNil(model.notice)
         XCTAssertEqual(model.displayTiles.first { $0.id == Self.targetKey }?.status, .on)
         XCTAssertEqual(model.controlDisplayOutcome, .partial)
+        // The pre-Hide reading is stale: Settings must read again and offer the
+        // Mac input, or a monitor left on the other computer has no in-app return.
+        XCTAssertNil(model.macInputDetections[Self.targetKey])
+        model.detectMacInput(for: Self.targetUUID)
+        XCTAssertEqual(model.macInputDetections[Self.targetKey], .onSwitchInput(0x11))
 
         // A later recovery problem must not be hidden by acknowledging an old input result.
         box.value = handoffStatus(.recovery, target: displays[1], source: displays[0],

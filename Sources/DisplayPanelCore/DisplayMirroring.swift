@@ -967,7 +967,7 @@ struct MirrorController {
         } catch let error as RecoveryError {
             // Only the selected monitor's missing mode can be addressed by
             // this input return. Never switch another removal's input.
-            guard case .modeUnavailable(let uuid, _) = error,
+            guard case .modeUnavailable(let uuid, _, _) = error,
                   uuid.caseInsensitiveCompare(target.uuid) == .orderedSame,
                   returnInputBeforeRestore != nil else { throw error }
         }

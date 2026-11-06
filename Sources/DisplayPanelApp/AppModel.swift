@@ -5434,6 +5434,7 @@ final class AppModel: ObservableObject {
                                           context: String = "after waking") {
         guard let removal else { return }
         let key = removal.target.uuid.lowercased()
+        displayHideLogger.notice("rehide target=\(key, privacy: .public) context=\(context, privacy: .public) refused=\(reason, privacy: .public)")
         displayResults[key] = DisplayOperationResult(
             action: .hide, succeeded: false,
             message: "DisplayPanel didn’t re-hide this display \(context). \(reason) Fix the layout in System Settings → Displays, then inspect recovery.",
@@ -6382,6 +6383,12 @@ final class AppModel: ObservableObject {
             automationStopUnconfirmed: automationStopUnconfirmed
         )
         displayResults[targetUUID.lowercased()] = result
+        // A Show whose return input didn't verify may have left the monitor on the
+        // other computer. Forget the pre-Hide reading so Settings reads it again
+        // and offers Switch to the Mac input.
+        if action == .show, [.unverified, .failed].contains(input.state) {
+            macInputDetections[targetUUID.lowercased()] = nil
+        }
         // Notice level persists, so a failed Show stays diagnosable after info logs age out.
         displayHideLogger.notice("\(action == .hide ? "hide" : "show", privacy: .public) target=\(targetUUID, privacy: .public) succeeded=\(succeeded) message=\(message, privacy: .public) input=\(line?.text ?? "-", privacy: .public)")
         lastHideOrShowFinished = .now
