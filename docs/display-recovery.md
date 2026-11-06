@@ -17,7 +17,7 @@ Run these from your logged-in desktop session.
 | `recovery rehearse --timeout 5s` | No | Save, start the helper, verify at the deadline |
 | `recovery restore [--display UUID]` | **Yes** | Restore one removed display (or a saved layout), then verify |
 | `recovery guard --timeout 15s` | **Yes** | Save, then restore on deadline, exit or signal |
-| `recovery keep-shown --consent-recovery` | No | Archive a previous-boot public Hide journal and accept the current desktop |
+| `recovery keep-shown --consent-recovery` | No | Archive a previous-boot or renumbered public Hide journal and accept the current desktop |
 | `recovery hide-again --consent-recovery` | **Yes** | Archive the old journal and hide its targets using a fresh baseline; no input switching |
 
 ```text
@@ -133,7 +133,9 @@ turn off mirroring in System Settings → Displays.
 
 A reboot ends the old Hide session. Numeric display and mode IDs may now belong
 to different things, so DisplayPanel never restores or edits the old baseline to
-make its checks pass.
+make its checks pass. The same applies within one boot when macOS renumbers the
+captured displays, for example after a monitor returns from another input: Show
+refuses the stale IDs and the journal is offered for this recovery instead.
 
 When all captured monitors return as separate, awake displays with the same
 stable identities, DisplayPanel compares two matching observations. If the complete
@@ -143,7 +145,7 @@ journal and clears recovery **without writing any display settings**. Boot-local
 display and mode IDs need not match. Intent-preserving transition observations
 do not perform this cleanup. Relaunch never automatically hides displays again.
 
-Otherwise **Settings → Displays → Recover previous session** offers two outcomes
+Otherwise **Settings → Displays → Recover hidden displays** offers two outcomes
 directly from **Needs recovery**, with a confirmation covering every unresolved
 display in the old journal:
 

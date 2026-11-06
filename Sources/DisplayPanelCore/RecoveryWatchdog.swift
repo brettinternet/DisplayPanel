@@ -20,7 +20,7 @@ public enum DisplayRecovery {
             let controller = DisplayHideController(store: store, mirror: mirror,
                                                    operationLock: { RecoveryStore.operationLock() })
             guard let recovery = try controller.inspect(preservingMirrorIntent: true).sessionRecovery else {
-                throw RecoveryError.unsafe("no previous-boot public Hide journal is eligible; inspect recovery status")
+                throw RecoveryError.unsafe("no previous-session or renumbered public Hide journal is eligible; inspect recovery status")
             }
             if let blocker = recovery.blocker { throw RecoveryError.unsafe(blocker) }
             try controller.recoverSession(recovery, hideAgain: action == .hideAgain)

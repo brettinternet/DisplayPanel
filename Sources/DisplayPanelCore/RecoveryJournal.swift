@@ -60,7 +60,8 @@ struct RecoveryJournal: Codable {
     var state: RecoveryState
     var trigger: String?
     var failure: String?
-    // A new baseline may supersede an archived previous-boot public journal.
+    // A new baseline may supersede an archived previous-session or renumbered
+    // public journal.
     // The archived transaction remains unresolved evidence, not a verified restore.
     var supersedesJournalID: UUID?
     // Diagnostics only; never used to signal or identify a process for recovery.
@@ -340,7 +341,7 @@ final class RecoveryStore {
     func supersedePublicMirror(_ previous: RecoveryJournal, with journal: RecoveryJournal,
                                revalidate: () throws -> Void) throws {
         guard lockFD != nil, previous.isPublicMirrorOnly, !previous.state.resolved,
-              previous.snapshot.bootSession != journal.snapshot.bootSession,
+              previous.hasStaleDisplayIDs(journal.snapshot),
               journal.supersedesJournalID == previous.id,
               stableRecoveryDigest(try load()) == stableRecoveryDigest(previous) else {
             throw RecoveryError.unsafe("journal cannot be superseded; keep recovery evidence")

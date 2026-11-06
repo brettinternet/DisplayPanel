@@ -186,14 +186,14 @@ a black window only: no DDC dimming, and **Sleep** becomes Restore.
 | Blacked out | An automation cover; **Restore** ends it |
 | Asleep / Unavailable | Wake or reconnect the display |
 | Mirrored | Mirrored outside DisplayPanel; fix in System Settings → Displays |
-| Needs recovery | Read the reason; Show when allowed, or recover the previous session after reboot |
+| Needs recovery | Read the reason; Show when allowed, or recover hidden displays after reboot or renumbering |
 
 Removed displays stay listed even when disconnected. Reconnect the same
 monitor, then **Check Again**. Recovery problems also appear as a banner and in
 the menu as **Review Display Recovery…**.
 
-After reboot, **Recover previous session** offers **Hide again** or **Keep
-displays shown** for the whole previous Hide set. Both accept the current layout;
+After reboot, or when macOS renumbers the hidden displays, **Recover hidden
+displays** offers **Hide again** or **Keep displays shown** for the whole Hide set. Both accept the current layout;
 neither shows displays or switches inputs. Missing monitors must reconnect and
 existing mirrors must be turned off first. See
 [previous-session recovery](display-recovery.md#recovering-after-reboot).

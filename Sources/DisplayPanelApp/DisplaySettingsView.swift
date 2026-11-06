@@ -533,9 +533,7 @@ struct DisplaySettingsView: View {
 
     private func sessionRecoverySection(_ recovery: DisplaySessionRecovery) -> some View {
         Section {
-            Text("The previous session ended with these displays removed.")
             Text(recovery.displayNames.joined(separator: ", "))
-                .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("Hide again") {
                     recoveryHidesAgain = true
@@ -555,7 +553,7 @@ struct DisplaySettingsView: View {
                 }
             }
         } header: {
-            Text("Recover previous session")
+            Text("Recover hidden displays")
         }
     }
 
@@ -584,7 +582,7 @@ struct DisplaySettingsView: View {
         DisclosureGroup("Recovery details") {
             if status.state == .recovery {
                 Text(status.sessionRecovery != nil
-                     ? "The previous session can’t be replayed. If a monitor is missing, switch it back to this Mac; if it’s mirrored, turn off mirroring in System Settings."
+                     ? "This Hide can’t be replayed. If a monitor is missing, switch it back to this Mac; if it’s mirrored, turn off mirroring in System Settings."
                      : "If Restore is refused, fix mirroring and arrangement in System Settings, then Check Again.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

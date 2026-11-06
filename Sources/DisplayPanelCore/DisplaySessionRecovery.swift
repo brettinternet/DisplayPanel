@@ -23,6 +23,15 @@ extension RecoveryJournal {
             deadline == nil && !verifyOnly
     }
 
+    /// Numeric display IDs are boot-local, and macOS can also renumber them
+    /// within a boot when a monitor relinks. Either way the journal can never
+    /// be replayed; only identity evidence still links it to the desktop.
+    func hasStaleDisplayIDs(_ current: RecoverySnapshot) -> Bool {
+        snapshot.bootSession != current.bootSession || snapshot.displays.contains { saved in
+            current.displays.contains { $0.uuid == saved.uuid && $0.id != saved.id }
+        }
+    }
+
     var recoveryPairs: [(target: String, source: String)] {
         if let session = publicMirrorSession {
             return session.removals.filter { !$0.state.resolved }.map { ($0.targetUUID, $0.sourceUUID) }
@@ -37,7 +46,7 @@ extension MirrorController {
     func sessionRecovery(journal: RecoveryJournal, current: RecoverySnapshot,
                          available: [DisplayRecord]) -> DisplaySessionRecovery? {
         guard !journal.state.resolved, journal.isPublicMirrorOnly,
-              journal.snapshot.bootSession != current.bootSession,
+              journal.hasStaleDisplayIDs(current),
               let journalIdentity = stableRecoveryDigest(journal),
               let topologyIdentity = current.stableTopologyIdentity() else { return nil }
         let blocker: String?
@@ -57,9 +66,8 @@ extension MirrorController {
 
     private func validateCurrentDesktop(journal: RecoveryJournal, current: RecoverySnapshot,
                                         available: [DisplayRecord]) throws {
-        guard !journal.state.resolved, journal.isPublicMirrorOnly,
-              journal.snapshot.bootSession != current.bootSession else {
-            throw RecoveryError.unsafe("only a previous-boot public Hide journal can be retired this way")
+        guard !journal.state.resolved, journal.isPublicMirrorOnly, journal.hasStaleDisplayIDs(current) else {
+            throw RecoveryError.unsafe("only a previous-session or renumbered public Hide journal can be retired this way")
         }
         let baseline = journal.snapshot
         guard baseline.userID == current.userID, baseline.hostModel == current.hostModel else {

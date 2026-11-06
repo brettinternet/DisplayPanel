@@ -1061,6 +1061,38 @@ final class DisplayHideTests: XCTestCase {
         XCTAssertEqual(writerCount, 0)
     }
 
+    /// macOS can renumber displays within one boot when a monitor relinks;
+    /// the journal then can never pass Show and must still be recoverable.
+    func testSameBootRenumberedDisplaysOfferSessionRecovery() throws {
+        let old = try previousBootJournal()
+        topology.snapshot = try snapshot { displays in
+            displays[2]["active"] = false
+            displays[2]["mirrorUUID"] = self.sourceUUID
+        }
+        XCTAssertNil(try controller().inspect().sessionRecovery, "unchanged IDs keep normal Show")
+
+        topology.snapshot = try snapshot { displays in
+            displays[0]["id"] = 8
+            displays[1]["id"] = 7
+            displays[2]["active"] = false
+            displays[2]["mirrorUUID"] = self.sourceUUID
+        }
+        XCTAssertThrowsError(try old.snapshot.validateRestoration(to: topology.snapshot))
+        XCTAssertNotNil(try XCTUnwrap(controller().inspect().sessionRecovery).blocker)
+
+        topology.snapshot = try snapshot { displays in
+            displays[0]["id"] = 8
+            displays[1]["id"] = 7
+            displays[2]["y"] = -20
+        }
+        let confirmation = try XCTUnwrap(controller().inspect().sessionRecovery)
+        XCTAssertTrue(confirmation.canRecover)
+        try controller().recoverSession(confirmation, hideAgain: false)
+        XCTAssertFalse(try controller().inspect().hasUnresolvedRecovery)
+        XCTAssertEqual(try store.load().supersedesJournalID, old.id)
+        XCTAssertEqual(writerCount, 0)
+    }
+
     func testPreviousBootReducedModeRequiresExplicitKeepShownAndPreservesEvidence() throws {
         let old = try previousBootJournal()
         let originalBytes = try Data(contentsOf: store.url)

@@ -4586,7 +4586,7 @@ final class AppModel: ObservableObject {
         }
         if protectionQuiescencePending { return Self.automationStopping.localizedDescription }
         if let failure = protectionQuiescenceFailure { return failure }
-        if !blackoutHiddenDisplays.isEmpty { return "Show blacked-out displays before recovering the previous session." }
+        if !blackoutHiddenDisplays.isEmpty { return "Show blacked-out displays before recovering hidden displays." }
         return handoffStatus?.sessionRecovery?.blocker
     }
 
@@ -4646,7 +4646,7 @@ final class AppModel: ObservableObject {
                         : "Displays kept shown."
                     for uuid in targets { self.displayResults[uuid.lowercased()] = nil }
                 } catch {
-                    self.sessionRecoveryResult = "Couldn’t recover the previous session. \(error.localizedDescription)"
+                    self.sessionRecoveryResult = "Couldn’t recover hidden displays. \(error.localizedDescription)"
                     self.refreshHandoffStatus()
                 }
             }
