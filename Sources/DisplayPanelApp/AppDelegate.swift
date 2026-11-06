@@ -400,6 +400,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         runRule.isEnabled = !model.automationPreferences.rules.isEmpty
         runRule.toolTip = runRule.isEnabled ? nil : "Create a rule in Settings → Automations."
         menu.addItem(runRule)
+        if !model.displayActions.actions.isEmpty {
+            let runAction = NSMenuItem(title: "Run action", action: nil, keyEquivalent: "")
+            let actionsMenu = NSMenu()
+            actionsMenu.autoenablesItems = false
+            for action in model.displayActions.actions {
+                let entry = item(action.name, action: #selector(runActionFromMenu(_:)))
+                entry.representedObject = action.id
+                let blocker = model.displayActionRunBlocker(for: action)
+                entry.isEnabled = blocker == nil
+                entry.toolTip = blocker
+                actionsMenu.addItem(entry)
+            }
+            runAction.submenu = actionsMenu
+            menu.addItem(runAction)
+        }
         if model.controlRunningRule != nil || !model.blackedOutDisplayIDs.isEmpty {
             menu.addItem(restoreMenuItem())
         } else {
@@ -655,6 +670,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task {
             let result = await model.runProtectionRule(id: id)
             if !result.ok { showSettings(tab: .automation) }
+        }
+    }
+
+    @objc func runActionFromMenu(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? UUID else { return }
+        model.runDisplayAction(id: id) { [weak self] result in
+            if !result.ok { self?.showSettings(tab: .automation) }
         }
     }
 
