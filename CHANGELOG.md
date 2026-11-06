@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.4
+
+- Run Actions from the menu bar under Run action.
+- Re-send a dropped DDC input write once, and re-select a quiet Show input return once while waiting for a late saved mode.
+- Continue Actions past an unconfirmed input step.
+- Name the monitor blocking Show and re-offer its Mac input.
+- Recover a Hide journal after macOS renumbers displays.
+
 ## 0.9.3
 
 - Give displays that need recovery a working click action instead of a dead menu item.
