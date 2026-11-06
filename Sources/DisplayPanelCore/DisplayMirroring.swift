@@ -737,7 +737,8 @@ struct MirrorController {
 
     func unmirror(store: RecoveryStore, selector: String? = nil, expectedID: UUID? = nil,
                   noOpWhenAlreadyResolved: Bool = false,
-                  returnInputBeforeRestore: ((RecoveryDisplay) throws -> Bool)? = nil) throws -> RecoveryJournal {
+                  returnInputBeforeRestore: ((RecoveryDisplay) throws -> Bool)? = nil,
+                  relinkInput: ((RecoveryDisplay) throws -> Bool)? = nil) throws -> RecoveryJournal {
         do {
             let operation = operationLock()
             try operation.lock()
@@ -751,7 +752,8 @@ struct MirrorController {
             if journal.publicMirrorSession != nil {
                 return try unmirrorSession(&journal, selector: selector, expectedID: expectedID,
                                           noOpWhenAlreadyResolved: noOpWhenAlreadyResolved,
-                                          store: store, returnInputBeforeRestore: returnInputBeforeRestore)
+                                          store: store, returnInputBeforeRestore: returnInputBeforeRestore,
+                                          relinkInput: relinkInput)
             }
             guard journal.mirrorTargetID != nil, journal.mirrorSourceID != nil else {
                 throw RecoveryError.unsafe("not a mirror journal; inspect recovery status")
@@ -785,7 +787,8 @@ struct MirrorController {
             if !wasResolved {
                 do {
                     _ = try prepareShow(journal, baseline: journal.snapshot, target: target, source: source,
-                                        store: store, returnInputBeforeRestore: returnInputBeforeRestore)
+                                        store: store, returnInputBeforeRestore: returnInputBeforeRestore,
+                                        relinkInput: relinkInput)
                 } catch {
                     if Self.sameStoredJournal(journal, try store.load()) {
                         journal.state = .needsAttention
@@ -805,7 +808,8 @@ struct MirrorController {
 
     private func unmirrorSession(_ journal: inout RecoveryJournal, selector: String?, expectedID: UUID?,
                                  noOpWhenAlreadyResolved: Bool, store: RecoveryStore,
-                                 returnInputBeforeRestore: ((RecoveryDisplay) throws -> Bool)?) throws -> RecoveryJournal {
+                                 returnInputBeforeRestore: ((RecoveryDisplay) throws -> Bool)?,
+                                 relinkInput: ((RecoveryDisplay) throws -> Bool)?) throws -> RecoveryJournal {
         guard var session = journal.publicMirrorSession else {
             throw RecoveryError.unsafe("missing public-mirror session")
         }
@@ -871,7 +875,8 @@ struct MirrorController {
             throw RecoveryError.unsafe("captured target or source identity is missing")
         }
         let current = try prepareShow(journal, baseline: session.baseline, target: target, source: source,
-                                      store: store, returnInputBeforeRestore: returnInputBeforeRestore)
+                                      store: store, returnInputBeforeRestore: returnInputBeforeRestore,
+                                      relinkInput: relinkInput)
         guard MirrorSessionTopology.matches(baseline: session.baseline, removals: session.removals, current: current) ||
                 MirrorSessionTopology.canRestoreFinalLayout(baseline: session.baseline, removals: session.removals,
                                                            targetUUID: selected.targetUUID, current: current) ||
@@ -949,12 +954,14 @@ struct MirrorController {
         }
     }
 
-    /// Only explicit Show/back supplies the input callback. Online is not proof
+    /// Only explicit Show/back supplies the input callbacks. Online is not proof
     /// of the selected monitor input, nor permission to unmirror. Both locks
-    /// remain held across the one input attempt and all read-only observations.
+    /// remain held across the input attempt, at most one re-selection
+    /// (`relinkInput` returns whether it wrote) and all read-only observations.
     private func prepareShow(_ journal: RecoveryJournal, baseline: RecoverySnapshot,
                              target: RecoveryDisplay, source: RecoveryDisplay, store: RecoveryStore,
-                             returnInputBeforeRestore: ((RecoveryDisplay) throws -> Bool)?) throws -> RecoverySnapshot {
+                             returnInputBeforeRestore: ((RecoveryDisplay) throws -> Bool)?,
+                             relinkInput: ((RecoveryDisplay) throws -> Bool)?) throws -> RecoverySnapshot {
         let current = try engine.capture()
         try baseline.validateRestoration(to: current)
         try validateShowAvailability(target: target, source: source)
@@ -962,14 +969,16 @@ struct MirrorController {
         func showModes(_ observed: RecoverySnapshot) -> RecoverySnapshot {
             MirrorSessionTopology.showModeBaseline(baseline, removals: removals, showing: target.uuid, current: observed)
         }
+        func targetModeUnavailable(_ error: Error) -> Bool {
+            guard case RecoveryError.modeUnavailable(let uuid, _, _) = error else { return false }
+            return uuid.caseInsensitiveCompare(target.uuid) == .orderedSame
+        }
         do {
             try preflightModes(showModes(current))
-        } catch let error as RecoveryError {
+        } catch {
             // Only the selected monitor's missing mode can be addressed by
             // this input return. Never switch another removal's input.
-            guard case .modeUnavailable(let uuid, _, _) = error,
-                  uuid.caseInsensitiveCompare(target.uuid) == .orderedSame,
-                  returnInputBeforeRestore != nil else { throw error }
+            guard targetModeUnavailable(error), returnInputBeforeRestore != nil else { throw error }
         }
         guard let returnInputBeforeRestore else { return current }
         guard Self.sameStoredJournal(journal, try store.load()) else {
@@ -977,62 +986,79 @@ struct MirrorController {
         }
         let switched = try returnInputBeforeRestore(target)
 
+        // Persisted per-attempt outcome changes, e.g. "0:ready#1a2b3c4d | 9:<error reason>".
+        var trace: [String] = []
+        var relinked = !switched
+        func note(_ attempt: Int, _ outcome: String) {
+            if trace.last.map({ $0.drop(while: { $0 != ":" }).dropFirst() == outcome }) != true {
+                trace.append("\(attempt):\(outcome)")
+            }
+        }
+        let preInputIdentity = current.stableTopologyIdentity()
+        defer {
+            showSettleLogger.notice("show-settle target=\(target.uuid, privacy: .public) switched=\(switched) relinked=\(relinked) pre=\(preInputIdentity?.prefix(8) ?? "none", privacy: .public) trace=\(trace.joined(separator: " | "), privacy: .public)")
+        }
+
         // Input return can reconnect the target and reinstate *both* mirrors;
         // never restore from the pre-input topology or consider mirror return
         // a Show. An unchanged input settles on two matching ready samples
         // within five seconds. A switched input makes the monitor relink some
         // seconds later (Auto Select off), so within 15 seconds it also needs
         // relink evidence (target unready or topology changed) or five seconds
-        // of continuous ready stability.
-        let preInputIdentity = current.stableTopologyIdentity()
-        let lastAttempt = switched ? 74 : 25
-        let quietMatches = 25
-        var relinked = !switched
-        var previous: String?
-        var matches = 0
-        // Persisted per-attempt outcome changes, e.g. "0:ready#1a2b3c4d | 9:<error reason>".
-        var trace: [String] = []
-        func note(_ attempt: Int, _ outcome: String) {
-            if trace.last.map({ $0.drop(while: { $0 != ":" }).dropFirst() == outcome }) != true {
-                trace.append("\(attempt):\(outcome)")
-            }
-        }
-        defer {
-            showSettleLogger.notice("show-settle target=\(target.uuid, privacy: .public) switched=\(switched) relinked=\(relinked) pre=\(preInputIdentity?.prefix(8) ?? "none", privacy: .public) trace=\(trace.joined(separator: " | "), privacy: .public)")
-        }
-        for attempt in 0...lastAttempt {
-            guard Self.sameStoredJournal(journal, try store.load()) else {
-                throw RecoveryError.unsafe("journal changed during input return; inspect recovery status")
-            }
-            do {
-                let observed = try engine.capture()
-                try baseline.validateRestoration(to: observed)
-                try validateShowAvailability(target: target, source: source)
-                try preflightModes(showModes(observed))
-                let identity = observed.stableTopologyIdentity()
-                if identity != preInputIdentity { relinked = true }
-                note(attempt, "ready#\(identity?.prefix(8) ?? "none")")
-                matches = identity != nil && identity == previous ? matches + 1 : 0
-                previous = identity
-                if matches > 0, relinked || matches >= quietMatches {
-                    guard Self.sameStoredJournal(journal, try store.load()) else {
-                        throw RecoveryError.unsafe("journal changed during input return; inspect recovery status")
+        // of continuous ready stability. A relinked HDMI monitor can list its
+        // saved high-refresh mode tens of seconds late (AW3425DW), so while
+        // only that mode is missing the wait extends to 60 seconds.
+        func settle(from preIdentity: String?, switched: Bool) throws -> RecoverySnapshot {
+            var lastAttempt = switched ? 74 : 25
+            let quietMatches = 25
+            relinked = !switched
+            var previous: String?
+            var matches = 0
+            var attempt = 0
+            while true {
+                guard Self.sameStoredJournal(journal, try store.load()) else {
+                    throw RecoveryError.unsafe("journal changed during input return; inspect recovery status")
+                }
+                do {
+                    let observed = try engine.capture()
+                    try baseline.validateRestoration(to: observed)
+                    try validateShowAvailability(target: target, source: source)
+                    try preflightModes(showModes(observed))
+                    let identity = observed.stableTopologyIdentity()
+                    if identity != preIdentity { relinked = true }
+                    note(attempt, "ready#\(identity?.prefix(8) ?? "none")")
+                    matches = identity != nil && identity == previous ? matches + 1 : 0
+                    previous = identity
+                    if matches > 0, relinked || matches >= quietMatches {
+                        guard Self.sameStoredJournal(journal, try store.load()) else {
+                            throw RecoveryError.unsafe("journal changed during input return; inspect recovery status")
+                        }
+                        return observed
                     }
-                    return observed
+                    if attempt >= lastAttempt {
+                        throw RecoveryError.unsafe("display topology did not settle after input return; retry Show when stable; journal retained")
+                    }
+                } catch {
+                    note(attempt, RecoveryError.reason(of: error))
+                    relinked = true
+                    previous = nil
+                    matches = 0
+                    if switched, targetModeUnavailable(error) {
+                        lastAttempt = max(lastAttempt, min(attempt + quietMatches, 299))
+                    }
+                    if attempt >= lastAttempt { throw error }
                 }
-                if attempt == lastAttempt {
-                    throw RecoveryError.unsafe("display topology did not settle after input return; retry Show when stable; journal retained")
-                }
-            } catch {
-                note(attempt, RecoveryError.reason(of: error))
-                relinked = true
-                previous = nil
-                matches = 0
-                if attempt == lastAttempt { throw error }
+                engine.convergencePause()
+                attempt += 1
             }
-            engine.convergencePause()
         }
-        throw RecoveryError.unsafe("display topology did not settle after input return; journal retained")
+        let settled = try settle(from: preInputIdentity, switched: switched)
+        // A monitor that stays linked through the return (S2721DGF) can keep a
+        // dead link the Mac retrained while it showed another input: no
+        // picture, no hotplug. Re-selecting its input once forces the relink.
+        guard switched, !relinked, let relinkInput, try relinkInput(target) else { return settled }
+        trace.append("reselected")
+        return try settle(from: settled.stableTopologyIdentity(), switched: true)
     }
 
     private func validateShowAvailability(target: RecoveryDisplay, source: RecoveryDisplay) throws {

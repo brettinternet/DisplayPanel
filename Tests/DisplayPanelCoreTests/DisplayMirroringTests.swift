@@ -1068,6 +1068,7 @@ final class DisplayMirroringTests: XCTestCase {
             var input: UInt16 = 15
             var reads = 0
             var sut = HandoffController(mirror: controller(original))
+            sut.reselectPause = {}
             sut.mirror.records = { self.records(current) }
             sut.mirror.engine.capture = { current }
             sut.mirror.engine.apply = { saved in
@@ -1170,7 +1171,8 @@ final class DisplayMirroringTests: XCTestCase {
             XCTAssertEqual(events.first, scenario == "no-input" ? "unhide" : "open", scenario)
             XCTAssertEqual(events.last, "unhide", "desktop restoration must follow the optional input return")
             if scenario == "unhide-failure" {
-                XCTAssertEqual(events.filter { $0 == "back-input" }.count, 1, "input is not retried when restore fails")
+                XCTAssertEqual(events.filter { $0 == "back-input" }.count, 3,
+                               "one return and one re-selection precede restore; input is not retried when restore fails")
                 XCTAssertEqual(try store.load().state, .needsAttention)
             } else {
                 XCTAssertEqual(current, original)
@@ -1349,14 +1351,17 @@ final class DisplayMirroringTests: XCTestCase {
             return DDCInputSelection(displayID: displayID, uuid: uuid, original: originalInput,
                 requested: requested, observed: requested, outcome: .verified, detail: nil)
         }
+        sut.reselectPause = {}
         _ = try sut.guardedBack(expectedJournalID: id, input: 15, store: store)
-        XCTAssertEqual(inputWrites, 1)
+        XCTAssertEqual(inputWrites, 3, "a return that doesn't relink is re-selected once")
         XCTAssertNoThrow(try original.verify(current), "successful explicit Show must verify AFTER input return")
         XCTAssertTrue(try store.load().state.resolved)
     }
 
     // Regression: with monitor Auto Select off, the input write itself starts
     // the relink, so Show must not restore during the pre-relink quiet period.
+    // A return that never relinks re-selects the input once (S2721DGF keeps a
+    // dead link otherwise) and settles again before restoring.
     func testShowAfterInputSwitchWaitsForRelinkOrQuietFloor() throws {
         for relinks in [true, false] {
             let store = RecoveryStore(url: directory.appendingPathComponent("relink-\(relinks).json"))
@@ -1366,8 +1371,11 @@ final class DisplayMirroringTests: XCTestCase {
             var current = original
             var capturesAfterSwitch: Int?
             var capturesBeforeRestore: Int?
+            var capturesBeforeReselect: Int?
             var unpluggedSamples = 0
+            var selected: [UInt8] = []
             var sut = HandoffController(mirror: controller(original), report: { _ in })
+            sut.reselectPause = {}
             sut.mirror.records = { self.records(current) }
             sut.mirror.engine.capture = {
                 guard let count = capturesAfterSwitch else { return current }
@@ -1389,21 +1397,62 @@ final class DisplayMirroringTests: XCTestCase {
                 return (target, DDCChannel(getVCP: { _ in (17, 0) }, setVCP: { _, _ in XCTFail("fake selector only") }))
             }
             sut.select = { requested, _, displayID, uuid, originalInput in
+                if selected.count == 1 { capturesBeforeReselect = capturesAfterSwitch }
+                selected.append(requested)
                 capturesAfterSwitch = 0
-                if relinks { unpluggedSamples = 3 }
+                if relinks || selected.count == 3 { unpluggedSamples = 3 }
                 return DDCInputSelection(displayID: displayID, uuid: uuid, original: originalInput,
                     requested: requested, observed: requested, outcome: .verified, detail: nil)
             }
-            _ = try sut.guardedBack(expectedJournalID: id, input: 15, store: store)
+            let outcome = try sut.guardedBack(expectedJournalID: id, input: 15, store: store)
+            XCTAssertEqual(outcome.state, .verified)
             let waited = try XCTUnwrap(capturesBeforeRestore)
+            XCTAssertLessThan(waited, 10, "relink evidence should end the wait early")
             if relinks {
-                XCTAssertLessThan(waited, 10, "relink evidence should end the wait early")
+                XCTAssertEqual(selected, [15])
             } else {
-                XCTAssertGreaterThan(waited, 25, "no relink must wait for the quiet floor")
+                XCTAssertEqual(selected, [15, 17, 15], "re-select through the observed previous input once")
+                XCTAssertGreaterThan(try XCTUnwrap(capturesBeforeReselect), 25, "no relink must wait for the quiet floor")
             }
             XCTAssertNoThrow(try original.verify(current))
             XCTAssertTrue(try store.load().state.resolved)
         }
+    }
+
+    // Regression: AW3425DW listed its 240 Hz mode more than 15 s after
+    // relinking on HDMI, so the first Show failed and a retry worked.
+    func testShowWaitsForRelinkedTargetModeBeyondRelinkWindow() throws {
+        let original = try snapshot()
+        let mirrored = try snapshot { $0[1]["mirrorUUID"] = self.sourceUUID; $0[1]["active"] = false }
+        var current = original
+        var missingModeSamples = 0
+        var sut = HandoffController(mirror: controller(original), report: { _ in })
+        sut.mirror.records = { self.records(current) }
+        sut.mirror.engine.capture = { current }
+        sut.mirror.engine.apply = { current = $0 }
+        sut.mirror.preflightModes = { _ in
+            guard missingModeSamples > 0 else { return }
+            missingModeSamples -= 1
+            throw RecoveryError.modeUnavailable(displayUUID: self.snapshotUUID(2), mode: "3440×1440 at 240.0 Hz")
+        }
+        sut.mirror.transaction = MirrorTransaction(
+            begin: { OpaquePointer(bitPattern: 1)! }, stage: { _, _, _ in },
+            complete: { _, _ in current = mirrored }, cancel: { _ in })
+        try sut.away(selector: "8", source: "7", input: nil, store: store)
+        let id = try store.load().id
+        sut.open = { uuid, allowInactive in
+            let target = try DDC.resolveDisplay(selector: uuid, records: self.records(current), allowInactive: allowInactive)
+            return (target, DDCChannel(getVCP: { _ in (15, 0) }, setVCP: { _, _ in XCTFail("fake selector only") }))
+        }
+        sut.select = { requested, _, displayID, uuid, originalInput in
+            missingModeSamples = 150
+            return DDCInputSelection(displayID: displayID, uuid: uuid, original: originalInput,
+                requested: requested, observed: requested, outcome: .verified, detail: nil)
+        }
+        _ = try sut.guardedBack(expectedJournalID: id, input: 17, store: store)
+        XCTAssertEqual(missingModeSamples, 0)
+        XCTAssertNoThrow(try original.verify(current))
+        XCTAssertTrue(try store.load().state.resolved)
     }
 
     func testShowAttemptsKnownReturnInputWhenPreReadIsMalformed() throws {

@@ -342,7 +342,7 @@ final class AppControlTests: XCTestCase {
     }
 
     func testEightStepActionReplyFitsTheControlMessageBudget() throws {
-        XCTAssertEqual(AppControlClient.actionResponseTimeout, 240)
+        XCTAssertEqual(AppControlClient.actionResponseTimeout, 1200)
         let targetUUIDs = (0..<8).map { _ in UUID().uuidString }
         let steps = targetUUIDs.enumerated().map { offset, targetUUID in
             AppControlActionStepResult(

@@ -98,7 +98,12 @@ journaled desktop. When the input may have changed, the settle waits up to
 15 seconds for relink evidence (a topology change or unavailable sample)
 followed by a stable match, or 5 seconds of unchanged samples when the monitor
 never relinks; this covers monitors with Auto Select off, whose relink starts
-only after the write. This input-return path accepts online mirror followers that
+only after the write. While only the selected monitor's saved mode is missing
+after a relink, the wait extends to 60 seconds: an HDMI monitor can list its
+240 Hz mode well after it reappears. A verified return that never relinks is
+re-selected once through the monitor's previous input (4 seconds there), then
+settles again: a monitor whose link the Mac retrained while it showed another
+input can otherwise stay without a picture and never hotplug. This input-return path accepts online mirror followers that
 macOS marks inactive; ordinary DDC controls remain active-only. Identity and
 connector checks still apply, and the monitor must accept DDC on the Mac's link.
 Returning to mirroring alone does not count as shown.

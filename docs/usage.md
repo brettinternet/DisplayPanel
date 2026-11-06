@@ -224,7 +224,7 @@ button or Shortcuts **Run Shell Script** action:
 | 5 | `partial` | Desktop changed, but the input switch didn't complete |
 | 6 | `recovery-needed` | Display needs recovery; only Show is allowed |
 
-Hide/Show waits up to 30 seconds; an Action waits 30 seconds per step; run-rule
+Hide/Show waits up to 150 seconds; an Action waits 150 seconds per step; run-rule
 returns as soon as its effect is installed. Requests are never queued or resent.
 After `response-lost`, check
 `app status --json` before retrying.

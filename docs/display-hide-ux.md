@@ -217,7 +217,8 @@ Desktop and input results are reported separately on the selected display:
 | Show: input fails | Restored only if fresh layout/mode checks pass | Failed |
 
 Show switches the monitor back to the Mac first, then restores and verifies the
-layout. A display coming online never triggers Show by itself. If a saved mode
+layout. If the monitor doesn't reconnect after switching back, Show switches it
+to its previous input and back once. A display coming online never triggers Show by itself. If a saved mode
 is missing, the message names the monitor, which may be another display still
 on the other computer. If a Show couldn't switch a monitor back, its **This
 Mac's input** row in Displays reads it again and offers **Switch to _input_**;

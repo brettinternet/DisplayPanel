@@ -410,6 +410,7 @@ struct HandoffController {
         try DDCInput.select($0, channel: $1, displayID: $2, uuid: $3, original: $4, readOriginal: false)
     }
     var report: (String) -> Void = { print($0) }
+    var reselectPause: () -> Void = { Thread.sleep(forTimeInterval: 4) }
 
     func guardedAway(target: DisplayHideIdentity, source: DisplayHideIdentity, input: UInt8?,
                      wakeExpectation: DisplayHideWakeExpectation? = nil,
@@ -449,17 +450,30 @@ struct HandoffController {
         } ?? .notRequested
         do {
             var inputAttempted = false
+            var previousInput: UInt8?
             let returnInput: ((RecoveryDisplay) throws -> Bool)? = input == nil ? nil : { target in
                 inputAttempted = true
-                inputOutcome = selectInput(input, target: target, returning: true)
+                inputOutcome = selectInput(input, target: target, returning: true, willSelect: { previous, _ in
+                    previousInput = previous
+                })
                 return inputOutcome.state.mayHaveSwitched
+            }
+            let relinkInput: ((RecoveryDisplay) throws -> Bool)? = input == nil ? nil : { target in
+                guard inputOutcome.state == .verified, let input, let previousInput,
+                      let back = reselect(input, through: previousInput, target: target) else { return false }
+                guard back.state != .failed else {
+                    inputOutcome = back
+                    throw RecoveryError.unsafe(back.detail ?? "DDC selection failed")
+                }
+                return true
             }
             _ = try mirror.unmirror(
                 store: store,
                 selector: targetUUID,
                 expectedID: expectedJournalID,
                 noOpWhenAlreadyResolved: true,
-                returnInputBeforeRestore: returnInput
+                returnInputBeforeRestore: returnInput,
+                relinkInput: relinkInput
             )
             if let input, !inputAttempted {
                 inputOutcome = DisplayInputOutcome(
@@ -497,18 +511,33 @@ struct HandoffController {
 
     func back(selector: String, input: UInt8?, store: RecoveryStore) throws {
         var inputFailure: Error?
+        var previousInput: UInt8?
+        var returned: DisplayInputOutcome.State?
         let returnInput: ((RecoveryDisplay) throws -> Bool)? = input == nil ? nil : { target in
             do {
-                return try switchInput(input, target: target, returning: true) { report("Input recovery: \($0)") }
-                    .mayHaveSwitched
+                let state = try switchInput(input, target: target, returning: true, previous: { previousInput = $0 }) {
+                    report("Input recovery: \($0)")
+                }
+                returned = state
+                return state.mayHaveSwitched
             } catch {
                 inputFailure = error
                 return true
             }
         }
+        let relinkInput: ((RecoveryDisplay) throws -> Bool)? = input == nil ? nil : { target in
+            guard returned == .verified, let input, let previousInput,
+                  let back = reselect(input, through: previousInput, target: target) else { return false }
+            report("Re-selected the Mac input through \(String(format: "0x%02X", previousInput)) to relink the monitor.")
+            guard back.state != .failed else {
+                throw RecoveryError.unsafe("\(back.detail ?? "DDC selection failed"); retry back or use the monitor's input button")
+            }
+            return true
+        }
         let journal: RecoveryJournal
         do {
-            journal = try mirror.unmirror(store: store, selector: selector, returnInputBeforeRestore: returnInput)
+            journal = try mirror.unmirror(store: store, selector: selector, returnInputBeforeRestore: returnInput,
+                                          relinkInput: relinkInput)
         } catch {
             throw RecoveryError.unsafe(error.localizedDescription + (inputFailure.map { " Input return: \($0.localizedDescription)" } ?? ""))
         }
@@ -522,8 +551,18 @@ struct HandoffController {
         }
     }
 
+    /// Some monitors keep a dead link when the Mac retrains it while they show
+    /// another input: the return to the Mac input then neither hotplugs nor
+    /// shows a picture, but re-selecting it through the previous input does.
+    /// Returns the final selection, or nil when no write was sent.
+    func reselect(_ input: UInt8, through previous: UInt8, target: RecoveryDisplay) -> DisplayInputOutcome? {
+        guard selectInput(previous, target: target, returning: true).state.mayHaveSwitched else { return nil }
+        reselectPause()
+        return selectInput(input, target: target, returning: true)
+    }
+
     func selectInput(_ input: UInt8?, target: RecoveryDisplay, returning: Bool = false,
-                     willSelect: (String) -> Void = { _ in }) -> DisplayInputOutcome {
+                     willSelect: (_ previous: UInt8, _ command: String) -> Void = { _, _ in }) -> DisplayInputOutcome {
         guard let input else { return .notRequested }
         guard input > 0 else {
             return DisplayInputOutcome(state: .failed, requestedInput: input,
@@ -588,7 +627,7 @@ struct HandoffController {
         let command = original.map {
             "dp ddc-input --display \(shellQuote(target.uuid)) --set \(String(format: "0x%02X", $0))"
         }
-        if let command { willSelect(command) }
+        if let original, let command { willSelect(original, command) }
         do {
             let result = try select(input, session.channel, target.id, target.uuid, original)
             switch result.outcome {
@@ -627,8 +666,10 @@ struct HandoffController {
 
     @discardableResult
     private func switchInput(_ input: UInt8?, target: RecoveryDisplay, returning: Bool = false,
+                             previous: (UInt8) -> Void = { _ in },
                              recovery: (String) -> Void) throws -> DisplayInputOutcome.State {
-        let outcome = selectInput(input, target: target, returning: returning, willSelect: { command in
+        let outcome = selectInput(input, target: target, returning: returning, willSelect: { original, command in
+            previous(original)
             recovery(command + ", or use the monitor's input button")
             report("To reverse input selection: \(command), or use the monitor's input button.")
         })
