@@ -136,8 +136,9 @@ dp app run-action --action ACTION_UUID --json
 - DisplayPanel checks every step first. A refusal names the step and changes
   nothing.
 - Steps run in order. Disconnected targets and targets already hidden the other
-  way are skipped with a reason. Other failures stop the run; earlier steps stay
-  done.
+  way are skipped with a reason. A step whose desktop changed but whose monitor
+  input couldn't be confirmed continues the run. Other failures stop it; earlier
+  steps stay done.
 - Ambiguous identities, unverified recovery and the last visible display still
   block.
 - A Show-only Action can wait out an in-progress monitor input return (up to 15
@@ -154,7 +155,8 @@ dp app run-action --action ACTION_UUID --json
   never prompts on its own. Results give moved, skipped and failed counts;
   window titles aren't stored.
 - Outcomes: `done` (finished, possibly with skipped steps), `no-op` (nothing to
-  change) or `partial` (some steps changed, then the run stopped).
+  change) or `partial` (some steps changed, then the run stopped, or a monitor
+  input needs checking).
 
 ## Saved display identity
 

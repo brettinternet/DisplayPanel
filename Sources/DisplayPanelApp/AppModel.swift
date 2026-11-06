@@ -4126,6 +4126,9 @@ final class AppModel: ObservableObject {
             } else if action.steps.count == 1, let onlyStep = stepResults.first,
                [.done, .partial, .noOp].contains(aggregate) {
                 summary = onlyStep.desktopSummary
+            } else if stoppingAtIndex == nil, aggregate == .partial {
+                let steps = stepResults.filter { $0.outcome == .partial }.map { "\($0.index)" }
+                summary = "Action completed; check the monitor input for Step \(steps.joined(separator: ", "))."
             } else if let stoppingAtIndex {
                 let stopped = stepResults.first(where: { $0.index == stoppingAtIndex })
                 if stopped?.outcome == .done || stopped?.outcome == .noOp {
@@ -4345,7 +4348,9 @@ final class AppModel: ObservableObject {
                     outcome: resultOutcome, desktopSummary: Self.bounded(desktop),
                     inputOutcome: result.inputOutcome?.state, inputDetail: input
                 ))
-                if resultOutcome == .done || resultOutcome == .noOp {
+                // A partial step changed the desktop as asked; only its monitor input
+                // needs checking, so later independent steps still run.
+                if resultOutcome == .done || resultOutcome == .noOp || resultOutcome == .partial {
                     if offset + 1 < action.steps.count &&
                         (self.runningActionInterrupted || self.displayLifecycleTransitioning) {
                         stoppingOutcome = .partial

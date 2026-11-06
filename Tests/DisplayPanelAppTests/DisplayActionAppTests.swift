@@ -1120,7 +1120,8 @@ final class DisplayActionAppTests: XCTestCase {
         XCTAssertTrue(model.isRemovedDisplay(mainUUID))
     }
 
-    func testPartialInputStopsLaterStepsAndKeepsPerStepEvidence() async throws {
+    func testPartialInputContinuesLaterStepsAndKeepsPerStepEvidence() async throws {
+        // A Show whose return input failed must not leave the next display hidden.
         let defaults = try makeDefaults()
         let box = StatusBox(hiddenStatus())
         var showWrites = 0
@@ -1136,7 +1137,7 @@ final class DisplayActionAppTests: XCTestCase {
             cover: { coverRequests.append($0); return [] }
         )
         await settleQuiescence(model)
-        let action = DisplayAction(name: "Show then stop", steps: [
+        let action = DisplayAction(name: "Show then continue", steps: [
             DisplayActionStep(target: DisplayIdentitySnapshot(try XCTUnwrap(displays.first { $0.uuid == targetUUID })), effect: .show),
             DisplayActionStep(target: DisplayIdentitySnapshot(try XCTUnwrap(displays.first { $0.uuid == sourceUUID })))
         ])
@@ -1144,12 +1145,13 @@ final class DisplayActionAppTests: XCTestCase {
 
         let result = await run(model, id: action.id)
         XCTAssertEqual(result.outcome, .partial)
-        XCTAssertEqual(result.steps?.map(\.outcome), [.partial, .notRun])
+        XCTAssertEqual(result.steps?.map(\.outcome), [.partial, .done])
         XCTAssertEqual(result.steps?.first?.inputOutcome, .failed)
         XCTAssertNotNil(result.steps?.first?.inputDetail, "the partial input result remains visible per step")
+        XCTAssertEqual(result.summary, "Action completed; check the monitor input for Step 1.")
         XCTAssertEqual(showWrites, 1)
-        XCTAssertTrue(coverRequests.isEmpty)
-        XCTAssertFalse(model.isRemovedDisplay(targetUUID), "completed Show state remains available after the later step is skipped")
+        XCTAssertEqual(coverRequests.count, 1)
+        XCTAssertFalse(model.isRemovedDisplay(targetUUID))
     }
 
     func testActionTopologyNotificationsContinueAfterVerifiedRemoveAndShow() async throws {
