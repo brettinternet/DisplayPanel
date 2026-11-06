@@ -37,7 +37,8 @@ back: validate journal and identities → [switch input → wait for modes/topol
 | Layout restore fails on back | Input may already have switched; precise blocker reported and unresolved journal retained |
 | Input fails on back | Restore only if fresh mode/topology checks pass; report the input failure separately |
 
-One input write, no retries, no automatic rollback. The switch-back command is
+At most two writes of the same input (one re-send when readback still shows the
+previous input), no automatic rollback. The switch-back command is
 printed, not saved, so keep the output or use the monitor's input button.
 
 Input return can reconnect a display or reinstate mirroring. Show/back waits up

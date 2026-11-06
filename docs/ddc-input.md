@@ -40,13 +40,16 @@ Readable doesn't guarantee the monitor accepts writes.
 ```text
 read current ─┬─ unreadable / ambiguous ─→ refuse
               ├─ already selected ───────→ alreadySelected
-              └─ write once → poll 12 × 250 ms
+              └─ write → poll 12 × 250 ms
                    ├─ reads requested ───→ verified
                    ├─ no reply ──────────→ unverified (check the monitor)
+                   ├─ reads previous ────→ re-send once, poll again
                    └─ reads other value ─→ error with a switch-back command
 ```
 
-No retries, input cycling or power commands. `ddc-luminance` uses the same
+Monitors occasionally drop a write while readback keeps working, so a write
+still showing the previous (or unknown) input is re-sent once with the same
+value. No other retries, input cycling or power commands. `ddc-luminance` uses the same
 read-first rule. If anything goes wrong, use the monitor's input button.
 
 ## Limits

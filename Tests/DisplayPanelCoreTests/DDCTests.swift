@@ -138,8 +138,22 @@ final class DDCTests: XCTestCase {
                 XCTAssertTrue(String(describing: error).contains("previous input unknown"))
                 XCTAssertFalse(String(describing: error).contains("--set"), "do not invent a recovery input")
             }
-            XCTAssertEqual(fake.writes, [0x0F], scenario)
+            XCTAssertEqual(fake.writes, scenario == "mismatch" ? [0x0F, 0x0F] : [0x0F], scenario)
         }
+    }
+
+    func testDroppedWriteIsResentOnceWhenMonitorKeepsPreviousInput() throws {
+        // AW3425DW ignored a Show's return write; readback stayed on the PC input.
+        let fake = FakeChannel(inputs: [.success(0x0F), .success(0x0F), .success(0x0F), .success(0x0F), .success(0x11)])
+        let result = try select(0x11, fake)
+        XCTAssertEqual(result.outcome, .verified)
+        XCTAssertEqual(fake.writes, [0x11, 0x11])
+
+        let ignored = FakeChannel(inputs: [.success(0x0F)])
+        XCTAssertThrowsError(try select(0x11, ignored)) {
+            XCTAssertEqual($0 as? DDCError, .inputNotVerified(original: 0x0F, requested: 0x11, observed: 0x0F, uuid: "UUID"))
+        }
+        XCTAssertEqual(ignored.writes, [0x11, 0x11], "bounded to one re-send")
     }
 
     func testTransportLossAfterWriteIsUnverifiedNotRetried() throws {

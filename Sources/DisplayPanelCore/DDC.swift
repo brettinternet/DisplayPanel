@@ -333,8 +333,9 @@ public enum DDCInput {
         return try select(value, channel: session.channel, displayID: session.display.id, uuid: session.display.uuid)
     }
 
-    /// Use the caller's pre-read or read first (refusing if unreadable), write at most once, then poll
-    /// read-only for up to `polls` × `interval` microseconds. Only journal-validated
+    /// Use the caller's pre-read or read first (refusing if unreadable), write, then poll
+    /// read-only for up to `polls` × `interval` microseconds. If readback still shows the
+    /// previous input, re-send the same value once and poll again. Only journal-validated
     /// Show/back may set `readOriginal` false with an unknown original input.
     static func select(
         _ value: UInt8,
@@ -354,27 +355,31 @@ public enum DDCInput {
         }
         if original == value { return result(original, .alreadySelected) }
 
-        do {
-            try channel.setVCP(inputVCP, UInt16(value))
-        } catch {
-            throw DDCError.inputWriteStateUnknown(original: original, uuid: uuid, detail: String(describing: error))
-        }
-
         var observed: UInt8?
-        var lastError: Error?
-        for _ in 0..<polls {
-            pause(interval)
+        for attempt in 1...2 {
             do {
-                let reading = try current(channel)
-                if reading == value { return result(reading, .verified) }
-                observed = reading
-                lastError = nil
+                try channel.setVCP(inputVCP, UInt16(value))
             } catch {
-                lastError = error
+                throw DDCError.inputWriteStateUnknown(original: original, uuid: uuid, detail: String(describing: error))
             }
-        }
-        if let lastError {
-            return result(observed, .unverified, "readback unavailable after write: \(lastError)")
+            var lastError: Error?
+            for _ in 0..<polls {
+                pause(interval)
+                do {
+                    let reading = try current(channel)
+                    if reading == value { return result(reading, .verified) }
+                    observed = reading
+                    lastError = nil
+                } catch {
+                    lastError = error
+                }
+            }
+            if let lastError {
+                return result(observed, .unverified, "readback unavailable after write: \(lastError)")
+            }
+            // Monitors occasionally drop a Set VCP. Re-send the same value once
+            // only when the monitor still reports its previous (or unknown) input.
+            guard attempt == 1, original == nil || observed == original else { break }
         }
         throw DDCError.inputNotVerified(original: original, requested: value, observed: observed!, uuid: uuid)
     }
