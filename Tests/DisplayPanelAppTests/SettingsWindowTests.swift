@@ -515,9 +515,9 @@ final class SettingsWindowTests: XCTestCase {
         window.setContentSize(NSSize(width: 680, height: 1000))
         let content = try XCTUnwrap(window.contentView)
         func keepOffSwitch() -> NSSwitch? {
-            // The unsaved mode-protection switch is disabled; this fixture's Keep Off switch is enabled.
-            let enabledSwitches = nativeViews(in: content).compactMap { $0 as? NSSwitch }.filter(\.isEnabled)
-            return enabledSwitches.count == 1 ? enabledSwitches[0] : nil
+            // Keep Off is the topmost enabled switch; mode protection follows it.
+            nativeViews(in: content).compactMap { $0 as? NSSwitch }.filter(\.isEnabled)
+                .max { $0.convert($0.bounds, to: nil).midY < $1.convert($1.bounds, to: nil).midY }
         }
         spin { content.layoutSubtreeIfNeeded(); return keepOffSwitch()?.state == .off }
         let toggle = try XCTUnwrap(keepOffSwitch())
