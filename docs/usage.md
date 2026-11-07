@@ -64,7 +64,8 @@ The master switch and Pause apply to all rules.
 
 An Action is 1–8 ordered steps: Hide, Show or Move windows for a display. It
 runs only from **Run** or `dp app run-action`. Steps run in order and stop
-at the first problem; earlier changes are not undone. Hide only covers or
+at the first problem; earlier changes are not undone. A failed Show doesn't
+stop the steps after it when they are all Shows. Hide only covers or
 removes a display; Move only relocates windows and never changes Hide state.
 A Hide (black out) step can also keep windows off the display for as long as
 that Hide lasts; see [keep windows off](display-hide-ux.md#keep-windows-off-while-hidden).

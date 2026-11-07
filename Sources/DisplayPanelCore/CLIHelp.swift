@@ -255,8 +255,9 @@ public enum CLIHelp {
             The workflow is preflighted as a whole, then runs sequentially and
             non-atomically. Disconnected or verified already-hidden targets can be
             skipped with a reason; identity and recovery safeguards still apply.
-            Other problems stop the run and keep earlier changes. If no steps need
-            changes, the result is no-op; skipped steps have outcome skipped.
+            Other problems stop the run and keep earlier changes, but a failed Show
+            doesn't stop the steps after it when they are all Shows. If no steps
+            need changes, the result is no-op; skipped steps have outcome skipped.
             While it runs, competing display commands, other Actions, recovery
             cleanup, disconnect and quit are busy until completion.
             JSON returns one result per step, including privacy-safe Move windows
