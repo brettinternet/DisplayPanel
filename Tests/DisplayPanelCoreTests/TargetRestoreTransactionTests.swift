@@ -97,6 +97,54 @@ final class TargetRestoreTransactionTests: XCTestCase {
         }
     }
 
+    /// Recorded 0.9.8: Show of the hidden original main staged only its own
+    /// (0,0); the display macOS had made main kept (0,0), so the target came
+    /// back separate at (1440,0) without the main role.
+    func testReturningOriginalMainRestagesVisibleDisplaysAndRepairsMainRole() throws {
+        let baseline = try fixture("baseline")
+        let otherUUID = "98402864-2a3e-4b75-92e6-0f801b89c132"
+        let main = try XCTUnwrap(baseline.displays.first { $0.uuid == sourceUUID })
+        let other = try XCTUnwrap(baseline.displays.first { $0.uuid == otherUUID })
+        let follower = try XCTUnwrap(baseline.displays.first { $0.uuid == followerUUID })
+        func mirrored(_ snapshot: RecoverySnapshot, _ uuid: String) throws -> RecoverySnapshot {
+            try change(snapshot, uuid: uuid) {
+                $0["mirrorUUID"] = otherUUID; $0["active"] = false; $0["main"] = false; $0["x"] = 0; $0["y"] = 0
+            }
+        }
+        let otherMain = try change(baseline, uuid: otherUUID) { $0["main"] = true; $0["x"] = 0; $0["y"] = 0 }
+        let hidden = try mirrored(mirrored(otherMain, sourceUUID), followerUUID)
+
+        var origins: [String] = []
+        let transaction = TargetRestoreTransaction(
+            begin: { OpaquePointer(bitPattern: 1)! },
+            prepareMode: { _ in { _ in } },
+            clearMirror: { _, _ in },
+            origin: { _, id, x, y in origins.append("\(id):\(x),\(y)") },
+            complete: { _, _ in },
+            cancel: { _ in }
+        )
+        try RecoveryConfiguration.restoreTarget(baseline, targetUUID: sourceUUID, capture: { hidden }, transaction: transaction)
+        XCTAssertEqual(origins, ["1:3440,-4", "\(other.id):-1440,0", "\(main.id):0,0"],
+                       "visible displays return to saved origins, the follower is never staged, main is last")
+
+        var removals = [
+            PublicMirrorRemoval(target: main, source: other, beforeOperation: baseline, state: .needsAttention),
+            PublicMirrorRemoval(target: follower, source: other, beforeOperation: baseline, state: .mirrored)
+        ]
+        removals[0].restoreFrom = hidden
+        let separate = try change(mirrored(otherMain, followerUUID), uuid: sourceUUID) { $0["main"] = false; $0["x"] = 1440 }
+        XCTAssertThrowsError(try MirrorSessionTopology.verifyPartialShow(
+            baseline: baseline, removals: removals, removalID: removals[0].id, before: hidden, current: separate
+        ))
+        XCTAssertTrue(MirrorSessionTopology.canRepairTargetLayout(
+            baseline: baseline, removals: removals, targetUUID: sourceUUID, current: separate
+        ), "Restore may return the original main to (0,0)")
+        let repaired = try mirrored(baseline, followerUUID)
+        XCTAssertNoThrow(try MirrorSessionTopology.verifyPartialShow(
+            baseline: baseline, removals: removals, removalID: removals[0].id, before: separate, current: repaired
+        ))
+    }
+
     func testFinalUnmirrorAnchorsMatchingSurvivorsAndMainLast() throws {
         let baseline = try fixture("baseline")
         // Only the last hidden target differs. The already-shown follower and

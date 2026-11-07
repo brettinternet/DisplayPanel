@@ -2988,11 +2988,11 @@ final class DisplayHideAppTests: XCTestCase {
             observation(disconnectedTarget, state: .unavailable, source: main, journalTarget: true),
             observation(main, state: .separate)
         ]
-        let status = multiHandoffStatus(
+        let box = StatusBox(multiHandoffStatus(
             [healthy, disconnected], observations: observations, journalID: "one-disconnected",
             state: .recovery
-        )
-        let model = makeModel(defaults: defaults, displays: [main, firstTarget], status: { status })
+        ))
+        let model = makeModel(defaults: defaults, displays: [main, firstTarget], status: { box.value })
 
         let healthyTile = try XCTUnwrap(model.displayTiles.first { $0.id == Self.targetKey })
         let disconnectedTile = try XCTUnwrap(model.displayTiles.first { $0.id == Self.sourceUUID.lowercased() })
@@ -3002,6 +3002,21 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertNil(disconnectedTile.display)
         XCTAssertEqual(model.controlDisplayStatuses.first { $0.targetUUID == Self.sourceUUID }?.observedState, "unavailable")
         XCTAssertEqual(model.controlDisplayStatuses.first { $0.targetUUID == Self.sourceUUID }?.recoveryNeeded, true)
+
+        // Recorded 0.9.8: one failed Show flagged every hidden display. A display
+        // still hidden as Hide left it stays Hidden; only its Show waits.
+        let blocked = DisplayHandoffRemoval(
+            id: "healthy-entry", target: handoffIdentity(firstTarget), source: handoffIdentity(main),
+            state: "mirrored", isUnresolved: true, canShow: false,
+            reason: "Restore Disconnected target first.", topologyVerified: true
+        )
+        box.value = multiHandoffStatus([blocked, disconnected], observations: observations,
+                                       journalID: "one-disconnected", state: .recovery)
+        model.refreshHandoffStatus()
+        let blockedTile = try XCTUnwrap(model.displayTiles.first { $0.id == Self.targetKey })
+        XCTAssertEqual(blockedTile.status, .hidden)
+        XCTAssertEqual(blockedTile.action, .show)
+        XCTAssertEqual(blockedTile.actionBlocker, "Restore Disconnected target first.")
     }
 
     func testHiddenMirrorOverlayAllowsIndependentlySelectedVerifiedSources() async throws {

@@ -141,7 +141,7 @@ enum MirrorSessionTopology {
     }
 
     static func matches(baseline: RecoverySnapshot, removals: [PublicMirrorRemoval],
-                        current: RecoverySnapshot) -> Bool {
+                        current: RecoverySnapshot, repairingTarget: String? = nil) -> Bool {
         guard (try? baseline.validateRestoration(to: current)) != nil,
               current.displays.filter(\.main).count == 1 else { return false }
         if activeRemovals(removals).isEmpty {
@@ -170,9 +170,10 @@ enum MirrorSessionTopology {
             }
         }
         // Removing a non-main display never moves main. Only while the
-        // original main display is removed may macOS report another as main.
+        // original main display is removed, or its repair returns it to (0,0),
+        // may macOS report another as main.
         if let originalMain = baseline.displays.first(where: \.main), activeByTarget[originalMain.uuid] == nil,
-           current.displays.first(where: \.main)?.uuid != originalMain.uuid {
+           originalMain.uuid != repairingTarget, current.displays.first(where: \.main)?.uuid != originalMain.uuid {
             return false
         }
         return true
@@ -290,7 +291,7 @@ enum MirrorSessionTopology {
     }
 
     /// A partial Show can clear its mirror yet fail its postcondition (for
-    /// example its mode). Only that recorded failed target may be repaired;
+    /// example its mode or main role). Only that recorded failed target may be repaired;
     /// survivors and sibling topology must still verify before another write.
     static func canRepairTargetLayout(baseline: RecoverySnapshot, removals: [PublicMirrorRemoval],
                                       targetUUID: String, current: RecoverySnapshot) -> Bool {
@@ -302,7 +303,7 @@ enum MirrorSessionTopology {
               target.mirrorUUID == nil, target.active else { return false }
         var siblings = removals
         siblings[index].state = .cancelled
-        return matches(baseline: baseline, removals: siblings, current: current)
+        return matches(baseline: baseline, removals: siblings, current: current, repairingTarget: targetUUID)
     }
 
     static func targetMatchesBaseline(_ targetUUID: String, baseline: RecoverySnapshot,

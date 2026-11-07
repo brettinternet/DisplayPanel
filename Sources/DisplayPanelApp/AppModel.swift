@@ -3031,6 +3031,11 @@ final class AppModel: ObservableObject {
             }
             guard let uuid = tile.uuid, let removal = handoffStatus?.removal(for: uuid) else { return }
             let canWait = canWaitForInputReturnShow([uuid])
+            if tile.status == .hidden, !canWait, !removal.canShow {
+                tile.action = .show
+                tile.actionBlocker = removal.reason ?? "Another hidden display needs recovery first."
+                return
+            }
             guard canWait || removal.canShow || canAttemptGuardedRecoveryShow(removal) else { return }
             tile.action = .show
             tile.actionBlocker = showWait(allowingInputReturnWait: canWait)?.localizedDescription
@@ -3059,7 +3064,11 @@ final class AppModel: ObservableObject {
         }
         if isBlackoutHidden(uuid) { return .hidden }
         if isJournalTarget, let uuid, let removal = handoffStatus?.removal(for: uuid) {
-            if removal.state == "mirrored", removal.topologyVerified, removal.canShow { return .hidden }
+            // Still hidden as Hide left it; another display's recovery only blocks its Show.
+            let otherNeedsRecovery = handoffStatus?.removals.contains {
+                $0.id != removal.id && $0.isUnresolved && !($0.state == "mirrored" && $0.topologyVerified)
+            } == true
+            if removal.state == "mirrored", removal.topologyVerified, removal.canShow || otherNeedsRecovery { return .hidden }
             return .needsRecovery
         }
         if isJournalTarget, handoffStatus?.state == .busy { return .busy }

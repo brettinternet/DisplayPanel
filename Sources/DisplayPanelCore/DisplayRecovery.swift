@@ -433,8 +433,9 @@ enum RecoveryConfiguration {
     }
 
     /// Restore one target, requesting its saved origin. Remaining mirror
-    /// followers and other desktops are never staged. macOS may place the
-    /// target elsewhere; callers verify with MirrorSessionTopology.verifyPartialShow.
+    /// followers are never staged, other desktops only to return the original
+    /// main to (0,0). macOS may place the target elsewhere; callers verify
+    /// with MirrorSessionTopology.verifyPartialShow.
     static func restoreTarget(_ baseline: RecoverySnapshot, targetUUID: String,
                               revalidate: () throws -> Void = {},
                               capture: () throws -> RecoverySnapshot = { try .capture(includePrivateMetadata: false) },
@@ -502,6 +503,15 @@ struct TargetRestoreTransaction {
         defer { if !consumed { cancel(config) } }
         if currentTarget.mirrorUUID != nil { try clearMirror(config, target.id) }
         if currentTarget.mode != target.mode { try stageMode(config) }
+        // CoreGraphics makes the display at (0,0) main. A returning original
+        // main can take it only if the visible displays macOS moved there
+        // return to their saved origins; mirror followers move with them.
+        if target.main, !currentTarget.main {
+            for survivor in before.displays where survivor.uuid != targetUUID && survivor.active && survivor.mirrorUUID == nil {
+                guard let saved = baseline.displays.first(where: { $0.uuid == survivor.uuid }) else { continue }
+                try origin(config, saved.id, saved.x, saved.y)
+            }
+        }
         if currentTarget.x != target.x || currentTarget.y != target.y || currentTarget.main != target.main {
             try origin(config, target.id, target.x, target.y)
         }

@@ -519,7 +519,9 @@ public struct DisplayHideController {
             } else if !relationVerified {
                 refusal = "The hidden display or its mirror source changed or is missing. Reconnect both as they were."
             } else if !sessionVerified {
-                refusal = journal.failure ?? "Another hidden display needs recovery first."
+                let blocking = session.removals.first { $0.id != removal.id && !$0.state.resolved && $0.state != .mirrored }
+                    .flatMap { blocking in session.baseline.displays.first { $0.uuid == blocking.targetUUID }?.name }
+                refusal = blocking.map { "Restore \($0) first." } ?? journal.failure ?? "Another hidden display needs recovery first."
             } else if removal.state != .mirrored {
                 refusal = "A Hide or Show of this display didn’t finish."
             } else {
