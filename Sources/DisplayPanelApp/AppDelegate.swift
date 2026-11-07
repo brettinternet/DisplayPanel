@@ -914,6 +914,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func screenConfigurationChanged(_ notification: Notification) {
         guard !terminationPending else { return }
+        if model.deferUntilDisplayWriteFinishes({ [weak self] in self?.screenConfigurationChanged(notification) }) {
+            return
+        }
         if notification.name == NSWorkspace.willSleepNotification ||
             notification.name == NSWorkspace.screensDidSleepNotification {
             model.beginDisplaySleepTransition()

@@ -433,7 +433,7 @@ final class DisplayHideAppTests: XCTestCase {
             showDisplay: { _, _ in
                 showCalls += 1
                 if showCalls == 1 {
-                    model.preferences.isEnabled = false
+                    DispatchQueue.main.sync { model.preferences.isEnabled = false }  // Show runs off main.
                     throw NSError(domain: "FakeShow", code: 1, userInfo: [
                         NSLocalizedDescriptionKey: "fake no-write Show refusal"
                     ])

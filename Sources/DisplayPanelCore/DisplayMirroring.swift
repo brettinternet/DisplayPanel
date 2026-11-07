@@ -969,16 +969,14 @@ struct MirrorController {
         func showModes(_ observed: RecoverySnapshot) -> RecoverySnapshot {
             MirrorSessionTopology.showModeBaseline(baseline, removals: removals, showing: target.uuid, current: observed)
         }
-        func targetModeUnavailable(_ error: Error) -> Bool {
-            guard case RecoveryError.modeUnavailable(let uuid, _, _) = error else { return false }
-            return uuid.caseInsensitiveCompare(target.uuid) == .orderedSame
-        }
         do {
             try preflightModes(showModes(current))
-        } catch {
+        } catch let error as RecoveryError {
             // Only the selected monitor's missing mode can be addressed by
             // this input return. Never switch another removal's input.
-            guard targetModeUnavailable(error), returnInputBeforeRestore != nil else { throw error }
+            guard case .modeUnavailable(let uuid, _, _) = error,
+                  uuid.caseInsensitiveCompare(target.uuid) == .orderedSame,
+                  returnInputBeforeRestore != nil else { throw error }
         }
         guard let returnInputBeforeRestore else { return current }
         guard Self.sameStoredJournal(journal, try store.load()) else {
@@ -1005,17 +1003,14 @@ struct MirrorController {
         // within five seconds. A switched input makes the monitor relink some
         // seconds later (Auto Select off), so within 15 seconds it also needs
         // relink evidence (target unready or topology changed) or five seconds
-        // of continuous ready stability. A relinked HDMI monitor can list its
-        // saved high-refresh mode tens of seconds late (AW3425DW), so while
-        // only that mode is missing the wait extends to 60 seconds.
+        // of continuous ready stability.
         func settle(from preIdentity: String?, switched: Bool) throws -> RecoverySnapshot {
-            var lastAttempt = switched ? 74 : 25
+            let lastAttempt = switched ? 74 : 25
             let quietMatches = 25
             relinked = !switched
             var previous: String?
             var matches = 0
-            var attempt = 0
-            while true {
+            for attempt in 0...lastAttempt {
                 guard Self.sameStoredJournal(journal, try store.load()) else {
                     throw RecoveryError.unsafe("journal changed during input return; inspect recovery status")
                 }
@@ -1035,7 +1030,7 @@ struct MirrorController {
                         }
                         return observed
                     }
-                    if attempt >= lastAttempt {
+                    if attempt == lastAttempt {
                         throw RecoveryError.unsafe("display topology did not settle after input return; retry Show when stable; journal retained")
                     }
                 } catch {
@@ -1043,14 +1038,11 @@ struct MirrorController {
                     relinked = true
                     previous = nil
                     matches = 0
-                    if switched, targetModeUnavailable(error) {
-                        lastAttempt = max(lastAttempt, min(attempt + quietMatches, 299))
-                    }
-                    if attempt >= lastAttempt { throw error }
+                    if attempt == lastAttempt { throw error }
                 }
                 engine.convergencePause()
-                attempt += 1
             }
+            throw RecoveryError.unsafe("display topology did not settle after input return; journal retained")
         }
         let settled = try settle(from: preInputIdentity, switched: switched)
         // A monitor that stays linked through the return (S2721DGF) can keep a

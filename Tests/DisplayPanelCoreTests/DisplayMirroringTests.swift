@@ -1361,10 +1361,11 @@ final class DisplayMirroringTests: XCTestCase {
     // Regression: with monitor Auto Select off, the input write itself starts
     // the relink, so Show must not restore during the pre-relink quiet period.
     // A return that never relinks re-selects the input once (S2721DGF keeps a
-    // dead link otherwise) and settles again before restoring.
+    // dead link otherwise) and settles again before restoring. S2721DGF's
+    // return is often unconfirmed, which must re-select too.
     func testShowAfterInputSwitchWaitsForRelinkOrQuietFloor() throws {
-        for relinks in [true, false] {
-            let store = RecoveryStore(url: directory.appendingPathComponent("relink-\(relinks).json"))
+        for (relinks, returned) in [(true, DDCInputSelection.Outcome.verified), (false, .verified), (false, .unverified)] {
+            let store = RecoveryStore(url: directory.appendingPathComponent("relink-\(relinks)-\(returned).json"))
             let original = try snapshot()
             let mirrored = try snapshot { $0[1]["mirrorUUID"] = self.sourceUUID; $0[1]["active"] = false }
             let unplugged = try snapshot { $0.remove(at: 1) }
@@ -1401,8 +1402,9 @@ final class DisplayMirroringTests: XCTestCase {
                 selected.append(requested)
                 capturesAfterSwitch = 0
                 if relinks || selected.count == 3 { unpluggedSamples = 3 }
-                return DDCInputSelection(displayID: displayID, uuid: uuid, original: originalInput,
-                    requested: requested, observed: requested, outcome: .verified, detail: nil)
+                let outcome = selected.count == 1 ? returned : .verified
+                return DDCInputSelection(displayID: displayID, uuid: uuid, original: originalInput, requested: requested,
+                    observed: outcome == .verified ? requested : nil, outcome: outcome, detail: nil)
             }
             let outcome = try sut.guardedBack(expectedJournalID: id, input: 15, store: store)
             XCTAssertEqual(outcome.state, .verified)
@@ -1417,42 +1419,6 @@ final class DisplayMirroringTests: XCTestCase {
             XCTAssertNoThrow(try original.verify(current))
             XCTAssertTrue(try store.load().state.resolved)
         }
-    }
-
-    // Regression: AW3425DW listed its 240 Hz mode more than 15 s after
-    // relinking on HDMI, so the first Show failed and a retry worked.
-    func testShowWaitsForRelinkedTargetModeBeyondRelinkWindow() throws {
-        let original = try snapshot()
-        let mirrored = try snapshot { $0[1]["mirrorUUID"] = self.sourceUUID; $0[1]["active"] = false }
-        var current = original
-        var missingModeSamples = 0
-        var sut = HandoffController(mirror: controller(original), report: { _ in })
-        sut.mirror.records = { self.records(current) }
-        sut.mirror.engine.capture = { current }
-        sut.mirror.engine.apply = { current = $0 }
-        sut.mirror.preflightModes = { _ in
-            guard missingModeSamples > 0 else { return }
-            missingModeSamples -= 1
-            throw RecoveryError.modeUnavailable(displayUUID: self.snapshotUUID(2), mode: "3440×1440 at 240.0 Hz")
-        }
-        sut.mirror.transaction = MirrorTransaction(
-            begin: { OpaquePointer(bitPattern: 1)! }, stage: { _, _, _ in },
-            complete: { _, _ in current = mirrored }, cancel: { _ in })
-        try sut.away(selector: "8", source: "7", input: nil, store: store)
-        let id = try store.load().id
-        sut.open = { uuid, allowInactive in
-            let target = try DDC.resolveDisplay(selector: uuid, records: self.records(current), allowInactive: allowInactive)
-            return (target, DDCChannel(getVCP: { _ in (15, 0) }, setVCP: { _, _ in XCTFail("fake selector only") }))
-        }
-        sut.select = { requested, _, displayID, uuid, originalInput in
-            missingModeSamples = 150
-            return DDCInputSelection(displayID: displayID, uuid: uuid, original: originalInput,
-                requested: requested, observed: requested, outcome: .verified, detail: nil)
-        }
-        _ = try sut.guardedBack(expectedJournalID: id, input: 17, store: store)
-        XCTAssertEqual(missingModeSamples, 0)
-        XCTAssertNoThrow(try original.verify(current))
-        XCTAssertTrue(try store.load().state.resolved)
     }
 
     func testShowAttemptsKnownReturnInputWhenPreReadIsMalformed() throws {

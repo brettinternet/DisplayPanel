@@ -115,6 +115,9 @@ final class AppModel: ObservableObject {
     }
     private var runningActionInterrupted = false
     private var actionTopologyWriteInProgress = false
+    private let displayWriteQueue = DispatchQueue(label: "com.brettinternet.displaypanel.display-write", qos: .userInitiated)
+    /// Non-nil while a Hide or Show write runs on `displayWriteQueue`: screen events to replay after it.
+    private var deferredDisplayEvents: [() -> Void]?
     private var preflightingDisplayAction = false
     private var lastDisplayActionFinished: ContinuousClock.Instant?
     private var lastOneShotFinished: ContinuousClock.Instant?
@@ -3454,7 +3457,8 @@ final class AppModel: ObservableObject {
     /// keeps it as the input Show switches back to.
     func detectMacInput(for targetUUID: String) {
         let key = targetUUID.lowercased()
-        guard !hideConfigurationFrozen(for: targetUUID),
+        // A running Hide or Show may be writing DDC to another monitor.
+        guard !hideConfigurationFrozen(for: targetUUID), !hideOperation.isBusy,
               let configuration = hidePreferences[targetUUID], configuration.enabled,
               let display = matchingSavedDisplay(configuration.target),
               isEligibleHideTarget(display), !isDisplayMirrored(display.id) else { return }
@@ -4728,7 +4732,7 @@ final class AppModel: ObservableObject {
         onStatusChange?()
         let finish: (Bool, String?) -> Void = { [weak self] succeeded, message in
             Task { @MainActor in
-                self?.finishHideAfterProtectionQuiescence(
+                await self?.finishHideAfterProtectionQuiescence(
                     request,
                     manualAction: manualAction,
                     manualActionStepIndex: manualActionStepIndex,
@@ -4846,7 +4850,7 @@ final class AppModel: ObservableObject {
         onStatusChange?()
         let finish: (Bool, String?) -> Void = { [weak self] succeeded, message in
             Task { @MainActor in
-                self?.finishShowAfterProtectionQuiescence(
+                await self?.finishShowAfterProtectionQuiescence(
                     request,
                     actionLeaseID: actionLeaseID,
                     cleanupSucceeded: succeeded,
@@ -4983,6 +4987,7 @@ final class AppModel: ObservableObject {
     }
 
     func refreshHandoffStatus() {
+        guard deferredDisplayEvents == nil else { return }  // See refreshDisplays.
         let previous = handoffStatus
         let previousFailure = handoffInspectionFailure
         let wasUnresolved = previous?.hasUnresolvedJournal == true || previousFailure != nil
@@ -5708,6 +5713,9 @@ final class AppModel: ObservableObject {
     }
 
     func refreshDisplays(restartWatcher: Bool = false) {
+        // A running Hide or Show write owns the topology and journal lock. It
+        // refreshes when it finishes, and screen events replay after it.
+        guard deferredDisplayEvents == nil else { return }
         if restartWatcher, runningDisplayAction != nil { runningActionInterrupted = true }
         displays = displayProvider()
         refreshHandoffStatus()
@@ -6199,6 +6207,33 @@ final class AppModel: ObservableObject {
         return DisplayHideRequest(target: target, source: source, awayInput: away.value, awayInputWarning: away.warning)
     }
 
+    /// Hide and Show can settle for over a minute. Run them off the main thread so
+    /// the menu and control socket stay responsive, and so SkyLight can deliver the
+    /// display notifications that refresh this process's CoreGraphics display and
+    /// mode cache; a blocked main thread left the settle reading stale modes.
+    /// Screen events that arrive meanwhile replay in order as soon as the write
+    /// returns, while the operation is still busy and before any next Action step.
+    private func performDisplayWrite(
+        _ write: @escaping () throws -> DisplayInputOutcome
+    ) async throws -> DisplayInputOutcome {
+        deferredDisplayEvents = []
+        defer {
+            let events = deferredDisplayEvents ?? []
+            deferredDisplayEvents = nil
+            events.forEach { $0() }
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            displayWriteQueue.async { continuation.resume(with: Result(catching: write)) }
+        }
+    }
+
+    /// Holds `event` until the running Hide or Show write finishes. Returns false when none is running.
+    func deferUntilDisplayWriteFinishes(_ event: @escaping () -> Void) -> Bool {
+        guard deferredDisplayEvents != nil else { return false }
+        deferredDisplayEvents?.append(event)
+        return true
+    }
+
     private func finishHideAfterProtectionQuiescence(
         _ request: DisplayHideRequest,
         manualAction: DisplayAction? = nil,
@@ -6208,7 +6243,7 @@ final class AppModel: ObservableObject {
         cleanupSucceeded: Bool,
         cleanupFailure: String?,
         completion: ((DisplayOperationResult) -> Void)?
-    ) {
+    ) async {
         guard hideOperation == .hiding(request.target.uuid) else { return }
         let notAttempted = DisplayInputOutcome(
             state: request.awayInput == nil ? .notRequested : .notAttempted,
@@ -6244,13 +6279,14 @@ final class AppModel: ObservableObject {
                   sameHideRequest(request, hideRequest(target: target, source: sourceSnapshot, configuration: configuration)) else {
                 throw DisplayHideError.identityChanged("The displays or Hide settings changed before Hide began. Try again.")
             }
+            let (targetID, sourceID, awayInput) = (coreIdentity(request.target), coreIdentity(request.source), request.awayInput)
             let inputOutcome: DisplayInputOutcome
             do {
                 actionTopologyWriteInProgress = actionLeaseID != nil
                 defer { actionTopologyWriteInProgress = false }
-                inputOutcome = try hideDisplay(
-                    coreIdentity(request.target), coreIdentity(request.source), request.awayInput
-                )
+                inputOutcome = try await performDisplayWrite { [hideDisplay] in
+                    try hideDisplay(targetID, sourceID, awayInput)
+                }
             }
             returnedInputOutcome = inputOutcome
             displays = displayProvider()
@@ -6281,7 +6317,7 @@ final class AppModel: ObservableObject {
         cleanupSucceeded: Bool,
         cleanupFailure: String?,
         completion: ((DisplayOperationResult) -> Void)?
-    ) {
+    ) async {
         guard case .showing(let targetUUID) = hideOperation else { return }
         let notAttempted = DisplayInputOutcome(
             state: request.returnInput == nil ? .notRequested : .notAttempted,
@@ -6321,11 +6357,14 @@ final class AppModel: ObservableObject {
         do {
             let showKey = request.status.removals.count > 1
                 ? "\(expectedJournalID)|\(request.targetUUID)" : expectedJournalID
+            let returnInput = request.returnInput
             let inputOutcome: DisplayInputOutcome
             do {
                 actionTopologyWriteInProgress = actionLeaseID != nil
                 defer { actionTopologyWriteInProgress = false }
-                inputOutcome = try showDisplay(showKey, request.returnInput)
+                inputOutcome = try await performDisplayWrite { [showDisplay] in
+                    try showDisplay(showKey, returnInput)
+                }
             }
             returnedInputOutcome = inputOutcome
             displays = displayProvider()

@@ -458,17 +458,17 @@ struct DisplaySettingsView: View {
                             .disabled(frozen || model.hideOperation.isBusy)
                     }
                     Button("Detect Again") { model.detectMacInput(for: uuid) }
-                        .disabled(frozen)
+                        .disabled(frozen || model.hideOperation.isBusy)
                 case .unavailable?:
                     Button("Detect Again") { model.detectMacInput(for: uuid) }
-                        .disabled(frozen)
+                        .disabled(frozen || model.hideOperation.isBusy)
                 case .detected?, nil:
                     EmptyView()
                 }
             }
         }
-        .task(id: "\(tileID)|\(frozen)") {
-            if !frozen, model.macInputDetections[tileID] == nil {
+        .task(id: "\(tileID)|\(frozen)|\(model.hideOperation.isBusy)") {
+            if !frozen, !model.hideOperation.isBusy, model.macInputDetections[tileID] == nil {
                 model.detectMacInput(for: uuid)
             }
         }

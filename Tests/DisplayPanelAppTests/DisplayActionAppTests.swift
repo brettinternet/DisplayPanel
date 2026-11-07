@@ -1154,6 +1154,12 @@ final class DisplayActionAppTests: XCTestCase {
         XCTAssertFalse(model.isRemovedDisplay(targetUUID))
     }
 
+    /// Fake writers run on the display-write queue. AppKit delivers screen events
+    /// on main, where AppDelegate defers them until the write returns.
+    private func screenEvent(_ model: AppModel, _ event: @escaping () -> Void) {
+        DispatchQueue.main.sync { if !model.deferUntilDisplayWriteFinishes(event) { event() } }
+    }
+
     func testActionTopologyNotificationsContinueAfterVerifiedRemoveAndShow() async throws {
         let defaults = try makeDefaults()
         let box = StatusBox(noneStatus())
@@ -1163,13 +1169,13 @@ final class DisplayActionAppTests: XCTestCase {
             defaults: defaults, box: box,
             hide: { _, _, input in
                 writes.append("hide")
-                model.displayParametersChanged()
+                self.screenEvent(model) { model.displayParametersChanged() }
                 box.value = self.hiddenStatus()
                 return DisplayInputOutcome(state: .verified, requestedInput: input)
             },
             show: { _, input in
                 writes.append("show")
-                model.displayParametersChanged()
+                self.screenEvent(model) { model.displayParametersChanged() }
                 box.value = self.noneStatus()
                 return DisplayInputOutcome(state: .verified, requestedInput: input)
             },
@@ -1208,8 +1214,8 @@ final class DisplayActionAppTests: XCTestCase {
         let box = StatusBox(noneStatus())
         var model: AppModel!
         model = makeModel(defaults: defaults, box: box, hide: { _, _, _ in
-            model.displayParametersChanged()
-            model.beginDisplaySleepTransition()
+            self.screenEvent(model) { model.displayParametersChanged() }
+            self.screenEvent(model) { model.beginDisplaySleepTransition() }
             box.value = self.hiddenStatus()
             return .notRequested
         })
@@ -1232,7 +1238,7 @@ final class DisplayActionAppTests: XCTestCase {
         var model: AppModel!
         model = makeModel(defaults: defaults, box: box, displayProvider: { inventory.value }, hide: { _, _, _ in
             inventory.value.removeAll { $0.uuid == self.sourceUUID }
-            model.displayParametersChanged()
+            self.screenEvent(model) { model.displayParametersChanged() }
             box.value = self.hiddenStatus()
             return .notRequested
         })

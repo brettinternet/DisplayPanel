@@ -493,8 +493,7 @@ final class DisplayHideTests: XCTestCase {
                     XCTAssertEqual(inputs, 0, "do not switch an unrelated or unverified monitor")
                 } else { XCTAssertEqual(inputs, 1) }
             }
-            XCTAssertLessThanOrEqual(pauses, ["timeout", "failed"].contains(scenario) ? 299 : 74,
-                                     "\(scenario): settlement is bounded to 15 s, or 60 s while the target's mode is missing; writers are not retried")
+            XCTAssertLessThanOrEqual(pauses, 74, "mode/identity settlement is bounded to 15 s; writers are not retried")
         }
     }
 

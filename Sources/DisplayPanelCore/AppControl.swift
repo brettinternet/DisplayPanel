@@ -354,8 +354,8 @@ public struct AppControlClient {
     static let defaultDeadline: TimeInterval = 3
     static let pollInterval: TimeInterval = 0.05
     /// How long one display step may take; an eight-step Action gets this budget per step.
-    /// Show can wait 60 s for a relinked monitor's mode, re-select its input,
-    /// then wait again.
+    /// Show can settle for over a minute, re-select the monitor's input, then
+    /// settle again.
     static let displayResponseTimeout = 150
     static let actionResponseTimeout = displayResponseTimeout * 8
 

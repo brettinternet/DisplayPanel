@@ -459,12 +459,10 @@ struct HandoffController {
                 return inputOutcome.state.mayHaveSwitched
             }
             let relinkInput: ((RecoveryDisplay) throws -> Bool)? = input == nil ? nil : { target in
-                guard inputOutcome.state == .verified, let input, let previousInput,
+                guard [.verified, .unverified].contains(inputOutcome.state), let input, let previousInput,
                       let back = reselect(input, through: previousInput, target: target) else { return false }
-                guard back.state != .failed else {
-                    inputOutcome = back
-                    throw RecoveryError.unsafe(back.detail ?? "DDC selection failed")
-                }
+                inputOutcome = back
+                guard back.state != .failed else { throw RecoveryError.unsafe(back.detail ?? "DDC selection failed") }
                 return true
             }
             _ = try mirror.unmirror(
@@ -526,7 +524,7 @@ struct HandoffController {
             }
         }
         let relinkInput: ((RecoveryDisplay) throws -> Bool)? = input == nil ? nil : { target in
-            guard returned == .verified, let input, let previousInput,
+            guard returned == .verified || returned == .unverified, let input, let previousInput,
                   let back = reselect(input, through: previousInput, target: target) else { return false }
             report("Re-selected the Mac input through \(String(format: "0x%02X", previousInput)) to relink the monitor.")
             guard back.state != .failed else {
@@ -554,6 +552,8 @@ struct HandoffController {
     /// Some monitors keep a dead link when the Mac retrains it while they show
     /// another input: the return to the Mac input then neither hotplugs nor
     /// shows a picture, but re-selecting it through the previous input does.
+    /// An unconfirmed return qualifies too (S2721DGF): either way this ends on
+    /// the Mac input, through the input read before the return.
     /// Returns the final selection, or nil when no write was sent.
     func reselect(_ input: UInt8, through previous: UInt8, target: RecoveryDisplay) -> DisplayInputOutcome? {
         guard selectInput(previous, target: target, returning: true).state.mayHaveSwitched else { return nil }
