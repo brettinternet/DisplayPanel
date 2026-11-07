@@ -14,8 +14,12 @@ final class RecoveryDisplayBinding {
     // images, not the unversioned framework aliases accepted by dlopen.
     static let coreGraphics = "/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics"
     static let skyLight = "/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/SkyLight"
-    static let coreGraphicsUUID = "B0FB9AC2-E3CC-31C2-A90E-0D38A776BAE2"
-    static let skyLightUUID = "8A3B348E-4637-3685-92D0-6CBC2F36A234"
+    /// Image pairs whose setter, begin and config validator were disassembled
+    /// read-only. Add a pair only with fresh evidence for that build.
+    static let verifiedImages: [(coreGraphics: String, skyLight: String)] = [
+        ("B0FB9AC2-E3CC-31C2-A90E-0D38A776BAE2", "8A3B348E-4637-3685-92D0-6CBC2F36A234"), // 26A434
+        ("72E77A2C-C0E6-3871-B1EF-EC3D728C74DE", "1AD26AFB-B313-3086-95F0-43FC18B8FBCA"), // 26B123
+    ]
 
     // Closure seams permit resolution tests without loading or calling private APIs.
     struct Loader {
@@ -63,8 +67,7 @@ final class RecoveryDisplayBinding {
         }
         // The inspected binary images, not the OS marketing/build string, define ABI compatibility.
         var failures: [String] = []
-        for (path, name, uuid) in [(coreGraphics, "CGSConfigureDisplayEnabled", coreGraphicsUUID),
-                                   (skyLight, "SLSConfigureDisplayEnabled", skyLightUUID)] {
+        for (path, name) in [(coreGraphics, "CGSConfigureDisplayEnabled"), (skyLight, "SLSConfigureDisplayEnabled")] {
             guard let handle = loader.open(path) else {
                 failures.append("missing framework \(path)"); continue
             }
@@ -75,9 +78,13 @@ final class RecoveryDisplayBinding {
             }
             // Both names must lead to the inspected SkyLight implementation.
             // A present but unqualified preferred image is not a fallback signal.
-            guard loader.imageUUID(path) == uuid,
-                  loader.symbolImage(pointer) == skyLight,
-                  loader.imageUUID(skyLight) == skyLightUUID else {
+            // Images from different verified builds never mix.
+            let images = (coreGraphics: loader.imageUUID(coreGraphics), skyLight: loader.imageUUID(skyLight))
+            guard verifiedImages.contains(where: { verified in
+                      (path == skyLight || images.coreGraphics == verified.coreGraphics) &&
+                          images.skyLight == verified.skyLight
+                  }),
+                  loader.symbolImage(pointer) == skyLight else {
                 throw RecoveryError.unsafe("private display backend unavailable: unverified ABI image for \(name) on OS build \(osBuild)")
             }
             let result = RecoveryDisplayBinding(handle: handle, pointer: pointer, loader: loader)

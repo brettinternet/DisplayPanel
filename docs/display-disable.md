@@ -22,6 +22,10 @@ CGCompleteDisplayConfiguration(config, kCGConfigureForSession);
   to SkyLight's `SLSConfigureDisplayEnabled`) with the signature
   `@convention(c) (CGDisplayConfigRef, CGDirectDisplayID, Bool) -> CGError`.
   If macOS changes, the feature reports unavailable instead of breaking.
+  Verified builds: `26A434` and `26B123` (macOS 27.2), each by read-only
+  disassembly of the setter, `SLSBeginDisplayConfiguration` and its config
+  check (`xcrun dyld_info -uuid -exports`, then static `lldb disassemble`
+  against a binary that links CoreGraphics; nothing runs).
 - **Session scope only.** App scope strands displays after a force quit;
   permanent scope survives reboot. No scope reconnects a display when the
   process dies, so a separate helper owns recovery.

@@ -4,6 +4,7 @@
 
 - Clear a hidden display's failed Hide or Show error once it's back on the desktop, including when another display's Show restored it.
 - Choose each display's Hide style (Black out or Remove from desktop) from a Style menu in Settings → Displays → Hide.
+- Full disconnect recognizes the macOS 27.2 (26B123) setter; it reported the setter unavailable after the update.
 
 ## 0.9.9
 

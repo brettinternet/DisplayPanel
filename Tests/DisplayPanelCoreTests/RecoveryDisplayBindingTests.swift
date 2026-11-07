@@ -14,7 +14,8 @@ final class RecoveryDisplayBindingTests: XCTestCase {
     private final class Fixture {
         var opens: [String] = [], symbols: [String] = [], closes = 0
         var missingFrameworks: Set<String> = [], missingSymbols: Set<String> = []
-        var uuids = [Binding.coreGraphics: Binding.coreGraphicsUUID, Binding.skyLight: Binding.skyLightUUID]
+        var uuids = [Binding.coreGraphics: Binding.verifiedImages[1].coreGraphics,
+                     Binding.skyLight: Binding.verifiedImages[1].skyLight]
         var origin: String? = Binding.skyLight
         var loader: Binding.Loader {
             Binding.Loader(open: { path in
@@ -89,10 +90,11 @@ final class RecoveryDisplayBindingTests: XCTestCase {
     }
 
     func testUnknownImagesOrSymbolOriginRefuseWithoutFallback() {
-        for variant in 0..<5 {
+        for variant in 0..<6 {
             let fixture = Fixture()
             switch variant {
             case 0: fixture.uuids[Binding.coreGraphics] = "other"
+            case 5: fixture.uuids[Binding.coreGraphics] = Binding.verifiedImages[0].coreGraphics // another build's image
             case 1: fixture.uuids[Binding.skyLight] = nil
             case 2: fixture.origin = Binding.coreGraphics
             case 3: fixture.origin = nil
@@ -134,8 +136,8 @@ final class RecoveryDisplayBindingTests: XCTestCase {
 
     func testCurrentVerifiedBuildResolvesWithoutConstructingTransaction() throws {
         #if arch(arm64)
-        guard try systemString("kern.osversion") == "26A434" else {
-            throw XCTSkip("read-only binding check requires verified build 26A434")
+        guard try ["26A434", "26B123"].contains(systemString("kern.osversion")) else {
+            throw XCTSkip("read-only binding check requires a verified build")
         }
         // Resolve symbols and inspect loaded images only: no transaction is
         // constructed, and neither public nor private display APIs are called.
