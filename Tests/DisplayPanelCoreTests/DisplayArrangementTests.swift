@@ -517,6 +517,10 @@ final class DisplayArrangementTests: XCTestCase {
         XCTAssertFalse(try sut.isAvailable(saved))
         XCTAssertThrowsError(try sut.restore(saved), "never pick between two equal modes")
         XCTAssertEqual(written.count, 1)
+        let defaultTwin = try mode(rate: 240, id: 121, flags: 0x4)
+        offered = [low, try mode(rate: 240, id: 120), defaultTwin]
+        XCTAssertTrue(try sut.restore(saved))
+        XCTAssertEqual(written.last, defaultTwin, "a top rate's default-marked twin keeps the saved flags")
     }
 
     func testModeRestoreRejectsMissingExactModeIdentityMirrorsJournalsAndLocks() throws {

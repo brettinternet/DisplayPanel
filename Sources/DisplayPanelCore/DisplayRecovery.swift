@@ -56,11 +56,15 @@ public struct RecoveryMode: Codable, Equatable {
         renumberingInvariant == saved.renumberingInvariant
     }
 
-    /// This mode as `modes` offers it: itself, or its single renumbering.
+    /// This mode as `modes` offers it: itself, or its single renumbering. A top
+    /// refresh rate is listed twice, with and without the default marker
+    /// (AW3425DW 240 Hz: modes 99 and 100), so the twin with equal flags wins.
     func offered(in modes: [RecoveryMode]) -> RecoveryMode? {
         if modes.contains(self) { return self }
         let renumberings = modes.filter { $0.isRenumbering(of: self) }
-        return renumberings.count == 1 ? renumberings[0] : nil
+        if renumberings.count == 1 { return renumberings[0] }
+        let sameFlags = renumberings.filter { $0.flags == flags }
+        return sameFlags.count == 1 ? sameFlags[0] : nil
     }
 
     /// This mode without its table position or default marker.

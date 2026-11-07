@@ -264,8 +264,9 @@ After reconnect/input return or wake, DisplayPanel waits for stable inventory an
 restores a differing exact mode once, before sampling the arrangement for
 correction. The saved mode must appear in CoreGraphics' offered list. A same-boot
 renumbering (another mode ID or a moved default marker, every other field equal)
-is used only when exactly one offered mode matches; no nearest resolution, refresh
-rate or scale is substituted.
+is used only when exactly one offered mode matches, or exactly one of them also has
+equal flags (a top refresh rate is listed with and without the default marker); no
+nearest resolution, refresh rate or scale is substituted.
 A late mode can arrive within the original 15-second transition deadline, and
 arrangement correction waits for it. At the deadline, protection reports the
 unavailable mode (or other blocking reason) without writing it; arrangement

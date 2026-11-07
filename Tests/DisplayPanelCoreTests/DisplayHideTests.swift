@@ -1111,14 +1111,15 @@ final class DisplayHideTests: XCTestCase {
         XCTAssertEqual(renumbered.publicMirrorSession?.removals.map(\.sourceID), [8, 8])
 
         // A relink can also rebuild a mode table: the same mode gets a new ID
-        // and may lose or gain its default marker. Only one such mode is adopted.
+        // and may lose or gain its default marker. Only one such mode, or one
+        // with equal flags, is adopted.
         func mode(_ id: Int, flags: Int = 0, refreshRate: Double = 60) throws -> RecoveryMode {
             try JSONDecoder().decode(RecoveryMode.self, from: JSONSerialization.data(withJSONObject: [
                 "id": id, "width": 1920, "height": 1080, "pixelWidth": 1920, "pixelHeight": 1080,
                 "refreshRate": refreshRate, "flags": flags]))
         }
         let moved = try mode(103, flags: 0x4)
-        topology.availableModes[9] = [moved, try mode(104)]
+        topology.availableModes[9] = [moved, try mode(104), try mode(105)]
         _ = try controller().inspect()
         XCTAssertEqual(try store.load().snapshot, renumbered.snapshot, "an ambiguous mode is never adopted")
         topology.availableModes[9] = [moved, try mode(104, refreshRate: 30)]
