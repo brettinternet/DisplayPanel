@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.8
 
 - Hide another display while a hidden monitor on another input doesn't offer its saved mode.
 
