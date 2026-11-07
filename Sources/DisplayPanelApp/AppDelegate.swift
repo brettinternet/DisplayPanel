@@ -24,6 +24,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var launchedAsLoginItem = false
     private var suppressInitialSettings = false
     private var terminationPending = false
+    /// `dp app quit` keeps an unresolved journal for the next launch instead of asking.
+    private var quitKeepingJournal = false
     private lazy var blackoutFocusController = BlackoutFocusController { [weak self] in
         self?.handleBlackoutEscape() ?? false
     }
@@ -111,6 +113,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     ) -> NSApplication.TerminateReply {
         guard let model else { return .terminateNow }
         guard !terminationPending else { return .terminateLater }
+        let keepingJournal = quitKeepingJournal
+        quitKeepingJournal = false
         if let runningAction = model.runningDisplayAction {
             let alert = NSAlert()
             alert.alertStyle = .warning
@@ -129,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             alert.runModal()
             return .terminateCancel
         }
-        if model.handoffStatus?.hasUnresolvedJournal == true || model.protectionQuiescenceFailure != nil {
+        if !keepingJournal, model.handoffStatus?.hasUnresolvedJournal == true || model.protectionQuiescenceFailure != nil {
             let status = model.handoffStatus
             let target = status?.hasUnresolvedJournal == true ? status?.target : nil
             let removalCount = status?.removals.filter(\.isUnresolved).count ?? (target == nil ? 0 : 1)
@@ -862,6 +866,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .openSettings:
             showSettings()
             NSApp.activate(ignoringOtherApps: true)
+        case .quit:
+            guard !model.hideOperation.isBusy else {
+                let message = "Wait for Hide or Show to finish."
+                return controlResponse(ok: false, summary: message, error: message, outcome: .busy)
+            }
+            quitKeepingJournal = true
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+            return controlResponse(ok: true, summary: "Quitting")
         }
         return controlResponse(ok: true)
     }

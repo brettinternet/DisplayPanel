@@ -38,7 +38,11 @@ func terminateRunningApp(at destination: URL) throws {
     }
     guard !runningApps.isEmpty else { return }
 
-    runningApps.forEach { $0.terminate() }
+    // The app's own quit keeps an unresolved display journal without a prompt
+    // that would block the install. Builds without it get a regular quit.
+    if !requestQuit(cli: destination.appendingPathComponent("Contents/Helpers/dp")) {
+        runningApps.forEach { $0.terminate() }
+    }
     let deadline = Date().addingTimeInterval(5)
     while runningApps.contains(where: { !$0.isTerminated }), Date() < deadline {
         RunLoop.current.run(until: Date().addingTimeInterval(0.05))
@@ -46,6 +50,17 @@ func terminateRunningApp(at destination: URL) throws {
     guard runningApps.allSatisfy(\.isTerminated) else {
         throw InstallError.destinationRunning(destination.path)
     }
+}
+
+func requestQuit(cli: URL) -> Bool {
+    let process = Process()
+    process.executableURL = cli
+    process.arguments = ["app", "quit"]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    guard (try? process.run()) != nil else { return false }
+    process.waitUntilExit()
+    return process.terminationStatus == 0
 }
 
 func run(_ tool: String, _ arguments: [String]) throws -> Bool {

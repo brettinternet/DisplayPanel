@@ -20,6 +20,7 @@ public enum AppControlCommand: String, Codable, Equatable, Sendable {
     case snooze
     case resume
     case openSettings = "open-settings"
+    case quit
 
     public static let blackoutNowMigrationGuidance =
         "app blackout-now is retired. Use `dp app hide --display <UUID>` to hide one display, `dp app run-action --action <UUID>` to run a saved Action, or `dp app run-rule --rule <UUID>` to run one saved Automation rule."
@@ -387,7 +388,7 @@ public struct AppControlClient {
         self.isAppRunning = isAppRunning
     }
 
-    /// Sends one request. Status, Hide/Show, Actions and one-shot rules never
+    /// Sends one request. Status, Quit, Hide/Show, Actions and one-shot rules never
     /// start the app. Other mutating commands may launch it after an unavailable
     /// first attempt; manual commands are never retried after request bytes land.
     public func execute(
@@ -421,7 +422,7 @@ public struct AppControlClient {
         do {
             return try send(command, durationSeconds: durationSeconds, targetUUID: targetUUID, actionID: actionID, ruleID: ruleID, hideStyle: hideStyle)
         } catch let error as AppControlTransportError {
-            if command == .status || command.isManualDisplayCommand {
+            if command == .status || command == .quit || command.isManualDisplayCommand {
                 if !error.requestBytesWritten, !isAppRunning() {
                     return .unavailable(error.description)
                 }

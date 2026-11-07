@@ -220,6 +220,7 @@ public enum CLIHelp {
               snooze --for <duration>
               resume
               open-settings
+              quit
               hide --display <UUID> [--style black-out]
               show --display <UUID>
               toggle-hide --display <UUID> [--style black-out]
@@ -232,6 +233,8 @@ public enum CLIHelp {
             It never launches or reconnects to the app.
             snooze temporarily pauses automation
             for up to 30 days; resume ends a snooze early.
+            quit keeps removed displays hidden and their journal for the next launch,
+            without the quit prompt; it never launches the app.
             hide, show and toggle-hide act like the display's Hide or Show in
             the running app and wait for the result. Hide uses the configured
             style by default; --style black-out forces a black cover for that

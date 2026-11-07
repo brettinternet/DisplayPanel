@@ -156,18 +156,20 @@ final class AppControlTests: XCTestCase {
         )
     }
 
-    func testStatusDoesNotLaunchAndReportsUnavailable() throws {
-        var launched = false
-        let client = try AppControlClient(
-            socketPath: "/private/tmp/displaypanel-test-no-such-socket-\(UUID().uuidString)",
-            launch: { launched = true },
-            isAppRunning: { false }
-        )
-        let response = try client.execute(.status)
-        XCTAssertFalse(launched)
-        XCTAssertFalse(response.running)
-        XCTAssertFalse(response.ok)
-        XCTAssertEqual(response.state, "unavailable")
+    func testStatusAndQuitDoNotLaunchAndReportUnavailable() throws {
+        for command in [AppControlCommand.status, .quit] {
+            var launched = false
+            let client = try AppControlClient(
+                socketPath: "/private/tmp/displaypanel-test-no-such-socket-\(UUID().uuidString)",
+                launch: { launched = true },
+                isAppRunning: { false }
+            )
+            let response = try client.execute(command)
+            XCTAssertFalse(launched, "\(command)")
+            XCTAssertFalse(response.running)
+            XCTAssertFalse(response.ok)
+            XCTAssertEqual(response.state, "unavailable")
+        }
     }
 
     func testSocketPathRejectsTraversalAndOverflow() throws {
