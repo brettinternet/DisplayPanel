@@ -1,6 +1,6 @@
 public enum CLIHelp {
     /// Release version displayed by `dp --version`.
-    public static let version = "dp 0.9.6"
+    public static let version = "dp 0.9.7"
 
     public static func text(for command: String? = nil) -> String {
         switch command {

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.7
 
 - Print readable `dp` output: tables for `list`, `probe` and `app status`, named displays in steps and DDC results, and plain mirror and handoff messages. `--json` is unchanged.
 - Name displays hidden by mirroring instead of "Display 1".
