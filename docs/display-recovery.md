@@ -264,8 +264,8 @@ and never silently update the saved choice.
 
 **Refresh rate** lists one offered mode per rate at the current resolution and
 scale (a top rate's default-marked twin when both are listed). Choosing one applies
-it with the same locked, session-only, verified write as protection, off the main
-thread like Hide and Show, then replaces a saved mode so protection keeps it.
+it with the same locked, session-only, verified write as protection, then
+replaces a saved mode so protection keeps it.
 It is unavailable for hidden or mirrored displays and while recovery or another
 display operation runs.
 
@@ -289,8 +289,10 @@ mode protection; Hide/Show recovery keeps owning those modes. DisplayPanel opera
 wake resume and hidden-display input-return repair suspend correction. Each write
 holds the operation and default-journal locks, rechecks identity and topology at
 staging and commit, uses a public session-only CoreGraphics transaction, and verifies
-the resulting exact mode. A failed write or verification is reported and never
-retried in that transition. Own-operation notifications cannot start another pass.
+the resulting exact mode. Like Hide and Show, the write runs off the main thread,
+so verification reads freshly notified modes; Hide, Show and Actions wait for it.
+A failed write or verification is reported and never retried in that transition.
+Own-operation notifications cannot start another pass.
 A Show that resolves the journal gets one pass, like an input return, so a display
 hidden while a relink offered only a reduced mode table returns to its saved mode.
 Results and refusal reasons appear beside the saved mode in Settings.

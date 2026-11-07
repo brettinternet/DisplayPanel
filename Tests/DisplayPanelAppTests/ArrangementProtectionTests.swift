@@ -105,11 +105,12 @@ final class ArrangementProtectionTests: XCTestCase {
             }, modeAvailable: { state.modeOffered && !state.unoffered.contains($0.uuid) }, writeMode: { saved, revalidate in
                 state.modeLockHeld = true
                 defer { state.modeLockHeld = false }
-                state.modeBeforeBoundary?()
+                // The write runs off main; display events and sleep arrive on main meanwhile.
+                if let hook = state.modeBeforeBoundary { DispatchQueue.main.sync(execute: hook) }
                 try revalidate()
                 state.modeWrites += 1
                 state.order.append("mode")
-                state.modeOnWrite?()
+                if let hook = state.modeOnWrite { DispatchQueue.main.sync(execute: hook) }
                 if state.modeFailure { throw ArrangementProtectionError("Saved display mode did not verify.") }
                 state.modes[saved.uuid] = saved.mode
                 if let index = state.layout.members.firstIndex(where: { $0.uuid == saved.uuid }) {
@@ -401,12 +402,15 @@ final class ArrangementProtectionTests: XCTestCase {
         model.displayReconfigured(display: 1, flags: .setModeFlag)
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(state.modeWrites, 0, "System Settings changes without a transition stand")
+        var busyDuringWrite = false
         state.modeOnWrite = { [weak model] in
+            busyDuringWrite = model?.hideOperation.isBusy == true
             model?.displayReconfigured(display: 1, flags: .addFlag)
             model?.displayParametersChanged()
         }
         model.displayReconfigured(display: 1, flags: .addFlag)
         try await waitFor { state.writes == 1 }
+        XCTAssertTrue(busyDuringWrite, "Hide, Show and Actions wait for an off-main mode write")
         XCTAssertEqual(state.order, ["mode", "arrangement"])
         XCTAssertEqual(state.layout.members[1].x, 1920)
         XCTAssertEqual(state.modes[uuid]?.refreshRate, 240)

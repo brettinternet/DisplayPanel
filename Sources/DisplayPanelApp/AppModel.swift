@@ -133,9 +133,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var hideOperation: DisplayHideOperation = .idle {
         didSet {
             displayReconfigurationEvents.operationChanged(busy: hideOperation.isBusy)
-            if hideOperation.isBusy {
+            switch hideOperation {
+            case .hiding, .showing:
                 if inputReturnShowCompletion == nil { cancelInputReturnSettlement() }
                 cancelArrangementSettlement()
+            case .idle, .changingMode:
+                // A mode write belongs to the transition (or the user's choice) it runs in.
+                break
             }
         }
     }
@@ -608,28 +612,23 @@ final class AppModel: ObservableObject {
         let uuid = uuid.lowercased()
         refreshHandoffStatus()
         if let reason = arrangementSuspensionReason() { throw ArrangementProtectionError(reason) }
-        guard !arrangementWriting, !modeWriting else {
-            throw ArrangementProtectionError(DisplayHideError.actionInProgress.localizedDescription)
-        }
         guard !arrangementExcludedUUIDs.contains(uuid) else {
             throw ArrangementProtectionError("Show this display before changing its refresh rate.")
         }
         let target = try captureMode(uuid).with(mode)
         try target.validate()
-        hideOperation = .changingMode(uuid)
-        modeWriting = true
-        actionTopologyWriteInProgress = true
-        displayReconfigurationEvents.operationChanged(busy: true)
-        onStatusChange?()
-        defer {
-            hideOperation = .idle
-            modeWriting = false
-            actionTopologyWriteInProgress = false
-            displayReconfigurationEvents.operationChanged(busy: false)
-            displays = displayProvider()
-            onStatusChange?()
+        guard let display = displayProvider().first(where: { $0.uuid?.caseInsensitiveCompare(uuid) == .orderedSame }) else {
+            throw ArrangementProtectionError("This display is disconnected.")
         }
-        _ = try await performDisplayWrite { [writeMode] in try writeMode(target, {}) }
+        defer { displays = displayProvider() }
+        _ = try await performModeWrite(target) { [self] in
+            if let reason = arrangementSuspensionReason(ownOperation: .changingMode(uuid)) {
+                throw ArrangementProtectionError(reason)
+            }
+            guard !arrangementExcludedUUIDs.contains(uuid), !isDisplayMirrored(display.id) else {
+                throw ArrangementProtectionError("Displays changed. Try again.")
+            }
+        }
         modeResults.removeValue(forKey: uuid)
         var updated = modePreferences
         guard let index = updated.displays.firstIndex(where: { $0.id == uuid }) else { return }
@@ -637,12 +636,32 @@ final class AppModel: ObservableObject {
         try saveModePreferences(updated)
     }
 
+    /// One mode write, off the main thread like Hide and Show so SkyLight can
+    /// refresh the mode cache its verification reads. `revalidate` runs on main
+    /// at each core check; Hide, Show and Actions wait for the write meanwhile.
+    private func performModeWrite(_ saved: SavedDisplayMode,
+                                  revalidate: @escaping () throws -> Void) async throws -> Bool {
+        hideOperation = .changingMode(saved.uuid)
+        modeWriting = true
+        actionTopologyWriteInProgress = true
+        onStatusChange?()
+        defer {
+            hideOperation = .idle
+            modeWriting = false
+            actionTopologyWriteInProgress = false
+            onStatusChange?()
+        }
+        return try await performDisplayWrite { [writeMode] in
+            try writeMode(saved) { try DispatchQueue.main.sync(execute: revalidate) }
+        }
+    }
+
     private enum ModeSettlement { case done, awaitingOffer, waiting }
 
     /// Uses the same transition deadline as arrangement protection, but consumes
     /// each display before writing. Only a display still waiting for its saved
     /// mode to be offered can delay, but not cancel, arrangement correction.
-    private func settleProtectedModes() -> ModeSettlement {
+    private func settleProtectedModes() async -> ModeSettlement {
         guard !modePending.isEmpty else { return .done }
         let inventory = displayProvider()
         guard modeSample == inventory else {
@@ -690,25 +709,19 @@ final class AppModel: ObservableObject {
                 // A failed boundary check or verification consumes this attempt.
                 modePending.remove(uuid)
                 let expectedPreferences = modePreferences
-                func revalidate() throws {
+                func revalidate(during operation: DisplayHideOperation? = nil) throws {
                     // The core writer owns the journal lock here; inspecting it
                     // again would mistake our own lock for a competing operation.
-                    if let reason = arrangementSuspensionReason() { throw ArrangementProtectionError(reason) }
+                    if let reason = arrangementSuspensionReason(ownOperation: operation) {
+                        throw ArrangementProtectionError(reason)
+                    }
                     guard modePreferences == expectedPreferences, !arrangementExcludedUUIDs.contains(uuid),
                           !isDisplayMirrored(display.id) else {
                         throw ArrangementProtectionError("Displays or mode settings changed. Try again.")
                     }
                 }
                 try revalidate()
-                modeWriting = true
-                actionTopologyWriteInProgress = true
-                displayReconfigurationEvents.operationChanged(busy: true)
-                defer {
-                    modeWriting = false
-                    actionTopologyWriteInProgress = false
-                    displayReconfigurationEvents.operationChanged(busy: false)
-                }
-                let changed = try writeMode(saved, revalidate)
+                let changed = try await performModeWrite(saved) { try revalidate(during: .changingMode(uuid)) }
                 modeResults[uuid] = changed ? "Restored the saved mode." : "The saved mode already matches."
                 displays = displayProvider()
             } catch {
@@ -734,7 +747,9 @@ final class AppModel: ObservableObject {
         }.compactMap { $0.uuid?.lowercased() })
     }
 
-    private func arrangementSuspensionReason(actionLeaseID: UUID? = nil) -> String? {
+    /// `ownOperation` is the running mode write asking, which doesn't block itself.
+    private func arrangementSuspensionReason(actionLeaseID: UUID? = nil,
+                                             ownOperation: DisplayHideOperation? = nil) -> String? {
         if let arrangementStorageFailure { return arrangementStorageFailure }
         if isShuttingDown { return "DisplayPanel is shutting down." }
         if sleepLifecycleActive || inputReturnIntent != nil || displayLifecycleTransitioning {
@@ -743,7 +758,7 @@ final class AppModel: ObservableObject {
         if handoffStatus?.hasUnresolvedJournal == true || handoffInspectionFailure != nil {
             return "An unresolved display journal needs recovery first."
         }
-        return displayActionEnvironmentBlocker(prefix: "", actionLeaseID: actionLeaseID)?.message
+        return displayActionEnvironmentBlocker(prefix: "", actionLeaseID: actionLeaseID, ownOperation: ownOperation)?.message
     }
 
     var arrangementStatus: AppControlArrangementStatus {
@@ -963,11 +978,11 @@ final class AppModel: ObservableObject {
         arrangementSettlement = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
-            self.finishArrangementSettlement()
+            await self.finishArrangementSettlement()
         }
     }
 
-    private func finishArrangementSettlement() {
+    private func finishArrangementSettlement() async {
         guard let deadline = arrangementDeadline else { return }
         // The pass at the deadline may still finish, but never waits again.
         let expired = now() >= deadline
@@ -979,7 +994,9 @@ final class AppModel: ObservableObject {
             continueArrangementSettlement(expired: expired)
             return
         }
-        let modes = settleProtectedModes()
+        let modes = await settleProtectedModes()
+        // A settings change during a mode write ends this transition.
+        guard !Task.isCancelled else { return }
         guard modes == .done || (modes == .awaitingOffer && arrangementPreferences.enabled) else {
             continueArrangementSettlement(expired: expired)
             return
@@ -1757,11 +1774,14 @@ final class AppModel: ObservableObject {
     }
 
     private func displayActionEnvironmentBlocker(prefix: String, actionLeaseID: UUID?,
-                                                 allowingInputReturnWait: Bool = false) -> DisplayActionStepBlocker? {
+                                                 allowingInputReturnWait: Bool = false,
+                                                 ownOperation: DisplayHideOperation? = nil) -> DisplayActionStepBlocker? {
         func blocked(_ text: String, _ reason: AppControlWindowMoveReason = .destinationUnavailable) -> DisplayActionStepBlocker {
             DisplayActionStepBlocker(message: prefix + text, windowMoveReason: reason)
         }
-        if hideOperation.isBusy { return blocked(DisplayHideError.actionInProgress.localizedDescription) }
+        if hideOperation.isBusy, hideOperation != ownOperation {
+            return blocked(DisplayHideError.actionInProgress.localizedDescription)
+        }
         if runningDisplayAction != nil, runningDisplayAction?.id != actionLeaseID {
             return DisplayActionStepBlocker(message: displayActionBusyMessage)
         }

@@ -128,7 +128,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "Display operation in progress"
-            alert.informativeText = "Wait for Hide or Show to finish. It can’t be canceled."
+            alert.informativeText = "Wait for the display change to finish. It can’t be canceled."
             alert.addButton(withTitle: "OK")
             alert.runModal()
             return .terminateCancel
@@ -868,7 +868,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSApp.activate(ignoringOtherApps: true)
         case .quit:
             guard !model.hideOperation.isBusy else {
-                let message = "Wait for Hide or Show to finish."
+                let message = "Wait for the display change to finish."
                 return controlResponse(ok: false, summary: message, error: message, outcome: .busy)
             }
             quitKeepingJournal = true
