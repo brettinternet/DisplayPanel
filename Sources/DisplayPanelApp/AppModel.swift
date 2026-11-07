@@ -5179,6 +5179,13 @@ final class AppModel: ObservableObject {
         handoffStatus = inputReturnIntent != nil || inputReturnRepairFailed || sessionRecoveryInProgress
             ? inspectHandoffPreservingIntent() : inspectHandoff()
         handoffInspectionFailure = handoffStatus?.inspectionFailure
+        // A failed Hide or Show no longer applies once its display's removal resolves,
+        // even when another display's Show resolved it.
+        if handoffInspectionFailure == nil, let previous {
+            for uuid in displayResults.keys where previous.removal(for: uuid) != nil && handoffStatus?.removal(for: uuid) == nil {
+                clearFailedResult(uuid)
+            }
+        }
         let isUnresolved = handoffStatus?.hasUnresolvedJournal == true || handoffInspectionFailure != nil
         if preflightingDisplayAction, isUnresolved != wasUnresolved {
             deferredActionRecoveryReconciliation = true

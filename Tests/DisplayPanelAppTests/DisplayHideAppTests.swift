@@ -3017,6 +3017,14 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(blockedTile.status, .hidden)
         XCTAssertEqual(blockedTile.action, .show)
         XCTAssertEqual(blockedTile.actionBlocker, "Restore Disconnected target first.")
+
+        // Recorded 0.9.9: a refused Show's error stayed after another display's
+        // final Show restored everything.
+        model.show(targetUUID: Self.targetUUID)
+        XCTAssertEqual(model.displayResults[Self.targetKey]?.succeeded, false)
+        box.value = DisplayHandoffStatus(state: .none, journalPath: "/tmp/no-display-recovery.json")
+        model.refreshHandoffStatus()
+        XCTAssertNil(model.displayResults[Self.targetKey])
     }
 
     func testHiddenMirrorOverlayAllowsIndependentlySelectedVerifiedSources() async throws {

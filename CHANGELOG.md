@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Clear a hidden display's failed Hide or Show error once it's back on the desktop, including when another display's Show restored it.
+
 ## 0.9.9
 
 - Showing the hidden main display while other displays stay hidden makes it main again; Restore repairs one that came back without the main role.
