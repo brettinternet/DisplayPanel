@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.6
+
+- Explain display recovery problems in Settings without CLI advice such as "inspect recovery".
+- Say when arrangement protection is paused because the main display is blacked out.
+- Show one recovery explanation for displays hidden in a previous session.
+
 ## 0.9.5
 
 - Choose a display's refresh rate in Settings or with `dp app refresh-rate`; mode protection keeps the choice.
