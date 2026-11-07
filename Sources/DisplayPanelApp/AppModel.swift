@@ -636,6 +636,55 @@ final class AppModel: ObservableObject {
         try saveModePreferences(updated)
     }
 
+    /// `dp app refresh-rate`: lists the offered rates, or applies one like the picker.
+    func handleRefreshRateControlRequest(_ request: AppControlRequest) async -> AppControlResponse {
+        func response(_ outcome: AppControlOutcome?, _ message: String,
+                      _ rates: (current: RecoveryMode, choices: [RecoveryMode])? = nil) -> AppControlResponse {
+            let ok = outcome == nil || outcome == .done || outcome == .noOp
+            return AppControlResponse(ok: ok, running: true, enabled: preferences.isEnabled,
+                state: runtimeState.controlIdentifier, summary: Self.bounded(message),
+                error: ok ? nil : Self.bounded(message), outcome: outcome,
+                refreshRate: rates?.current.refreshRate, refreshRates: rates?.choices.map(\.refreshRate))
+        }
+        guard request.hasSupportedProtocol, request.command == .refreshRate,
+              let target = request.targetUUID, UUID(uuidString: target) != nil,
+              request.actionID == nil, request.ruleID == nil, request.durationSeconds == nil,
+              request.hideStyle == nil, request.watch == nil,
+              request.refreshRate.map({ $0.isFinite && $0 > 0 }) ?? true else {
+            return response(.refused, "Refresh rate takes one --display and an optional --hz.")
+        }
+        let uuid = target.lowercased()
+        refreshHandoffStatus()
+        if let reason = arrangementSuspensionReason() { return response(.refused, reason) }
+        guard !arrangementExcludedUUIDs.contains(uuid) else {
+            return response(.refused, "Show this display before changing its refresh rate.")
+        }
+        let rates: (current: RecoveryMode, choices: [RecoveryMode])
+        do { rates = try modeChoices(uuid) } catch { return response(.refused, error.localizedDescription) }
+        let offered = rates.choices.map { Self.hertz($0.refreshRate) }.joined(separator: ", ")
+        guard let hertz = request.refreshRate else {
+            return response(nil, "\(Self.hertz(rates.current.refreshRate)); offered \(offered)", rates)
+        }
+        // Rates print with two decimals, so a printed rate selects its mode.
+        let matches = rates.choices.filter { abs($0.refreshRate - hertz) < 0.005 }
+        guard matches.count == 1, let choice = matches.first else {
+            return response(.refused, "\(Self.hertz(hertz)) isn't offered at this size. Choose \(offered).", rates)
+        }
+        guard choice.refreshRate != rates.current.refreshRate else {
+            return response(.noOp, "Already \(Self.hertz(choice.refreshRate)).", rates)
+        }
+        do {
+            try await setRefreshRate(uuid: uuid, to: choice)
+        } catch {
+            return response(.failed, error.localizedDescription, rates)
+        }
+        return response(.done, "Set to \(Self.hertz(choice.refreshRate)).", (choice, rates.choices))
+    }
+
+    static func hertz(_ value: Double) -> String {
+        "\(value.formatted(.number.precision(.fractionLength(0...2)))) Hz"
+    }
+
     /// One mode write, off the main thread like Hide and Show so SkyLight can
     /// refresh the mode cache its verification reads. `revalidate` runs on main
     /// at each core check; Hide, Show and Actions wait for the write meanwhile.

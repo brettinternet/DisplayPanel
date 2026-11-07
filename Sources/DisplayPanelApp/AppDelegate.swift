@@ -804,6 +804,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return await model.handleDisplayControlRequest(request, receivedAt: receivedAt)
         case .restoreArrangement:
             return model.handleArrangementControlRequest(request)
+        case .refreshRate:
+            return await model.handleRefreshRateControlRequest(request)
         case .runRule:
             return await model.handleProtectionRuleControlRequest(request, receivedAt: receivedAt)
         case .enable:

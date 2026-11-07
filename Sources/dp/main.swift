@@ -119,7 +119,8 @@ struct DisplayPanelMain {
                     try FileHandle.standardOutput.write(contentsOf: data)
                 }
                 exit(code)
-            case .app(let appCommand, let durationSeconds, let targetUUID, let actionID, let ruleID, let hideStyle, let json):
+            case .app(let appCommand, let durationSeconds, let targetUUID, let actionID, let ruleID, let hideStyle,
+                      let refreshRate, let json):
                 let client = try AppControlClient()
                 let response: AppControlResponse
                 do {
@@ -129,7 +130,8 @@ struct DisplayPanelMain {
                         targetUUID: targetUUID,
                         actionID: actionID,
                         ruleID: ruleID,
-                        hideStyle: hideStyle
+                        hideStyle: hideStyle,
+                        refreshRate: refreshRate
                     )
                 } catch {
                     guard appCommand.isManualDisplayCommand else { throw error }

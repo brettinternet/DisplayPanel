@@ -267,7 +267,8 @@ scale (a top rate's default-marked twin when both are listed). Choosing one appl
 it with the same locked, session-only, verified write as protection, then
 replaces a saved mode so protection keeps it.
 It is unavailable for hidden or mirrored displays and while recovery or another
-display operation runs.
+display operation runs. `dp app refresh-rate --display UUID` lists the offered
+rates through the running app; `--hz` chooses one the same way.
 
 After reconnect/input return or wake, DisplayPanel waits for stable inventory and
 restores a differing exact mode once, before sampling the arrangement for

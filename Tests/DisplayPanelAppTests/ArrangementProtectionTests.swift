@@ -376,7 +376,14 @@ final class ArrangementProtectionTests: XCTestCase {
         try model.setModeProtectionEnabled(uuid: uuid, enabled: true)
         XCTAssertEqual(model.modePreferences.displays.first?.saved.mode.refreshRate, 60, "turning on remembers the current mode")
         let fastest = try XCTUnwrap(model.refreshRates(uuid: uuid)?.choices.last)
-        try await model.setRefreshRate(uuid: uuid, to: fastest)
+        let unoffered = await model.handleRefreshRateControlRequest(
+            AppControlRequest(command: .refreshRate, targetUUID: uuid, refreshRate: 144))
+        XCTAssertEqual(unoffered.outcome, .refused)
+        XCTAssertEqual(unoffered.refreshRates, [60, 240])
+        XCTAssertEqual(state.modeWrites, 0, "an unoffered rate never writes")
+        let set = await model.handleRefreshRateControlRequest(
+            AppControlRequest(command: .refreshRate, targetUUID: uuid.uppercased(), refreshRate: 240))
+        XCTAssertEqual(set.outcome, .done, set.summary)
         XCTAssertEqual(state.modes[uuid], fastest)
         XCTAssertFalse(model.hideOperation.isBusy)
         let entry = try XCTUnwrap(model.modePreferences.displays.first)

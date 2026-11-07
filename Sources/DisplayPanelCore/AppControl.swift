@@ -9,6 +9,7 @@ public enum AppControlCommand: String, Codable, Equatable, Sendable {
     case toggleHide = "toggle-hide"
     case runAction = "run-action"
     case restoreArrangement = "restore-arrangement"
+    case refreshRate = "refresh-rate"
     case runRule = "run-rule"
     case enable
     case disable
@@ -32,7 +33,7 @@ public enum AppControlCommand: String, Codable, Equatable, Sendable {
 
     /// Manually invoked display operations and one-shot rules never launch or resend the app request.
     public var isManualDisplayCommand: Bool {
-        isDisplayCommand || self == .runAction || self == .runRule || self == .restoreArrangement
+        isDisplayCommand || self == .runAction || self == .runRule || self == .restoreArrangement || self == .refreshRate
     }
 
     /// A shell command line that runs this display command with the CLI at
@@ -72,7 +73,8 @@ public struct AppControlRequest: Codable, Equatable, Sendable {
     public var hasSupportedProtocol: Bool {
         if watch != nil {
             return protocolVersion == Self.watchProtocol && watch == true && command == .status &&
-                durationSeconds == nil && targetUUID == nil && actionID == nil && ruleID == nil && hideStyle == nil
+                durationSeconds == nil && targetUUID == nil && actionID == nil && ruleID == nil && hideStyle == nil &&
+                refreshRate == nil
         }
         return protocolVersion == Self.currentProtocol && hideStyle == nil ||
             protocolVersion == Self.hideStyleProtocol
@@ -86,6 +88,8 @@ public struct AppControlRequest: Codable, Equatable, Sendable {
     public let ruleID: UUID?
     public let hideStyle: AppControlHideStyle?
     public let watch: Bool?
+    /// Hertz for `refresh-rate`; without it the command lists the offered rates.
+    public let refreshRate: Double?
 
     public init(
         command: AppControlCommand,
@@ -95,9 +99,11 @@ public struct AppControlRequest: Codable, Equatable, Sendable {
         ruleID: UUID? = nil,
         hideStyle: AppControlHideStyle? = nil,
         protocolVersion: Int? = nil,
-        watch: Bool? = nil
+        watch: Bool? = nil,
+        refreshRate: Double? = nil
     ) {
         self.watch = watch
+        self.refreshRate = refreshRate
         self.protocolVersion = protocolVersion ?? (watch == nil ? (hideStyle == nil ? Self.currentProtocol : Self.hideStyleProtocol) : Self.watchProtocol)
         self.command = command
         self.durationSeconds = durationSeconds
@@ -110,7 +116,7 @@ public struct AppControlRequest: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
         case command
-        case durationSeconds, targetUUID, actionID, ruleID, hideStyle, watch
+        case durationSeconds, targetUUID, actionID, ruleID, hideStyle, watch, refreshRate
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -123,6 +129,7 @@ public struct AppControlRequest: Codable, Equatable, Sendable {
         try container.encodeIfPresent(ruleID, forKey: .ruleID)
         try container.encodeIfPresent(hideStyle, forKey: .hideStyle)
         try container.encodeIfPresent(watch, forKey: .watch)
+        try container.encodeIfPresent(refreshRate, forKey: .refreshRate)
     }
 }
 
@@ -174,6 +181,9 @@ public struct AppControlResponse: Codable, Equatable, Sendable {
     public let runningAction: AppControlRunningAction?
     public let runningRule: AppControlRunningRule?
     public let arrangement: AppControlArrangementStatus?
+    /// `refresh-rate`: the display's current rate and its offered rates.
+    public let refreshRate: Double?
+    public let refreshRates: [Double]?
     /// Present only on a status stream; scoped to that connection.
     public var sequence: UInt64?
 
@@ -202,7 +212,9 @@ public struct AppControlResponse: Codable, Equatable, Sendable {
         actions: [AppControlActionStatus]? = nil,
         runningAction: AppControlRunningAction? = nil,
         runningRule: AppControlRunningRule? = nil,
-        arrangement: AppControlArrangementStatus? = nil
+        arrangement: AppControlArrangementStatus? = nil,
+        refreshRate: Double? = nil,
+        refreshRates: [Double]? = nil
     ) {
         self.protocolVersion = protocolVersion
         self.ok = ok
@@ -223,6 +235,8 @@ public struct AppControlResponse: Codable, Equatable, Sendable {
         self.runningAction = runningAction
         self.runningRule = runningRule
         self.arrangement = arrangement
+        self.refreshRate = refreshRate
+        self.refreshRates = refreshRates
     }
 
     public static func unavailable(_ message: String = "DisplayPanel.app is not running") -> Self {
@@ -240,6 +254,7 @@ public struct AppControlResponse: Codable, Equatable, Sendable {
         case protocolVersion = "protocol"
         case ok, running, enabled, state, summary, detail, error, sequence
         case nextAction, secondsRemaining, snoozedUntil, outcome, displays, rules, steps, actions, runningAction, runningRule, arrangement
+        case refreshRate, refreshRates
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -264,6 +279,8 @@ public struct AppControlResponse: Codable, Equatable, Sendable {
         try container.encodeIfPresent(runningRule, forKey: .runningRule)
         try container.encodeIfPresent(sequence, forKey: .sequence)
         try container.encodeIfPresent(arrangement, forKey: .arrangement)
+        try container.encodeIfPresent(refreshRate, forKey: .refreshRate)
+        try container.encodeIfPresent(refreshRates, forKey: .refreshRates)
     }
 }
 
@@ -397,7 +414,8 @@ public struct AppControlClient {
         targetUUID: String? = nil,
         actionID: UUID? = nil,
         ruleID: UUID? = nil,
-        hideStyle: AppControlHideStyle? = nil
+        hideStyle: AppControlHideStyle? = nil,
+        refreshRate: Double? = nil
     ) throws -> AppControlResponse {
         try execute(
             command,
@@ -406,6 +424,7 @@ public struct AppControlClient {
             actionID: actionID,
             ruleID: ruleID,
             hideStyle: hideStyle,
+            refreshRate: refreshRate,
             deadline: Self.defaultDeadline
         )
     }
@@ -417,10 +436,13 @@ public struct AppControlClient {
         actionID: UUID? = nil,
         ruleID: UUID? = nil,
         hideStyle: AppControlHideStyle? = nil,
+        refreshRate: Double? = nil,
         deadline: TimeInterval
     ) throws -> AppControlResponse {
+        let sendRequest = { try self.send(command, durationSeconds: durationSeconds, targetUUID: targetUUID, actionID: actionID,
+                                   ruleID: ruleID, hideStyle: hideStyle, refreshRate: refreshRate) }
         do {
-            return try send(command, durationSeconds: durationSeconds, targetUUID: targetUUID, actionID: actionID, ruleID: ruleID, hideStyle: hideStyle)
+            return try sendRequest()
         } catch let error as AppControlTransportError {
             if command == .status || command == .quit || command.isManualDisplayCommand {
                 if !error.requestBytesWritten, !isAppRunning() {
@@ -438,7 +460,7 @@ public struct AppControlClient {
                     )
                 }
                 do {
-                    return try send(command, durationSeconds: durationSeconds, targetUUID: targetUUID, actionID: actionID, ruleID: ruleID, hideStyle: hideStyle)
+                    return try sendRequest()
                 } catch {
                     throw AppControlError.transport(error.localizedDescription)
                 }
@@ -452,7 +474,7 @@ public struct AppControlClient {
             }
             _ = waitForSocket(deadline: deadline)
             do {
-                return try send(command, durationSeconds: durationSeconds, targetUUID: targetUUID, actionID: actionID, ruleID: ruleID, hideStyle: hideStyle)
+                return try sendRequest()
             } catch {
                 throw AppControlError.transport(error.localizedDescription)
             }
@@ -519,7 +541,8 @@ public struct AppControlClient {
         targetUUID: String?,
         actionID: UUID?,
         ruleID: UUID?,
-        hideStyle: AppControlHideStyle?
+        hideStyle: AppControlHideStyle?,
+        refreshRate: Double?
     ) throws -> AppControlResponse {
         let request = AppControlRequest(
             command: command,
@@ -527,7 +550,8 @@ public struct AppControlClient {
             targetUUID: targetUUID,
             actionID: actionID,
             ruleID: ruleID,
-            hideStyle: hideStyle
+            hideStyle: hideStyle,
+            refreshRate: refreshRate
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]

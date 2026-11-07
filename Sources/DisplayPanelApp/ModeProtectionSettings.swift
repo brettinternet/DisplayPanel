@@ -23,7 +23,7 @@ struct ModeProtectionSettings: View {
                             }
                         }
                     )) {
-                        ForEach(rates.choices, id: \.refreshRate) { Text(Self.rate($0.refreshRate)).tag($0.refreshRate) }
+                        ForEach(rates.choices, id: \.refreshRate) { Text(AppModel.hertz($0.refreshRate)).tag($0.refreshRate) }
                     }
                     .disabled(unavailable)
                     .accessibilityLabel("Refresh rate for \(tile.name)")
@@ -70,13 +70,9 @@ struct ModeProtectionSettings: View {
 
     private static func summary(_ mode: RecoveryMode) -> String {
         var parts = ["\(mode.width) × \(mode.height)"]
-        if mode.refreshRate > 0 { parts.append(rate(mode.refreshRate)) }
+        if mode.refreshRate > 0 { parts.append(AppModel.hertz(mode.refreshRate)) }
         if mode.pixelWidth > mode.width { parts.append("HiDPI") }
         return parts.joined(separator: " · ")
-    }
-
-    private static func rate(_ hertz: Double) -> String {
-        "\(hertz.formatted(.number.precision(.fractionLength(0...2)))) Hz"
     }
 
     private func perform(_ action: () throws -> Void) {

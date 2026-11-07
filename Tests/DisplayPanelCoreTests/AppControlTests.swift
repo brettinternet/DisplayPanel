@@ -218,6 +218,13 @@ final class AppControlTests: XCTestCase {
             socketPath: "/private/tmp/displaypanel-absent-\(UUID().uuidString)",
             launch: { XCTFail("Restore arrangement must never launch the app") }, isAppRunning: { false })
         XCTAssertEqual(try arrangementClient.execute(.restoreArrangement).exitCode, 3)
+        XCTAssertEqual(try arrangementClient.execute(.refreshRate, targetUUID: uuid, refreshRate: 240).exitCode, 3)
+        XCTAssertEqual(try CLIParser.parse(["app", "refresh-rate", "--display", uuid, "--hz", "59.94"]),
+                       .app(command: .refreshRate, durationSeconds: nil, targetUUID: uuid, refreshRate: 59.94, json: false))
+        for invalid in [["app", "refresh-rate"], ["app", "refresh-rate", "--display", uuid, "--hz", "0"],
+                        ["app", "hide", "--display", uuid, "--hz", "240"]] {
+            XCTAssertThrowsError(try CLIParser.parse(invalid), invalid.joined(separator: " "))
+        }
         XCTAssertFalse(AppControlCommand.toggle.isDisplayCommand)
         XCTAssertTrue(AppControlCommand.runAction.isManualDisplayCommand)
         XCTAssertTrue(AppControlCommand.runRule.isManualDisplayCommand)

@@ -135,6 +135,7 @@ public enum PanelCommand: Equatable {
         actionID: UUID? = nil,
         ruleID: UUID? = nil,
         hideStyle: AppControlHideStyle? = nil,
+        refreshRate: Double? = nil,
         json: Bool
     )
     case help(command: String?)
@@ -496,6 +497,7 @@ public enum CLIParser {
         var targetUUID: String?
         var actionID: UUID?
         var ruleID: UUID?
+        var refreshRate: Double?
         var i = 1
         while i < args.count {
             switch args[i] {
@@ -509,7 +511,7 @@ public enum CLIParser {
                 guard !watch else { throw CLIParseError.duplicateOption("--watch") }
                 watch = true
             case "--display":
-                guard command.isDisplayCommand else {
+                guard command.isDisplayCommand || command == .refreshRate else {
                     throw CLIParseError.unknownOption("--display")
                 }
                 guard targetUUID == nil else { throw CLIParseError.duplicateOption("--display") }
@@ -551,6 +553,14 @@ public enum CLIParser {
                     throw CLIParseError.invalidHideStyle(args[i])
                 }
                 hideStyle = parsed
+            case "--hz":
+                guard command == .refreshRate else { throw CLIParseError.unknownOption("--hz") }
+                guard refreshRate == nil else { throw CLIParseError.duplicateOption("--hz") }
+                i += 1
+                guard i < args.count, let hertz = Double(args[i]), hertz.isFinite, hertz > 0 else {
+                    throw CLIParseError.missingValue("--hz (positive number)")
+                }
+                refreshRate = hertz
             case "--for":
                 guard command == .snooze else {
                     throw CLIParseError.unknownOption("--for")
@@ -575,7 +585,7 @@ public enum CLIParser {
         if command == .snooze, durationSeconds == nil {
             throw CLIParseError.missingValue("--for")
         }
-        if command.isDisplayCommand, targetUUID == nil {
+        if command.isDisplayCommand || command == .refreshRate, targetUUID == nil {
             throw CLIParseError.missingValue("--display")
         }
         if command == .runAction, actionID == nil {
@@ -595,6 +605,7 @@ public enum CLIParser {
             actionID: actionID,
             ruleID: ruleID,
             hideStyle: hideStyle,
+            refreshRate: refreshRate,
             json: json
         )
     }

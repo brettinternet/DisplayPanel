@@ -226,6 +226,7 @@ public enum CLIHelp {
               toggle-hide --display <UUID> [--style black-out]
               run-action --action <UUID>
               run-rule --rule <UUID>
+              refresh-rate --display <UUID> [--hz <rate>]
 
             Control DisplayPanel.app; status does not launch the app. --json emits
             the machine-readable response. status --watch --json streams complete
@@ -247,6 +248,9 @@ public enum CLIHelp {
             main display, then verifies. It requires the running app, never launches or
             retries it, and refuses unsafe identities, geometry or unresolved recovery.
             status includes arrangement protection state and its reason.
+            refresh-rate lists the display's offered rates at its current size and scale;
+            --hz applies one like the Settings picker and keeps it as the saved mode.
+            It requires the running app and never launches or retries it.
             run-action --action <UUID> invokes one saved Action with 1–8 ordered
             Hide (black out), Hide (remove from desktop), Show, Move windows or Restore arrangement steps,
             only in the running app. Accessibility is checked without prompting; use

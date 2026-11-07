@@ -114,6 +114,7 @@ dp app hide | toggle-hide --display UUID [--style black-out] [--json]
 dp app show --display UUID [--json]
 dp app run-action --action UUID [--json]
 dp app run-rule --rule UUID [--json]
+dp app refresh-rate --display UUID [--hz 240] [--json]
 ```
 
 ### Live status for integrations
