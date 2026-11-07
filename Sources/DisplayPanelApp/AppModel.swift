@@ -796,6 +796,14 @@ final class AppModel: ObservableObject {
         }.compactMap { $0.uuid?.lowercased() })
     }
 
+    /// macOS can't arrange around a blacked-out main display, so it pauses arrangement work.
+    private func captureVisibleArrangement(_ excluded: Set<String>) throws -> DisplayPanelCore.DisplayArrangement {
+        if displays.contains(where: { $0.main && excluded.contains($0.uuid?.lowercased() ?? "") }) {
+            throw ArrangementProtectionError("Paused while the main display is blacked out.")
+        }
+        return try captureArrangement(excluded)
+    }
+
     /// `ownOperation` is the running mode write asking, which doesn't block itself.
     private func arrangementSuspensionReason(actionLeaseID: UUID? = nil,
                                              ownOperation: DisplayHideOperation? = nil) -> String? {
@@ -819,7 +827,7 @@ final class AppModel: ObservableObject {
         if arrangementWriting { return status("suspended", "Restoring arrangement.") }
         if let reason = arrangementSuspensionReason() { return status("suspended", reason) }
         do {
-            let current = try captureArrangement(arrangementExcludedUUIDs)
+            let current = try captureVisibleArrangement(arrangementExcludedUUIDs)
             try current.validate()
             let canRemember = current.members.count >= 2
             if let saved = arrangementPreferences.remembered.first(where: { $0.setKey == current.setKey }) {
@@ -872,7 +880,7 @@ final class AppModel: ObservableObject {
     func rememberCurrentArrangement() throws {
         refreshHandoffStatus()
         if let reason = arrangementSuspensionReason() { throw ArrangementProtectionError(reason) }
-        let current = try captureArrangement(arrangementExcludedUUIDs)
+        let current = try captureVisibleArrangement(arrangementExcludedUUIDs)
         try current.validate()
         guard current.members.count >= 2 else { throw ArrangementProtectionError("Connect at least two visible displays to remember an arrangement.") }
         var updated = arrangementPreferences
@@ -894,7 +902,7 @@ final class AppModel: ObservableObject {
         if let uuid {
             refreshHandoffStatus()
             if let reason = arrangementSuspensionReason() { throw ArrangementProtectionError(reason) }
-            let current = try captureArrangement(arrangementExcludedUUIDs)
+            let current = try captureVisibleArrangement(arrangementExcludedUUIDs)
             try current.validate()
             guard let member = current.members.first(where: { $0.uuid.caseInsensitiveCompare(uuid) == .orderedSame }) else {
                 throw ArrangementProtectionError("The preferred main display must be visible and unambiguous.")
@@ -909,7 +917,7 @@ final class AppModel: ObservableObject {
     private func prepareArrangementRestore(actionLeaseID: UUID? = nil) throws -> ArrangementRestorePlan {
         if let reason = arrangementSuspensionReason(actionLeaseID: actionLeaseID) { throw ArrangementProtectionError(reason) }
         let excluded = arrangementExcludedUUIDs
-        let current = try captureArrangement(excluded)
+        let current = try captureVisibleArrangement(excluded)
         try current.validate()
         let desired: DisplayPanelCore.DisplayArrangement
         if let saved = arrangementPreferences.remembered.first(where: { $0.setKey == current.setKey }) {
@@ -1055,7 +1063,7 @@ final class AppModel: ObservableObject {
             return
         }
         do {
-            let current = try captureArrangement(arrangementExcludedUUIDs)
+            let current = try captureVisibleArrangement(arrangementExcludedUUIDs)
             try current.validate()
             // A mode that may still be offered can change sizes: sample now, but
             // write only after it finishes or the deadline gives up on it.
@@ -3099,9 +3107,9 @@ final class AppModel: ObservableObject {
               let removalStatus = targetUUID.flatMap({ status.removal(for: $0) }) else { return nil }
         let input = configuredReturnInput(for: removalStatus.target)
         if let warning = input.warning {
-            return "Show won’t switch the monitor input: \(warning)"
+            return "Won’t switch the monitor input: \(warning)"
         }
-        return input.value.map { "Show switches the monitor back to \(MonitorInput.name($0))." }
+        return input.value.map { "Switches the monitor back to \(MonitorInput.name($0))." }
     }
 
     /// Turns Remove from desktop on or off for a display.

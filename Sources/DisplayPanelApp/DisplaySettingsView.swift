@@ -180,6 +180,8 @@ struct DisplaySettingsView: View {
         case .unavailable:
             return "Disconnected"
         case .needsRecovery:
+            // Recover hidden displays above explains a previous session and offers its actions.
+            if model.handoffStatus?.sessionRecovery != nil { return "Hidden in a previous session." }
             return model.offInputRecoveryNote(for: tile) ?? model.displayRecoveryProblem ?? "Needs recovery."
         }
     }

@@ -1048,7 +1048,7 @@ final class DisplayHideAppTests: XCTestCase {
         model.detectMacInput(for: Self.targetUUID)
         model.setHideSwitchInput(nil, for: Self.targetUUID)
         XCTAssertEqual(model.hidePreferences[Self.targetUUID]?.returnInput, 0x0F, "settings are frozen while hidden")
-        XCTAssertEqual(model.showReturnInputNote, "Show switches the monitor back to DisplayPort 1.")
+        XCTAssertEqual(model.showReturnInputNote, "Switches the monitor back to DisplayPort 1.")
         XCTAssertEqual(try model.makeShowRequest().returnInput, 0x0F)
 
         // A Mac input kept while switching is off isn't used: Show switches back only when Hide switched.
@@ -1128,7 +1128,7 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertNil(model.notice, "results never open an alert")
         XCTAssertEqual(model.displayTiles.first { $0.id == Self.targetKey }?.status, .hidden)
         XCTAssertNil(model.displayRecoveryProblem, "a healthy hidden display isn't a recovery problem")
-        XCTAssertEqual(model.showReturnInputNote, "Show switches the monitor back to DisplayPort 1.")
+        XCTAssertEqual(model.showReturnInputNote, "Switches the monitor back to DisplayPort 1.")
 
         let shownResult = try await showAndWait(model)
         XCTAssertEqual(returnInputs, [0x0F])
@@ -1368,7 +1368,7 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertNil(request.returnInput)
         let warning = "the saved input belongs to a different display."
         XCTAssertEqual(request.returnInputWarning, warning)
-        XCTAssertEqual(model.showReturnInputNote, "Show won’t switch the monitor input: \(warning)")
+        XCTAssertEqual(model.showReturnInputNote, "Won’t switch the monitor input: \(warning)")
 
         let result = try await showAndWait(model)
         XCTAssertTrue(showCalled)
