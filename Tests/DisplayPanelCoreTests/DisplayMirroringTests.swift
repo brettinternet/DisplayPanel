@@ -292,12 +292,17 @@ final class DisplayMirroringTests: XCTestCase {
         var staged: [(UInt32, UInt32)] = []
         var interrupt: (applied: Bool, message: String)?
         var atBegin: (() throws -> Void)?
+        var modeUnavailable: Int?
         let operation = RecoveryStore(url: directory.appendingPathComponent("move-operation"))
         let sut = MirrorController(
             records: { self.records(current) }, operationLock: { operation },
             engine: RecoveryEngine(capture: { current }, apply: { _ in active.removeAll(); current = baseline },
                                    convergencePause: {}),
-            preflightModes: { _ in },
+            preflightModes: { snapshot in
+                if let index = modeUnavailable, snapshot.displays.contains(where: { $0.uuid == self.snapshotUUID(index) }) {
+                    throw RecoveryError.modeUnavailable(displayUUID: self.snapshotUUID(index), mode: "fake")
+                }
+            },
             transaction: MirrorTransaction(
                 begin: { try atBegin?(); staged = []; return OpaquePointer(bitPattern: 1)! },
                 stage: { _, target, source in staged.append((target, source)) },
@@ -331,8 +336,12 @@ final class DisplayMirroringTests: XCTestCase {
             XCTAssertEqual(try removal(2, in: pending).sourceUUID, self.snapshotUUID(4))
             XCTAssertEqual(try removal(4, in: pending).state, .captured)
         }
+        // Hidden 2 switched to another input no longer offers its saved mode;
+        // that must not block another Hide.
+        modeUnavailable = 2
         var saved = try sut.mirror(selector: snapshotUUID(4), source: snapshotUUID(3), store: moveStore)
         atBegin = nil
+        modeUnavailable = nil
         XCTAssertEqual(staged.map { [$0.0, $0.1] }, [[8, 9], [10, 9]])
         XCTAssertEqual(current, try sessionSnapshot([2: 3, 4: 3], includeFourth: true))
         let moved = try removal(2, in: try moveStore.load())

@@ -466,7 +466,10 @@ struct MirrorController {
         }
         try baseline.validateRestoration(to: current)
         try current.verify(engine.capture())
-        try preflightModes(baseline)
+        // A hidden monitor on another input often offers fewer modes; Show
+        // returns its input before checking them, so only visible displays block.
+        try preflightModes(MirrorSessionTopology.showModeBaseline(baseline, removals: session.removals,
+                                                                  showing: nil, current: current))
 
         let removal = PublicMirrorRemoval(target: targetSaved, source: sourceSaved, beforeOperation: current)
         // Removals mirroring onto the target move with it, staged first so the

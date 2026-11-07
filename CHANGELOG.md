@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Hide another display while a hidden monitor on another input doesn't offer its saved mode.
+
 ## 0.9.7
 
 - Print readable `dp` output: tables for `list`, `probe` and `app status`, named displays in steps and DDC results, and plain mirror and handoff messages. `--json` is unchanged.
