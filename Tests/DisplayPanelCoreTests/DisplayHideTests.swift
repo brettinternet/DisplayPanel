@@ -506,6 +506,7 @@ final class DisplayHideTests: XCTestCase {
                 case "identity-before", "identity-after": "identity"
                 case "journal-after": "journal changed"
                 case "unstable": "did not settle"
+                case "timeout": "is on its Mac input, but macOS doesn't offer its saved mode"
                 default: "original mode unavailable"
                 }
                 XCTAssertTrue(error.localizedDescription.contains(expected), "\(scenario): \(error)")

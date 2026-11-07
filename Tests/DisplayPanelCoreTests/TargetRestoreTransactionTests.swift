@@ -258,9 +258,9 @@ final class TargetRestoreTransactionTests: XCTestCase {
                 })
             let success = succeeds.contains(outcome)
             if success {
-                _ = try sut.unmirror(store: store, selector: targetUUID, returnInputBeforeRestore: { _ in inputs += 1; return false })
+                _ = try sut.unmirror(store: store, selector: targetUUID, returnInputBeforeRestore: { _ in inputs += 1; return .alreadySelected })
             } else {
-                XCTAssertThrowsError(try sut.unmirror(store: store, selector: targetUUID, returnInputBeforeRestore: { _ in inputs += 1; return false }), outcome)
+                XCTAssertThrowsError(try sut.unmirror(store: store, selector: targetUUID, returnInputBeforeRestore: { _ in inputs += 1; return .alreadySelected }), outcome)
             }
             XCTAssertEqual(completions, 1, "verification reads never retry the writer")
             XCTAssertEqual(inputs, 1, "input return runs once before the desktop postcondition: \(outcome)")

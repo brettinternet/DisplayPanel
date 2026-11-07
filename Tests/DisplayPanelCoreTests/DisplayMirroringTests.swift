@@ -373,7 +373,7 @@ final class DisplayMirroringTests: XCTestCase {
                 XCTAssertEqual(current.displays[2], siblingBefore)
             })
         XCTAssertThrowsError(try sut.unmirror(store: scenarioStore, selector: snapshotUUID(2),
-                                             returnInputBeforeRestore: { _ in inputCalls += 1; return false }))
+                                             returnInputBeforeRestore: { _ in inputCalls += 1; return .alreadySelected }))
         let inspector = DisplayHideController(store: scenarioStore, mirror: sut, operationLock: { operation })
         let status = try inspector.inspect()
         XCTAssertEqual(status.removals.first?.state, "needsAttention")
@@ -389,7 +389,7 @@ final class DisplayMirroringTests: XCTestCase {
         XCTAssertFalse(MirrorSessionTopology.canRepairTargetLayout(
             baseline: baseline, removals: persisted.removals, targetUUID: snapshotUUID(2), current: wrongIdentity))
         let repaired = try sut.unmirror(store: scenarioStore, selector: snapshotUUID(2),
-                                        returnInputBeforeRestore: { _ in inputCalls += 1; return false })
+                                        returnInputBeforeRestore: { _ in inputCalls += 1; return .alreadySelected })
         XCTAssertEqual(writes, 2, "only a separate explicit Show retries the failed target layout")
         XCTAssertEqual(inputCalls, 2, "each explicit request returns input before checking the desktop postcondition")
         XCTAssertEqual(repaired.publicMirrorSession?.removals.map(\.state), [.restored, .mirrored])
@@ -435,12 +435,12 @@ final class DisplayMirroringTests: XCTestCase {
         let inspector = DisplayHideController(store: scenarioStore, mirror: sut, operationLock: { operation })
         XCTAssertTrue(try XCTUnwrap(inspector.inspect().removals.last).canShow)
         XCTAssertThrowsError(try sut.unmirror(store: scenarioStore, selector: snapshotUUID(3),
-                                             returnInputBeforeRestore: { returnedInputs.append($0.uuid); return false }))
+                                             returnInputBeforeRestore: { returnedInputs.append($0.uuid); return .alreadySelected }))
         XCTAssertEqual(returnedInputs, [snapshotUUID(3)])
         XCTAssertTrue(try scenarioStore.load().publicMirrorSession?.removals.allSatisfy { !$0.state.resolved } == true)
         shouldMatch = true
         let result = try sut.unmirror(store: scenarioStore, selector: snapshotUUID(3),
-                                      returnInputBeforeRestore: { returnedInputs.append($0.uuid); return false })
+                                      returnInputBeforeRestore: { returnedInputs.append($0.uuid); return .alreadySelected })
         XCTAssertEqual(writes, 2)
         XCTAssertEqual(result.state, .restored)
         XCTAssertTrue(result.publicMirrorSession?.removals.allSatisfy { $0.state.resolved } == true)
@@ -713,7 +713,7 @@ final class DisplayMirroringTests: XCTestCase {
         var inputs: [String] = []
         _ = try sut.mirror(selector: snapshotUUID(2), source: snapshotUUID(1), store: scenarioStore)
         _ = try sut.mirror(selector: snapshotUUID(3), source: snapshotUUID(1), store: scenarioStore)
-        _ = try sut.unmirror(store: scenarioStore, selector: snapshotUUID(2), returnInputBeforeRestore: { inputs.append($0.uuid); return false })
+        _ = try sut.unmirror(store: scenarioStore, selector: snapshotUUID(2), returnInputBeforeRestore: { inputs.append($0.uuid); return .alreadySelected })
         XCTAssertEqual(current.displays[1].y, 0)
         XCTAssertEqual(inputs, [snapshotUUID(2)])
         // The placed display is an ordinary visible display: inspection keeps
@@ -721,9 +721,9 @@ final class DisplayMirroringTests: XCTestCase {
         let inspector = DisplayHideController(store: scenarioStore, mirror: sut, operationLock: { operation })
         XCTAssertFalse(try inspector.inspect().removals.contains { $0.state == "needsAttention" })
         _ = try sut.mirror(selector: snapshotUUID(2), source: snapshotUUID(1), store: scenarioStore)
-        _ = try sut.unmirror(store: scenarioStore, selector: snapshotUUID(3), returnInputBeforeRestore: { inputs.append($0.uuid); return false })
+        _ = try sut.unmirror(store: scenarioStore, selector: snapshotUUID(3), returnInputBeforeRestore: { inputs.append($0.uuid); return .alreadySelected })
         XCTAssertEqual(fullRestores, 0)
-        let final = try sut.unmirror(store: scenarioStore, selector: snapshotUUID(2), returnInputBeforeRestore: { inputs.append($0.uuid); return false })
+        let final = try sut.unmirror(store: scenarioStore, selector: snapshotUUID(2), returnInputBeforeRestore: { inputs.append($0.uuid); return .alreadySelected })
         XCTAssertEqual(fullRestores, 1, "the last Show stages the whole baseline")
         XCTAssertEqual(final.state, .restored)
         XCTAssertEqual(current, baseline, "the original -4 origin returns only with the final Show")

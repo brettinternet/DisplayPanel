@@ -6605,6 +6605,8 @@ final class AppModel: ObservableObject {
         }
         let uuid = "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
         result = result.replacingOccurrences(of: " \\(\(uuid)\\)", with: "", options: .regularExpression)
+        result = result.replacingOccurrences(of: " \\(pixels [^)]*\\)", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\\.0 Hz", with: " Hz", options: .regularExpression)
         for (key, name) in names {
             result = result.replacingOccurrences(of: key, with: name, options: .caseInsensitive)
         }

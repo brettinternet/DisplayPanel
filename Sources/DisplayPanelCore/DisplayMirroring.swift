@@ -747,7 +747,7 @@ struct MirrorController {
 
     func unmirror(store: RecoveryStore, selector: String? = nil, expectedID: UUID? = nil,
                   noOpWhenAlreadyResolved: Bool = false,
-                  returnInputBeforeRestore: ((RecoveryDisplay) throws -> Bool)? = nil,
+                  returnInputBeforeRestore: ((RecoveryDisplay) throws -> DisplayInputOutcome.State)? = nil,
                   relinkInput: ((RecoveryDisplay) throws -> Bool)? = nil) throws -> RecoveryJournal {
         do {
             let operation = operationLock()
@@ -818,7 +818,7 @@ struct MirrorController {
 
     private func unmirrorSession(_ journal: inout RecoveryJournal, selector: String?, expectedID: UUID?,
                                  noOpWhenAlreadyResolved: Bool, store: RecoveryStore,
-                                 returnInputBeforeRestore: ((RecoveryDisplay) throws -> Bool)?,
+                                 returnInputBeforeRestore: ((RecoveryDisplay) throws -> DisplayInputOutcome.State)?,
                                  relinkInput: ((RecoveryDisplay) throws -> Bool)?) throws -> RecoveryJournal {
         guard var session = journal.publicMirrorSession else {
             throw RecoveryError.unsafe("missing public-mirror session")
@@ -976,7 +976,7 @@ struct MirrorController {
     /// (`relinkInput` returns whether it wrote) and all read-only observations.
     private func prepareShow(_ journal: RecoveryJournal, baseline: RecoverySnapshot,
                              target: RecoveryDisplay, source: RecoveryDisplay, store: RecoveryStore,
-                             returnInputBeforeRestore: ((RecoveryDisplay) throws -> Bool)?,
+                             returnInputBeforeRestore: ((RecoveryDisplay) throws -> DisplayInputOutcome.State)?,
                              relinkInput: ((RecoveryDisplay) throws -> Bool)?) throws -> RecoverySnapshot {
         let removals = journal.publicMirrorSession?.removals ?? []
         // The input return can make macOS renumber displays; the caller
@@ -1004,7 +1004,8 @@ struct MirrorController {
         guard Self.sameStoredJournal(journal, try store.load()) else {
             throw RecoveryError.unsafe("journal changed before input return; inspect recovery status")
         }
-        let switched = try returnInputBeforeRestore(target)
+        let returned = try returnInputBeforeRestore(target)
+        let switched = returned.mayHaveSwitched
 
         // Persisted per-attempt outcome changes, e.g. "0:ready#1a2b3c4d | 9:<error reason>".
         var trace: [String] = []
@@ -1064,13 +1065,19 @@ struct MirrorController {
             }
             throw RecoveryError.unsafe("display topology did not settle after input return; journal retained")
         }
-        let settled = try settle(from: preInputIdentity, switched: switched)
-        // A monitor that stays linked through the return (S2721DGF) can keep a
-        // dead link the Mac retrained while it showed another input: no
-        // picture, no hotplug. Re-selecting its input once forces the relink.
-        guard switched, !relinked, let relinkInput, try relinkInput(target) else { return settled }
-        trace.append("reselected")
-        return try settle(from: settled.stableTopologyIdentity(), switched: true)
+        do {
+            let settled = try settle(from: preInputIdentity, switched: switched)
+            // A monitor that stays linked through the return (S2721DGF) can keep a
+            // dead link the Mac retrained while it showed another input: no
+            // picture, no hotplug. Re-selecting its input once forces the relink.
+            guard switched, !relinked, let relinkInput, try relinkInput(target) else { return settled }
+            trace.append("reselected")
+            return try settle(from: settled.stableTopologyIdentity(), switched: true)
+        } catch RecoveryError.modeUnavailable(let uuid, let mode, let name)
+            where [.verified, .alreadySelected].contains(returned) && uuid.caseInsensitiveCompare(target.uuid) == .orderedSame {
+            // Switching a monitor confirmed on its Mac input again won't bring the mode back.
+            throw RecoveryError.unsafe("\(name ?? uuid) is on its Mac input, but macOS doesn't offer its saved mode \(mode). Turn it off and on or reconnect it, then retry Show. The journal is retained.")
+        }
     }
 
     private func validateShowAvailability(target: RecoveryDisplay, source: RecoveryDisplay) throws {

@@ -451,12 +451,12 @@ struct HandoffController {
         do {
             var inputAttempted = false
             var previousInput: UInt8?
-            let returnInput: ((RecoveryDisplay) throws -> Bool)? = input == nil ? nil : { target in
+            let returnInput: ((RecoveryDisplay) throws -> DisplayInputOutcome.State)? = input == nil ? nil : { target in
                 inputAttempted = true
                 inputOutcome = selectInput(input, target: target, returning: true, willSelect: { previous, _ in
                     previousInput = previous
                 })
-                return inputOutcome.state.mayHaveSwitched
+                return inputOutcome.state
             }
             let relinkInput: ((RecoveryDisplay) throws -> Bool)? = input == nil ? nil : { target in
                 guard [.verified, .unverified].contains(inputOutcome.state), let input, let previousInput,
@@ -511,16 +511,16 @@ struct HandoffController {
         var inputFailure: Error?
         var previousInput: UInt8?
         var returned: DisplayInputOutcome.State?
-        let returnInput: ((RecoveryDisplay) throws -> Bool)? = input == nil ? nil : { target in
+        let returnInput: ((RecoveryDisplay) throws -> DisplayInputOutcome.State)? = input == nil ? nil : { target in
             do {
                 let state = try switchInput(input, target: target, returning: true, previous: { previousInput = $0 }) {
                     report("Input recovery: \($0)")
                 }
                 returned = state
-                return state.mayHaveSwitched
+                return state
             } catch {
                 inputFailure = error
-                return true
+                return .failed
             }
         }
         let relinkInput: ((RecoveryDisplay) throws -> Bool)? = input == nil ? nil : { target in
