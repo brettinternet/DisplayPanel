@@ -9,7 +9,7 @@ public struct SavedDisplayMode: Codable, Equatable {
     public let vendor: UInt32
     public let model: UInt32
     public let serial: UInt32
-    public let mode: RecoveryMode
+    public private(set) var mode: RecoveryMode
 
     public init(display: DisplayRecord, mode: RecoveryMode) {
         uuid = display.uuid?.lowercased() ?? ""
@@ -18,6 +18,13 @@ public struct SavedDisplayMode: Codable, Equatable {
         model = display.model
         serial = display.serial
         self.mode = mode
+    }
+
+    /// The same display with another of its modes.
+    public func with(_ mode: RecoveryMode) -> SavedDisplayMode {
+        var copy = self
+        copy.mode = mode
+        return copy
     }
 
     /// Same-boot renumbering (AW3425DW relinks) keeps the saved choice.
@@ -83,6 +90,13 @@ public struct DisplayModeProtectionController {
             throw RecoveryError.unsafe("display identity or topology changed while remembering its mode")
         }
         return saved
+    }
+
+    /// The display's current mode and one offered mode per refresh rate at its size and scale.
+    public func refreshRates(uuid: String) throws -> (current: RecoveryMode, choices: [RecoveryMode]) {
+        let current = try capture(uuid: uuid)
+        let display = try eligible(current, inventory: records())
+        return (current.mode, current.mode.refreshRateChoices(in: availableModes(display.id)))
     }
 
     public func isAvailable(_ saved: SavedDisplayMode) throws -> Bool {

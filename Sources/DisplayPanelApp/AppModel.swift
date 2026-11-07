@@ -227,6 +227,7 @@ final class AppModel: ObservableObject {
     private let captureMode: (String) throws -> SavedDisplayMode
     private let modeAvailable: (SavedDisplayMode) throws -> Bool
     private let writeMode: (SavedDisplayMode, () throws -> Void) throws -> Bool
+    private let modeChoices: (String) throws -> (current: RecoveryMode, choices: [RecoveryMode])
     private var modeWriting = false
     private var modePending: Set<String> = []
     /// Matching or absent displays: observed without a write attempt, so a
@@ -365,6 +366,9 @@ final class AppModel: ObservableObject {
         captureMode: @escaping (String) throws -> SavedDisplayMode = { try DisplayModeProtectionController().capture(uuid: $0) },
         modeAvailable: @escaping (SavedDisplayMode) throws -> Bool = { try DisplayModeProtectionController().isAvailable($0) },
         writeMode: @escaping (SavedDisplayMode, () throws -> Void) throws -> Bool = { try DisplayModeProtectionController().restore($0, revalidate: $1) },
+        modeChoices: @escaping (String) throws -> (current: RecoveryMode, choices: [RecoveryMode]) = {
+            try DisplayModeProtectionController().refreshRates(uuid: $0)
+        },
         windowMoveUptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         keepWindowsOffScheduler: KeepWindowsOffScheduling? = nil,
         mouseButtonPressed: @escaping () -> Bool = {
@@ -379,6 +383,7 @@ final class AppModel: ObservableObject {
         self.captureMode = captureMode
         self.modeAvailable = modeAvailable
         self.writeMode = writeMode
+        self.modeChoices = modeChoices
         if let data = defaults.data(forKey: Self.modePreferencesKey) {
             do {
                 let saved = try JSONDecoder().decode(ModeProtectionPreferences.self, from: data)
@@ -579,12 +584,56 @@ final class AppModel: ObservableObject {
         modeResults.removeValue(forKey: uuid.lowercased())
     }
 
+    /// Turning protection on without a saved mode remembers the current one.
     func setModeProtectionEnabled(uuid: String, enabled: Bool) throws {
-        var updated = modePreferences
-        guard let index = updated.displays.firstIndex(where: { $0.id == uuid.lowercased() }) else {
-            throw ArrangementProtectionError("Remember a mode before enabling protection.")
+        if enabled, !modePreferences.displays.contains(where: { $0.id == uuid.lowercased() }) {
+            try rememberCurrentMode(uuid: uuid)
         }
+        var updated = modePreferences
+        guard let index = updated.displays.firstIndex(where: { $0.id == uuid.lowercased() }) else { return }
         updated.displays[index].enabled = enabled
+        try saveModePreferences(updated)
+    }
+
+    /// The offered refresh rates at a shown display's current size and scale, if it has a choice.
+    func refreshRates(uuid: String) -> (current: RecoveryMode, choices: [RecoveryMode])? {
+        guard !arrangementExcludedUUIDs.contains(uuid.lowercased()),
+              let rates = try? modeChoices(uuid), rates.choices.count > 1 else { return nil }
+        return rates
+    }
+
+    /// Applies one of `refreshRates(uuid:)` session-only, off the main thread like
+    /// Hide and Show. A saved mode follows the choice so protection keeps it.
+    func setRefreshRate(uuid: String, to mode: RecoveryMode) async throws {
+        let uuid = uuid.lowercased()
+        refreshHandoffStatus()
+        if let reason = arrangementSuspensionReason() { throw ArrangementProtectionError(reason) }
+        guard !arrangementWriting, !modeWriting else {
+            throw ArrangementProtectionError(DisplayHideError.actionInProgress.localizedDescription)
+        }
+        guard !arrangementExcludedUUIDs.contains(uuid) else {
+            throw ArrangementProtectionError("Show this display before changing its refresh rate.")
+        }
+        let target = try captureMode(uuid).with(mode)
+        try target.validate()
+        hideOperation = .changingMode(uuid)
+        modeWriting = true
+        actionTopologyWriteInProgress = true
+        displayReconfigurationEvents.operationChanged(busy: true)
+        onStatusChange?()
+        defer {
+            hideOperation = .idle
+            modeWriting = false
+            actionTopologyWriteInProgress = false
+            displayReconfigurationEvents.operationChanged(busy: false)
+            displays = displayProvider()
+            onStatusChange?()
+        }
+        _ = try await performDisplayWrite { [writeMode] in try writeMode(target, {}) }
+        modeResults.removeValue(forKey: uuid)
+        var updated = modePreferences
+        guard let index = updated.displays.firstIndex(where: { $0.id == uuid }) else { return }
+        updated.displays[index].saved = target
         try saveModePreferences(updated)
     }
 
@@ -6250,15 +6299,15 @@ final class AppModel: ObservableObject {
         return DisplayHideRequest(target: target, source: source, awayInput: away.value, awayInputWarning: away.warning)
     }
 
-    /// Hide and Show can settle for over a minute. Run them off the main thread so
+    /// Hide and Show can settle for over a minute; a refresh-rate change verifies here too. Run them off the main thread so
     /// the menu and control socket stay responsive, and so SkyLight can deliver the
     /// display notifications that refresh this process's CoreGraphics display and
     /// mode cache; a blocked main thread left the settle reading stale modes.
     /// Screen events that arrive meanwhile replay in order as soon as the write
     /// returns, while the operation is still busy and before any next Action step.
-    private func performDisplayWrite(
-        _ write: @escaping () throws -> DisplayInputOutcome
-    ) async throws -> DisplayInputOutcome {
+    private func performDisplayWrite<Outcome>(
+        _ write: @escaping () throws -> Outcome
+    ) async throws -> Outcome {
         deferredDisplayEvents = []
         defer {
             let events = deferredDisplayEvents ?? []

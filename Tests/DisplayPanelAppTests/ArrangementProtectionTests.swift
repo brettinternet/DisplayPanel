@@ -117,6 +117,9 @@ final class ArrangementProtectionTests: XCTestCase {
                 }
                 try revalidate()
                 return true
+            }, modeChoices: { uuid in
+                let current = try state.modes[uuid] ?? State.mode()
+                return (current, [try State.mode(width: current.width, rate: 60), try State.mode(width: current.width, rate: 240)])
             })
         models.append(model)
         return (model, defaults)
@@ -362,6 +365,25 @@ final class ArrangementProtectionTests: XCTestCase {
         try reloaded.forgetMode(uuid: uuid)
         XCTAssertTrue(reloaded.modePreferences.displays.isEmpty)
         XCTAssertEqual(state.modeWrites, 0)
+    }
+
+    func testRefreshRateChoiceReplacesTheEnabledSavedModeSoProtectionKeepsIt() async throws {
+        let state = State()
+        let (model, _) = try makeModel(state)
+        let uuid = state.layout.members[0].uuid
+        state.modes[uuid] = try State.mode(rate: 60)
+        try model.setModeProtectionEnabled(uuid: uuid, enabled: true)
+        XCTAssertEqual(model.modePreferences.displays.first?.saved.mode.refreshRate, 60, "turning on remembers the current mode")
+        let fastest = try XCTUnwrap(model.refreshRates(uuid: uuid)?.choices.last)
+        try await model.setRefreshRate(uuid: uuid, to: fastest)
+        XCTAssertEqual(state.modes[uuid], fastest)
+        XCTAssertFalse(model.hideOperation.isBusy)
+        let entry = try XCTUnwrap(model.modePreferences.displays.first)
+        XCTAssertEqual(entry.saved.mode, fastest)
+        XCTAssertTrue(entry.enabled)
+        model.displayReconfigured(display: 1, flags: .addFlag)
+        try await waitFor { model.modeResults[uuid] == "The saved mode already matches." }
+        XCTAssertEqual(state.modeWrites, 1, "a reconnect keeps the chosen rate")
     }
 
     func testModeInputReturnRunsBeforeArrangementAndIgnoresManualAndOwnChanges() async throws {

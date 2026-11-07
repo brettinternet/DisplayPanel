@@ -1,7 +1,7 @@
 import SwiftUI
 import DisplayPanelCore
 
-/// One display's saved mode and its protection switch, on that display's page.
+/// One display's refresh rate, saved mode and protection switch, on that display's page.
 struct ModeProtectionSettings: View {
     @ObservedObject var model: AppModel
     let tile: DisplayTile
@@ -10,19 +10,36 @@ struct ModeProtectionSettings: View {
     var body: some View {
         if let uuid = tile.uuid, UUID(uuidString: uuid) != nil {
             let entry = model.modePreferences.displays.first { $0.id == uuid.lowercased() }
+            let unavailable = tile.display == nil || model.hideConfigurationFrozen || model.isBlackoutHidden(uuid)
             Section {
+                if let rates = model.refreshRates(uuid: uuid) {
+                    Picker("Refresh rate", selection: Binding(
+                        get: { rates.current.refreshRate },
+                        set: { rate in
+                            guard let mode = rates.choices.first(where: { $0.refreshRate == rate }) else { return }
+                            Task {
+                                do { try await model.setRefreshRate(uuid: uuid, to: mode); failure = nil }
+                                catch { failure = error.localizedDescription }
+                            }
+                        }
+                    )) {
+                        ForEach(rates.choices, id: \.refreshRate) { Text(Self.rate($0.refreshRate)).tag($0.refreshRate) }
+                    }
+                    .disabled(unavailable)
+                    .accessibilityLabel("Refresh rate for \(tile.name)")
+                }
                 Toggle(isOn: Binding(
                     get: { entry?.enabled ?? false },
                     set: { enabled in perform { try model.setModeProtectionEnabled(uuid: uuid, enabled: enabled) } }
                 )) {
                     Text("Restore saved mode")
-                    Text(entry.map { Self.summary($0.saved.mode) } ?? "Remember the current mode first.")
+                    if let entry { Text(Self.summary(entry.saved.mode)) }
                 }
-                .disabled(entry == nil)
+                .disabled(entry == nil && unavailable)
                 .accessibilityLabel("Restore saved mode for \(tile.name)")
                 HStack {
                     Button("Remember Current Mode") { perform { try model.rememberCurrentMode(uuid: uuid) } }
-                        .disabled(tile.display == nil || model.hideConfigurationFrozen || model.isBlackoutHidden(uuid))
+                        .disabled(unavailable)
                         .accessibilityLabel("Remember current mode for \(tile.name)")
                     if entry != nil {
                         Button("Forget") { perform { try model.forgetMode(uuid: uuid) } }
@@ -53,11 +70,13 @@ struct ModeProtectionSettings: View {
 
     private static func summary(_ mode: RecoveryMode) -> String {
         var parts = ["\(mode.width) × \(mode.height)"]
-        if mode.refreshRate > 0 {
-            parts.append("\(mode.refreshRate.formatted(.number.precision(.fractionLength(0...2)))) Hz")
-        }
+        if mode.refreshRate > 0 { parts.append(rate(mode.refreshRate)) }
         if mode.pixelWidth > mode.width { parts.append("HiDPI") }
         return parts.joined(separator: " · ")
+    }
+
+    private static func rate(_ hertz: Double) -> String {
+        "\(hertz.formatted(.number.precision(.fractionLength(0...2)))) Hz"
     }
 
     private func perform(_ action: () throws -> Void) {

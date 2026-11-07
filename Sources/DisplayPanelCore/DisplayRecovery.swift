@@ -67,11 +67,25 @@ public struct RecoveryMode: Codable, Equatable {
         return sameFlags.count == 1 ? sameFlags[0] : nil
     }
 
+    /// One offered mode per refresh rate at this mode's size, scale and flags:
+    /// this mode itself, else the default-marked twin a top rate is listed with.
+    func refreshRateChoices(in modes: [RecoveryMode]) -> [RecoveryMode] {
+        let peers = modes.filter {
+            $0.width == width && $0.height == height && $0.pixelWidth == pixelWidth &&
+                $0.pixelHeight == pixelHeight && $0.flags & ~Self.defaultFlag == flags & ~Self.defaultFlag
+        }
+        return Set(peers.map(\.refreshRate)).sorted().compactMap { rate in
+            let twins = peers.filter { $0.refreshRate == rate }
+            return twins.first { $0 == self } ?? twins.first { $0.flags & Self.defaultFlag != 0 } ?? twins.first
+        }
+    }
+
+    private static let defaultFlag: UInt32 = 0x4 // kDisplayModeDefaultFlag
+
     /// This mode without its table position or default marker.
     var renumberingInvariant: RecoveryMode {
-        let defaultFlag: UInt32 = 0x4 // kDisplayModeDefaultFlag
-        return RecoveryMode(id: 0, width: width, height: height, pixelWidth: pixelWidth,
-                            pixelHeight: pixelHeight, refreshRate: refreshRate, flags: flags & ~defaultFlag)
+        RecoveryMode(id: 0, width: width, height: height, pixelWidth: pixelWidth,
+                     pixelHeight: pixelHeight, refreshRate: refreshRate, flags: flags & ~Self.defaultFlag)
     }
 
     private init(id: Int32, width: Int, height: Int, pixelWidth: Int, pixelHeight: Int,

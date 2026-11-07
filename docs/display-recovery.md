@@ -253,12 +253,21 @@ No live trial was performed for DP-78.
 ## Protected display modes
 
 Each display's page in **Displays** has a **Display mode** section; protection is
-off by default for every display. Choose **Remember Current Mode**, then turn on
-**Restore saved mode**. Remember captures the exact logical resolution, pixel dimensions (scale), refresh rate,
+off by default for every display. Turning on **Restore saved mode** remembers the
+current mode if none is saved; **Remember Current Mode** replaces it. Remember
+captures the exact logical resolution, pixel dimensions (scale), refresh rate,
 mode ID and flags. Identity is the saved-display rule: one matching UUID plus
 vendor/model/serial; a numeric display address is rebound only from that identity.
-Only **Remember Current Mode** or **Forget** replaces or removes a saved mode. Turning protection off keeps it. Ordinary System Settings edits stand and
-never silently update the saved choice.
+Only **Remember Current Mode**, **Refresh rate** or **Forget** replaces or removes a
+saved mode. Turning protection off keeps it. Ordinary System Settings edits stand
+and never silently update the saved choice.
+
+**Refresh rate** lists one offered mode per rate at the current resolution and
+scale (a top rate's default-marked twin when both are listed). Choosing one applies
+it with the same locked, session-only, verified write as protection, off the main
+thread like Hide and Show, then replaces a saved mode so protection keeps it.
+It is unavailable for hidden or mirrored displays and while recovery or another
+display operation runs.
 
 After reconnect/input return or wake, DisplayPanel waits for stable inventory and
 restores a differing exact mode once, before sampling the arrangement for

@@ -423,10 +423,10 @@ final class DisplayArrangementTests: XCTestCase {
         XCTAssertEqual(pauses, 5)
     }
 
-    private func mode(rate: Double, id: Int32 = 7, flags: UInt32 = 0) throws -> RecoveryMode {
+    private func mode(rate: Double, id: Int32 = 7, flags: UInt32 = 0, scale: Int = 2) throws -> RecoveryMode {
         try JSONDecoder().decode(RecoveryMode.self, from: JSONSerialization.data(withJSONObject: [
-            "id": id, "width": 1920, "height": 1080, "pixelWidth": 3840,
-            "pixelHeight": 2160, "refreshRate": rate, "flags": flags
+            "id": id, "width": 1920, "height": 1080, "pixelWidth": 1920 * scale,
+            "pixelHeight": 1080 * scale, "refreshRate": rate, "flags": flags
         ]))
     }
 
@@ -493,6 +493,17 @@ final class DisplayArrangementTests: XCTestCase {
         verifySuccess = false
         XCTAssertThrowsError(try sut.restore(saved)) { XCTAssertTrue($0.localizedDescription.contains("did not verify")) }
         XCTAssertEqual(commits, 2, "verification retries must not write again")
+    }
+
+    func testRefreshRateChoicesKeepSizeScaleAndFlagsWithOneModePerRate() throws {
+        // AW3425DW: 240 Hz is listed twice, and the default-marked twin is current after a mode reset.
+        let current = try mode(rate: 60, id: 103, flags: 0x3)
+        let mid = try mode(rate: 120, id: 102, flags: 0x3)
+        let defaultTwin = try mode(rate: 240, id: 100, flags: 0x7)
+        let offered = [current, mid, try mode(rate: 240, id: 99, flags: 0x3), defaultTwin,
+                       try mode(rate: 165, id: 101, flags: 0x3, scale: 1), try mode(rate: 144, id: 90, flags: 0x203)]
+        XCTAssertEqual(current.refreshRateChoices(in: offered), [current, mid, defaultTwin])
+        XCTAssertEqual(offered[2].refreshRateChoices(in: offered).last, offered[2], "the current twin stays selected")
     }
 
     func testModeRestoreAdoptsOnlyASingleSameBootRenumbering() throws {

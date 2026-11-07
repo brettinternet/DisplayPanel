@@ -275,6 +275,8 @@ enum DisplayHideOperation: Equatable {
     case idle
     case hiding(String)
     case showing(String)
+    /// A refresh-rate change, which every Hide, Show and Action guard waits for.
+    case changingMode(String)
 
     var isBusy: Bool {
         if case .idle = self { return false }
@@ -284,7 +286,7 @@ enum DisplayHideOperation: Equatable {
     var targetUUID: String? {
         switch self {
         case .idle: return nil
-        case .hiding(let uuid), .showing(let uuid): return uuid
+        case .hiding(let uuid), .showing(let uuid), .changingMode(let uuid): return uuid
         }
     }
 }
@@ -312,7 +314,7 @@ enum DisplayHideError: Error, LocalizedError, Equatable {
              .protectionCleanup(let message):
             return message
         case .actionInProgress:
-            return "Another Hide or Show is still running. Try again when it finishes."
+            return "Another display change is still running. Try again when it finishes."
         case .sleeping:
             return "Displays are sleeping or changing. Try again once they’re awake."
         }
