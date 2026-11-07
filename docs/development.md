@@ -215,7 +215,8 @@ With explicit owner approval for desktop interaction, install the app using
 verify opening it and Launch at Login registration, then confirm the bundled
 helper executes and the installed signature still verifies. The installer copies
 the signed bundle without re-signing. It quits the running app with
-`dp app quit`, which keeps an unresolved display journal without the quit prompt. A quarantined download must pass Gatekeeper;
+`dp app quit`, which keeps an unresolved display journal without the quit prompt,
+and reopens it after installing. A quarantined download must pass Gatekeeper;
 the installer then clears its quarantine so macOS does not translocate it.
 Do not run blackout or recovery commands to test signing.
 

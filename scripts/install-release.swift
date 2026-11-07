@@ -29,14 +29,15 @@ enum InstallError: LocalizedError {
     }
 }
 
-func terminateRunningApp(at destination: URL) throws {
-    guard let bundleIdentifier = Bundle(url: destination)?.bundleIdentifier else { return }
+/// Returns whether the app was running, so the installed build can reopen.
+func terminateRunningApp(at destination: URL) throws -> Bool {
+    guard let bundleIdentifier = Bundle(url: destination)?.bundleIdentifier else { return false }
     let runningApps = NSRunningApplication.runningApplications(
         withBundleIdentifier: bundleIdentifier
     ).filter { app in
         app.bundleURL?.standardizedFileURL == destination
     }
-    guard !runningApps.isEmpty else { return }
+    guard !runningApps.isEmpty else { return false }
 
     // The app's own quit keeps an unresolved display journal without a prompt
     // that would block the install. Builds without it get a regular quit.
@@ -50,6 +51,7 @@ func terminateRunningApp(at destination: URL) throws {
     guard runningApps.allSatisfy(\.isTerminated) else {
         throw InstallError.destinationRunning(destination.path)
     }
+    return true
 }
 
 func requestQuit(cli: URL) -> Bool {
@@ -100,9 +102,7 @@ func install(sourcePath: String, destinationPath: String) throws {
         throw InstallError.invalidDestination(destination.path)
     }
 
-    if fileManager.fileExists(atPath: destination.path) {
-        try terminateRunningApp(at: destination)
-    }
+    let wasRunning = try fileManager.fileExists(atPath: destination.path) && terminateRunningApp(at: destination)
 
     let staging = destination
         .deletingLastPathComponent()
@@ -130,6 +130,9 @@ func install(sourcePath: String, destinationPath: String) throws {
             try? fileManager.moveItem(at: trashedDestination, to: destination)
         }
         throw error
+    }
+    if wasRunning, !(try run("/usr/bin/open", [destination.path])) {
+        FileHandle.standardError.write(Data("installed, but could not reopen \(destination.path)\n".utf8))
     }
 }
 
