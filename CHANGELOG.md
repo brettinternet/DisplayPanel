@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Print readable `dp` output: tables for `list`, `probe` and `app status`, named displays in steps and DDC results, and plain mirror and handoff messages. `--json` is unchanged.
+- Name displays hidden by mirroring instead of "Display 1".
+- Say why arrangement protection is paused, such as "Paused while displays sleep or are off.", instead of recovery errors.
+- Warn when `dp app` talks to a newer DisplayPanel; the README shows how to link the app's bundled `dp`.
+
 ## 0.9.6
 
 - Explain display recovery problems in Settings without CLI advice such as "inspect recovery".

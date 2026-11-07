@@ -111,11 +111,25 @@ public enum Probe {
 
     static func ddcText(_ report: ProbeReport) -> String {
         func value(_ result: DDCReadAvailability) -> String {
-            result.status.rawValue + (result.detail.map { " (\($0))" } ?? "")
+            let status: String
+            switch result.status {
+            case .readable: status = "readable"
+            case .notApplicable: status = "not applicable"
+            case .noController: status = "no controller"
+            case .ambiguousMapping: status = "ambiguous mapping"
+            case .unsupported: status = "unsupported"
+            case .transportError: status = "transport error"
+            }
+            return status
         }
-        return ([report.ddcNotice] + report.ddc.map {
-            "DDC displayID=\($0.displayID) input(0x60)=\(value($0.input)) luminance(0x10)=\(value($0.luminance))"
-        }).joined(separator: "\n")
+        let rows = report.ddc.map { ddc -> [String] in
+            let name = report.displays.first { $0.id == ddc.displayID }?.name ?? "Display \(ddc.displayID)"
+            let note = ddc.input.detail == ddc.luminance.detail ? ddc.input.detail ?? ""
+                : [ddc.input.detail.map { "input: \($0)" }, ddc.luminance.detail.map { "brightness: \($0)" }]
+                    .compactMap { $0 }.joined(separator: "; ")
+            return ["\(ddc.displayID)", name, value(ddc.input), value(ddc.luminance), note]
+        }
+        return report.ddcNotice + "\n" + CLIText.table([["ID", "NAME", "INPUT (0x60)", "BRIGHTNESS (0x10)", "NOTE"]] + rows, indent: "  ")
     }
 
     public static func printReport(_ report: ProbeReport, json: Bool) throws {
@@ -123,19 +137,18 @@ public enum Probe {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             FileHandle.standardOutput.write(try encoder.encode(report)); print()
         } else {
-            print("OS: \(report.os)"); print("Architecture: \(report.architecture)")
-            if report.displays.isEmpty { print("Displays: none (headless or no WindowServer context)") }
-            else {
-                for d in report.displays {
-                    let uuid = d.uuid ?? "-"; let name = d.name ?? "-"
-                    print("Display index=\(d.index) id=\(d.id) uuid=\(uuid) name=\(name) active=\(d.active) online=\(d.online) asleep=\(d.asleep) builtin=\(d.builtin) main=\(d.main) vendor=\(d.vendor) model=\(d.model) serial=\(d.serial) bounds=\(d.bounds.x),\(d.bounds.y) \(d.bounds.width)x\(d.bounds.height) pixels=\(d.pixelWidth)x\(d.pixelHeight)")
-                }
-            }
-            print(ddcText(report))
-            for evidence in report.symbols {
-                let values = evidence.symbols.keys.sorted().map { "\($0)=\(evidence.symbols[$0] == true)" }.joined(separator: " ")
-                print("Symbols \(evidence.library): \(values)")
-            }
+            print("macOS \(report.os.replacingOccurrences(of: "Version ", with: "")) · \(report.architecture)\n")
+            print(DisplayInventory.text(report.displays) + "\n")
+            print(ddcText(report) + "\n")
+            print("Symbols")
+            print(CLIText.table(report.symbols.map { evidence in
+                let names = evidence.symbols.keys.sorted()
+                let missing = names.filter { evidence.symbols[$0] != true }
+                let found = names.filter { evidence.symbols[$0] == true }
+                return [evidence.library, [found.isEmpty ? nil : "found \(found.joined(separator: ", "))",
+                                           missing.isEmpty ? nil : "missing \(missing.joined(separator: ", "))"]
+                    .compactMap { $0 }.joined(separator: "; ")]
+            }, indent: "  ") + "\n")
             print("DCPAVServiceProxy services: \(report.avServices.count)")
             for service in report.avServices {
                 print("  entryID=\(service.registryEntryID) path=\(service.path ?? "-") Location=\(service.location ?? "-") Unit=\(service.unit ?? "-") IOAVServiceUserInterfaceSupported=\(service.ioavServiceUserInterfaceSupported.map(String.init) ?? "-")")

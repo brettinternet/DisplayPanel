@@ -660,7 +660,7 @@ final class AppModel: ObservableObject {
             return response(.refused, "Show this display before changing its refresh rate.")
         }
         let rates: (current: RecoveryMode, choices: [RecoveryMode])
-        do { rates = try modeChoices(uuid) } catch { return response(.refused, error.localizedDescription) }
+        do { rates = try modeChoices(uuid) } catch { return response(.refused, plainProblem(error)) }
         let offered = rates.choices.map { Self.hertz($0.refreshRate) }.joined(separator: ", ")
         guard let hertz = request.refreshRate else {
             return response(nil, "\(Self.hertz(rates.current.refreshRate)); offered \(offered)", rates)
@@ -676,7 +676,7 @@ final class AppModel: ObservableObject {
         do {
             try await setRefreshRate(uuid: uuid, to: choice)
         } catch {
-            return response(.failed, error.localizedDescription, rates)
+            return response(.failed, plainProblem(error), rates)
         }
         return response(.done, "Set to \(Self.hertz(choice.refreshRate)).", (choice, rates.choices))
     }
@@ -775,7 +775,7 @@ final class AppModel: ObservableObject {
                 displays = displayProvider()
             } catch {
                 modePending.remove(uuid)
-                modeResults[uuid] = error.localizedDescription
+                modeResults[uuid] = plainProblem(error)
             }
         }
         onStatusChange?()
@@ -784,7 +784,8 @@ final class AppModel: ObservableObject {
 
     private func stopPendingModes() {
         for uuid in modePending {
-            modeResults[uuid] = "Mode protection stopped after 15 seconds: \(modeResults[uuid] ?? "display did not settle")."
+            let reason = (modeResults[uuid] ?? "display did not settle").trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            modeResults[uuid] = "Mode protection stopped after 15 seconds: \(reason)."
         }
     }
 
@@ -804,6 +805,18 @@ final class AppModel: ObservableObject {
         return try captureArrangement(excluded)
     }
 
+    /// Arrangement and mode errors in Settings and `dp app` words.
+    func plainProblem(_ error: Error) -> String {
+        if case RecoveryError.unsafe(let reason)? = error as? RecoveryError {
+            if reason.hasPrefix("display inventory contains an") { return "Paused while displays sleep or are off." }
+            if reason == "mirrored displays cannot be arranged" { return "Paused while displays are mirrored." }
+            if reason == "cannot exclude the main display from an arrangement" {
+                return "Paused while the main display is blacked out."
+            }
+        }
+        return Self.sentence(readableProblem(error.localizedDescription))
+    }
+
     /// `ownOperation` is the running mode write asking, which doesn't block itself.
     private func arrangementSuspensionReason(actionLeaseID: UUID? = nil,
                                              ownOperation: DisplayHideOperation? = nil) -> String? {
@@ -812,8 +825,12 @@ final class AppModel: ObservableObject {
         if sleepLifecycleActive || inputReturnIntent != nil || displayLifecycleTransitioning {
             return "Waiting for wake or display recovery to finish."
         }
-        if handoffStatus?.hasUnresolvedJournal == true || handoffInspectionFailure != nil {
-            return "An unresolved display journal needs recovery first."
+        if handoffInspectionFailure != nil { return "Paused until hidden displays are recovered." }
+        if let status = handoffStatus, status.hasUnresolvedJournal {
+            if status.state == .busy { return "Waiting for the display change to finish." }
+            let hidden = status.sessionRecovery == nil && (status.state == .none || status.state == .hidden && status.canShow) &&
+                status.removals.filter(\.isUnresolved).allSatisfy { $0.state == "mirrored" && $0.canShow && $0.topologyVerified }
+            return hidden ? "Paused while displays are hidden." : "Paused until hidden displays are recovered."
         }
         return displayActionEnvironmentBlocker(prefix: "", actionLeaseID: actionLeaseID, ownOperation: ownOperation)?.message
     }
@@ -835,7 +852,7 @@ final class AppModel: ObservableObject {
                 do {
                     differs = !current.samePlacement(as: try current.restoringRemembered(saved))
                 } catch {
-                    return status("suspended", error.localizedDescription,
+                    return status("suspended", plainProblem(error),
                         differs: !current.samePlacement(as: saved), remember: canRemember)
                 }
                 return status(arrangementPreferences.enabled ? "remembered" : "unprotected",
@@ -850,7 +867,7 @@ final class AppModel: ObservableObject {
             }
             return status("unprotected", "No remembered arrangement or preferred main display for these displays.", remember: canRemember)
         } catch {
-            return status("suspended", error.localizedDescription)
+            return status("suspended", plainProblem(error))
         }
     }
 
@@ -867,14 +884,14 @@ final class AppModel: ObservableObject {
         var updated = arrangementPreferences
         updated.enabled = enabled
         do { try saveArrangementPreferences(updated) }
-        catch { arrangementLastResult = error.localizedDescription }
+        catch { arrangementLastResult = plainProblem(error) }
     }
 
     func setArrangementApplyOnLaunch(_ enabled: Bool) {
         var updated = arrangementPreferences
         updated.applyOnLaunch = enabled
         do { try saveArrangementPreferences(updated) }
-        catch { arrangementLastResult = error.localizedDescription }
+        catch { arrangementLastResult = plainProblem(error) }
     }
 
     func rememberCurrentArrangement() throws {
@@ -963,7 +980,7 @@ final class AppModel: ObservableObject {
             message = changed ? "Restored the arrangement." : "The arrangement already matches."
         } catch {
             outcome = attemptedWrite ? .failed : .refused
-            message = error.localizedDescription
+            message = plainProblem(error)
         }
         arrangementLastResult = message
         displays = displayProvider()
@@ -1084,7 +1101,7 @@ final class AppModel: ObservableObject {
             // A partially reconnected inventory can be temporarily unreadable.
             // Wait within the original deadline, never extend it or write early.
             arrangementSample = nil
-            arrangementLastResult = error.localizedDescription
+            arrangementLastResult = plainProblem(error)
             continueArrangementSettlement(expired: expired)
             onStatusChange?()
         }
@@ -5664,7 +5681,7 @@ final class AppModel: ObservableObject {
         if let until = snoozedUntil {
             let label = ProtectionRuntimeState.snoozed(until).label
             if let remaining = secondsRemaining, let action = nextAction {
-                return "\(label) until \(Self.expiryFormatter.string(from: until)) · \(Self.countdownLabel(remaining)) to \(action)"
+                return "\(label) until \(Self.expiryFormatter.string(from: until)) · \(CLIText.countdown(remaining)) to \(action)"
             }
             return label
         }
@@ -5679,7 +5696,7 @@ final class AppModel: ObservableObject {
         let suffix = peers.count == 1 ? peers[0].rule.name : "\(peers.count) rules"
         let base = "\(label) · \(suffix)"
         if let remaining = secondsRemaining, let action = nextAction {
-            return "\(base) · \(Self.countdownLabel(remaining)) to \(action)"
+            return "\(base) · \(CLIText.countdown(remaining)) to \(action)"
         }
         return base
     }
@@ -5717,16 +5734,16 @@ final class AppModel: ObservableObject {
         if !blackedOutDisplayIDs.isEmpty, state != .blackedOut {
             if let timer = ruleTimer(for: rule, state: state),
                let remaining = timer.remaining, let action = timer.action {
-                return "Empty-display blackout active · \(Self.countdownLabel(remaining)) to \(action)"
+                return "Empty-display blackout active · \(CLIText.countdown(remaining)) to \(action)"
             }
             return "Empty-display blackout active · \(state.label)"
         }
         if let timer = ruleTimer(for: rule, state: state),
            let remaining = timer.remaining, let action = timer.action {
             if case .snoozed(let until) = state {
-                return "\(label) until \(Self.expiryFormatter.string(from: until)) · \(Self.countdownLabel(remaining)) to \(action)"
+                return "\(label) until \(Self.expiryFormatter.string(from: until)) · \(CLIText.countdown(remaining)) to \(action)"
             }
-            return "\(label) · \(Self.countdownLabel(remaining)) to \(action)"
+            return "\(label) · \(CLIText.countdown(remaining)) to \(action)"
         }
         return label
     }
@@ -7087,16 +7104,6 @@ final class AppModel: ObservableObject {
         formatter.timeStyle = .short
         return formatter
     }()
-
-    private static func countdownLabel(_ seconds: Int) -> String {
-        if seconds >= 3600 {
-            return "\(seconds / 3600)h \((seconds % 3600) / 60)m"
-        }
-        if seconds >= 60 {
-            return "\(seconds / 60)m \(seconds % 60)s"
-        }
-        return "\(seconds)s"
-    }
 
     nonisolated static func durationLabel(_ seconds: TimeInterval) -> String {
         if seconds >= 3600, seconds.truncatingRemainder(dividingBy: 3600) == 0 {

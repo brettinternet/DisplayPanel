@@ -186,6 +186,8 @@ public struct AppControlResponse: Codable, Equatable, Sendable {
     public let refreshRates: [Double]?
     /// Present only on a status stream; scoped to that connection.
     public var sequence: UInt64?
+    /// The running app's release, so an older `dp` can say it is behind.
+    public var version: String?
 
     public var exitCode: Int32 {
         if !running { return 3 }
@@ -254,7 +256,7 @@ public struct AppControlResponse: Codable, Equatable, Sendable {
         case protocolVersion = "protocol"
         case ok, running, enabled, state, summary, detail, error, sequence
         case nextAction, secondsRemaining, snoozedUntil, outcome, displays, rules, steps, actions, runningAction, runningRule, arrangement
-        case refreshRate, refreshRates
+        case refreshRate, refreshRates, version
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -281,6 +283,7 @@ public struct AppControlResponse: Codable, Equatable, Sendable {
         try container.encodeIfPresent(arrangement, forKey: .arrangement)
         try container.encodeIfPresent(refreshRate, forKey: .refreshRate)
         try container.encodeIfPresent(refreshRates, forKey: .refreshRates)
+        try container.encodeIfPresent(version, forKey: .version)
     }
 }
 

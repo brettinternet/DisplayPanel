@@ -22,6 +22,13 @@ Or download the app or CLI and its SHA-256 checksum from
 [GitHub Releases](https://github.com/brettinternet/displaypanel/releases). Move
 `DisplayPanel.app` to `/Applications`, or put `dp` on your `PATH`.
 
+With the app installed, link its bundled `dp` instead of installing a second
+copy, so the CLI updates with the app:
+
+```sh
+ln -sf /Applications/DisplayPanel.app/Contents/Helpers/dp ~/.local/bin/dp
+```
+
 To build the CLI (macOS 13+, Swift 5.9+):
 
 ```sh

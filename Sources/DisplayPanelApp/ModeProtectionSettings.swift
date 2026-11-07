@@ -19,7 +19,7 @@ struct ModeProtectionSettings: View {
                             guard let mode = rates.choices.first(where: { $0.refreshRate == rate }) else { return }
                             Task {
                                 do { try await model.setRefreshRate(uuid: uuid, to: mode); failure = nil }
-                                catch { failure = error.localizedDescription }
+                                catch { failure = model.plainProblem(error) }
                             }
                         }
                     )) {
@@ -77,6 +77,6 @@ struct ModeProtectionSettings: View {
 
     private func perform(_ action: () throws -> Void) {
         do { try action(); failure = nil }
-        catch { failure = error.localizedDescription }
+        catch { failure = model.plainProblem(error) }
     }
 }

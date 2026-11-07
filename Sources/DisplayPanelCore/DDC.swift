@@ -276,6 +276,17 @@ public enum DDCLuminance {
     }
 }
 
+/// Display names for the common MCCS input codes.
+public enum MonitorInput {
+    public static let common: [(value: UInt8, name: String)] = [
+        (0x11, "HDMI 1"), (0x12, "HDMI 2"), (0x0F, "DisplayPort 1"), (0x10, "DisplayPort 2")
+    ]
+
+    public static func name(_ value: UInt8) -> String {
+        common.first { $0.value == value }?.name ?? String(format: "Input 0x%02X", value)
+    }
+}
+
 public struct DDCInputReading: Equatable, Codable {
     public let displayID: UInt32
     public let uuid: String

@@ -10,8 +10,8 @@ public enum DisplayMirroring {
     public static func mirror(selector: String, source: String, journalPath: String?) throws {
         let store = store(journalPath)
         let journal = try MirrorController().mirror(selector: selector, source: source, store: store)
-        print("Mirrored; journal retained: \(store.url.path) (\(journal.id))")
-        print("Modes/HDR/refresh, windows and Spaces may change. No gamma or DDC writes.")
+        print("Hidden by mirroring. Journal: \(store.url.path) (\(journal.id))")
+        print("Resolution, HDR, refresh rate, windows and Spaces may change; brightness and monitor input don't.")
     }
 
     public static func unmirror(selector: String? = nil, journalPath: String?) throws {
@@ -19,16 +19,16 @@ public enum DisplayMirroring {
         let journal = try MirrorController().unmirror(store: store, selector: selector)
         let remaining = journal.publicMirrorSession?.removals.filter { !$0.state.resolved }.count ?? 0
         if remaining > 0 {
-            print("Selected display shown and verified; \(remaining) removal(s) remain. Its position may differ slightly until the last Show restores the original arrangement; journal retained: \(store.url.path)")
+            print("Shown and verified; \(remaining) more still hidden. Positions may shift slightly until the last one is shown. Journal: \(store.url.path)")
         } else {
-            print("Captured arrangement, modes and main display verified; journal retained: \(store.url.path)")
+            print("Shown; arrangement, modes and main display restored and verified. Journal: \(store.url.path)")
         }
     }
 
     static func verifyRemoval(selector: String?, journalPath: String?) throws {
         let store = store(journalPath)
         let journal = try MirrorController().verifyRemoval(store: store, selector: selector)
-        print("Removal state verified; journal retained: \(store.url.path) (\(journal.id))")
+        print("Hidden state verified. Journal: \(store.url.path) (\(journal.id))")
     }
 
     private static func store(_ path: String?) -> RecoveryStore {

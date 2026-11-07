@@ -153,6 +153,6 @@ struct ArrangementProtectionSettings: View {
 
     private func perform(_ action: () throws -> Void) {
         do { try action(); failure = nil }
-        catch { failure = error.localizedDescription }
+        catch { failure = model.plainProblem(error) }
     }
 }

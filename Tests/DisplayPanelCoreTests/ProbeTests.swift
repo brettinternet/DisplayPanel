@@ -26,8 +26,9 @@ final class ProbeTests: XCTestCase {
         let entries = try XCTUnwrap(json["ddc"] as? [[String: Any]])
         XCTAssertEqual((entries[0]["input"] as? [String: Any])?["status"] as? String, "unsupported")
         let text = Probe.ddcText(report)
-        XCTAssertTrue(text.contains("input(0x60)=unsupported (monitor reports VCP 0x60 unsupported)"))
-        XCTAssertTrue(text.contains("DDC displayID=2 input(0x60)=readable luminance(0x10)=readable"))
+        let rows = text.split(separator: "\n").map { $0.split(separator: " ").joined(separator: " ") }
+        XCTAssertTrue(rows.contains("1 Fake unsupported readable input: monitor reports VCP 0x60 unsupported"), text)
+        XCTAssertTrue(rows.contains("2 Fake readable readable"), text)
         XCTAssertTrue(text.contains("a successful read is not write qualification"))
     }
 

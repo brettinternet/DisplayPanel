@@ -58,14 +58,14 @@ struct DisplayPanelMain {
                     if json {
                         try printJSON(result)
                     } else {
-                        print("id=\(result.displayID) uuid=\(result.uuid) original=\(result.original)/\(result.maximum) requested=\(result.requested) observed=\(result.observed)")
+                        print(Output.luminance(result, names: Output.names()))
                     }
                 } else {
                     let reading = try DDCLuminance.read(selector: selector)
                     if json {
                         try printJSON(reading)
                     } else {
-                        print("id=\(reading.displayID) uuid=\(reading.uuid) luminance=\(reading.current)/\(reading.maximum)")
+                        print(Output.luminance(reading, names: Output.names()))
                     }
                 }
             case .ddcInput(let selector, let setValue, let json):
@@ -74,19 +74,14 @@ struct DisplayPanelMain {
                     if json {
                         try printJSON(result)
                     } else {
-                        let original = result.original.map { String(format: "0x%02X", $0) } ?? "unknown"
-                        var line = String(format: "id=%u uuid=%@ original=%@ requested=0x%02X", result.displayID, result.uuid, original, result.requested)
-                        if let observed = result.observed { line += String(format: " observed=0x%02X", observed) }
-                        line += " outcome=\(result.outcome.rawValue)"
-                        if let detail = result.detail { line += " detail=\(quoted(detail))" }
-                        print(line)
+                        print(Output.input(result, names: Output.names()))
                     }
                 } else {
                     let reading = try DDCInput.read(selector: selector)
                     if json {
                         try printJSON(reading)
                     } else {
-                        print(String(format: "id=%u uuid=%@ input=0x%02X", reading.displayID, reading.uuid, reading.current))
+                        print(Output.input(reading, names: Output.names()))
                     }
                 }
             case .ddcPower(let selector, let value, let acceptedRisk, let json):
@@ -94,11 +89,7 @@ struct DisplayPanelMain {
                 if json {
                     try printJSON(result)
                 } else {
-                    var line = String(format: "id=%u uuid=%@ original=0x%02X", result.displayID, result.uuid, result.original)
-                    if let requested = result.requested { line += " requested=\(requested.rawValue)" }
-                    if let observed = result.observed { line += String(format: " observed=0x%02X", observed) }
-                    line += " outcome=\(result.outcome.rawValue) detail=\(quoted(result.detail))"
-                    print(line)
+                    print(Output.power(result, names: Output.names()))
                 }
             case .sleepDisplays(let keepSystemAwake, let timeout):
                 let controller = DisplaySleepController()
@@ -144,49 +135,24 @@ struct DisplayPanelMain {
                 }
                 if json {
                     try printJSON(response)
-                } else if let steps = response.steps {
-                    for step in steps {
-                        var line = "Step \(step.index) (\(step.targetUUID), \(step.effect)): \(step.outcome.rawValue) — \(step.desktopSummary)"
-                        if let input = step.inputOutcome { line += " · input \(input.rawValue)" }
-                        if let detail = step.inputDetail { line += " · \(detail)" }
-                        print(line)
+                } else if let steps = response.steps, !steps.isEmpty {
+                    let text = Output.steps(steps, names: Output.names())
+                    if response.ok {
+                        print(steps.count > 1 ? text + "\n" + response.summary : text)
+                    } else if steps.count > 1 {
+                        print(text)
+                        fputs("dp: \(response.summary)\n", stderr)
+                    } else {
+                        fputs("dp: \(text)\n", stderr)
                     }
-                    if !response.ok, appCommand != .status {
-                        fputs("dp: \(response.error ?? response.summary)\n", stderr)
-                    }
-                } else if !response.ok, appCommand != .status {
-                    let result = appCommand == .runRule
-                        ? "\(response.outcome?.rawValue ?? "failed"): \(response.error ?? response.summary)"
-                        : (response.error ?? response.summary)
-                    fputs("dp: \(result)\n", stderr)
+                } else if appCommand == .status {
+                    print(Output.status(response, names: response.displays == nil ? [:] : Output.names()))
+                } else if response.ok {
+                    print([response.summary, response.detail].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n"))
                 } else {
-                    var line = "running=\(response.running) enabled=\(response.enabled) state=\(response.state) summary=\(quoted(response.summary))"
-                    if appCommand == .runRule, let outcome = response.outcome {
-                        line += " outcome=\(outcome.rawValue)"
-                    }
-                    if let detail = response.detail, !detail.isEmpty {
-                        line += " detail=\(quoted(detail))"
-                    }
-                    if let arrangement = response.arrangement {
-                        line += " arrangement=\(arrangement.state) arrangementReason=\(quoted(arrangement.reason))"
-                    }
-                    if let nextAction = response.nextAction {
-                        line += " nextAction=\(quoted(nextAction))"
-                    }
-                    if let secondsRemaining = response.secondsRemaining {
-                        line += " secondsRemaining=\(secondsRemaining)"
-                    }
-                    if let snoozedUntil = response.snoozedUntil {
-                        line += " snoozedUntil=\(quoted(snoozedUntil))"
-                    }
-                    if let action = response.runningAction {
-                        line += " runningAction=\(quoted(action.name)) step=\(action.currentStep)/\(action.totalSteps)"
-                    }
-                    if let rule = response.runningRule {
-                        line += " runningRule=\(quoted(rule.name)) id=\(rule.id.uuidString)"
-                    }
-                    print(line)
+                    fputs("dp: \(response.error ?? response.summary)\n", stderr)
                 }
+                noteNewerApp(response.version)
                 if response.exitCode != 0 {
                     Foundation.exit(response.exitCode)
                 }
@@ -262,10 +228,10 @@ struct DisplayPanelMain {
         print()
     }
 
-    private static func quoted(_ value: String) -> String {
-        let escaped = value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
+    /// An older `dp` still talks to a newer app, but may not know its newer replies.
+    private static func noteNewerApp(_ appVersion: String?) {
+        let cliVersion = String(CLIHelp.version.dropFirst("dp ".count))
+        guard let appVersion, appVersion.compare(cliVersion, options: .numeric) == .orderedDescending else { return }
+        fputs("DisplayPanel \(appVersion) is running; this dp is \(cliVersion).\n", stderr)
     }
 }

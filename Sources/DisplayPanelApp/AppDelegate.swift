@@ -53,7 +53,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let controlServer = AppControlServer(statusSnapshot: { [weak self] in
             self?.controlStatusResponse() ?? .unavailable()
         }) { [weak self] request, receivedAt in
-            await self?.handleControlRequest(request, receivedAt: receivedAt) ?? .unavailable()
+            guard let self else { return .unavailable() }
+            var response = await handleControlRequest(request, receivedAt: receivedAt)
+            response.version = model.version
+            return response
         }
         do {
             try controlServer.start()

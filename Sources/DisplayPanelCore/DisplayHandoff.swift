@@ -496,12 +496,12 @@ struct HandoffController {
                 capturedTarget = target
                 try switchInput(input, target: target) { inputRecovery = $0 }
             }
-            report("Away: separate desktop hidden by mirroring; Mac signal remains on. Journal: \(store.url.path)")
+            report("Hidden by mirroring; the Mac still drives the monitor. Journal: \(store.url.path)")
             guard let target = capturedTarget else {
                 throw RecoveryError.unsafe("newly hidden target is missing from the durable journal; inspect recovery status")
             }
             report("Return with: dp back --display \(shellQuote(target.uuid)) --consent-back --journal \(shellQuote(store.url.path))")
-            report("Add --input <Mac-input> only if DDC switching back is wanted; otherwise use the monitor's input button.")
+            report("Add --input <Mac input> to switch the monitor back over DDC, or use the monitor's input button.")
         } catch {
             throw RecoveryError.unsafe("\(error)\(inputRecovery.map { ". Input recovery: \($0)" } ?? "")")
         }
@@ -526,7 +526,7 @@ struct HandoffController {
         let relinkInput: ((RecoveryDisplay) throws -> Bool)? = input == nil ? nil : { target in
             guard returned == .verified || returned == .unverified, let input, let previousInput,
                   let back = reselect(input, through: previousInput, target: target) else { return false }
-            report("Re-selected the Mac input through \(String(format: "0x%02X", previousInput)) to relink the monitor.")
+            report("Re-selected the Mac input through \(MonitorInput.name(previousInput)) to relink the monitor.")
             guard back.state != .failed else {
                 throw RecoveryError.unsafe("\(back.detail ?? "DDC selection failed"); retry back or use the monitor's input button")
             }
@@ -540,12 +540,12 @@ struct HandoffController {
             throw RecoveryError.unsafe(error.localizedDescription + (inputFailure.map { " Input return: \($0.localizedDescription)" } ?? ""))
         }
         if let inputFailure { throw inputFailure }
-        if input == nil { report("DDC skipped (no --input configured); use the monitor's input button.") }
+        if input == nil { report("No --input given; use the monitor's input button.") }
         let remaining = journal.publicMirrorSession?.removals.filter { !$0.state.resolved }.count ?? 0
         if remaining > 0 {
-            report("Back: selected display shown and verified; \(remaining) removal(s) remain hidden. Its position may differ slightly until the last Show restores the original arrangement. Journal: \(store.url.path)")
+            report("Shown and verified; \(remaining) more still hidden. Positions may shift slightly until the last one is shown. Journal: \(store.url.path)")
         } else {
-            report("Back: captured topology restored and verified. Journal: \(store.url.path)")
+            report("Shown; arrangement restored and verified. Journal: \(store.url.path)")
         }
     }
 
@@ -675,13 +675,16 @@ struct HandoffController {
         })
         switch outcome.state {
         case .notRequested:
-            report("DDC skipped (no --input configured); use the monitor's input button.")
+            report("No --input given; use the monitor's input button.")
         case .notAttempted:
-            report("DDC input was not attempted: \(outcome.detail ?? "unknown reason").")
+            report("Input not switched: \(outcome.detail ?? "unknown reason").")
         case .skipped:
-            report("DDC skipped (\(outcome.detail ?? "unavailable")); use the monitor's input button.")
+            report("Input not switched (\(outcome.detail ?? "DDC unavailable")); use the monitor's input button.")
         case .verified, .alreadySelected, .unverified:
-            report("DDC input outcome=\(outcome.state.rawValue)\(outcome.detail.map { ": \($0)" } ?? "")")
+            let name = MonitorInput.name(outcome.observedInput ?? outcome.requestedInput ?? 0)
+            report(outcome.state == .alreadySelected ? "The monitor was already on \(name)."
+                : "Switched the monitor to \(name)\(outcome.state == .unverified ? "; not confirmed" : "")."
+                + (outcome.detail.map { " \($0)" } ?? ""))
             if outcome.state == .unverified {
                 report("Input switch is unverified; check visually and use the monitor's input button if needed.")
             }

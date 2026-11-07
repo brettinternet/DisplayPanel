@@ -610,7 +610,7 @@ final class DisplayMirroringTests: XCTestCase {
         XCTAssertEqual(active.count, 2)
         try handoff.back(selector: snapshotUUID(3), input: nil, store: scenarioStore)
         XCTAssertEqual(active.count, 1, "back Shows only its selected target")
-        XCTAssertTrue(reports.contains { $0.contains("selected display shown and verified; 1 removal(s) remain hidden") })
+        XCTAssertTrue(reports.contains { $0.contains("Shown and verified; 1 more still hidden") })
     }
 
     func testDistinctSourcesAndMainTargetSurviveObservedMacRearrangement() throws {

@@ -51,7 +51,7 @@ public enum DisplayInventory {
                 index: offset + 1,
                 id: id,
                 uuid: uuid,
-                name: screen?.localizedName,
+                name: screen?.localizedName ?? productName(id),
                 active: activeIDs.contains(id),
                 online: onlineIDs.contains(id),
                 asleep: CGDisplayIsAsleep(id) != 0,
@@ -67,17 +67,43 @@ public enum DisplayInventory {
         }
     }
 
+    private static let metadata = try? CoreDisplayMetadata()
+
+    /// CoreDisplay still names a display NSScreen omits, such as one hidden by mirroring.
+    private static func productName(_ id: CGDirectDisplayID) -> String? {
+        let info = metadata?.info(id)?.takeRetainedValue() as? [String: Any]
+        guard let names = info?["DisplayProductName"] as? [String: String] else { return nil }
+        return names[Locale.current.identifier] ?? names["en_US"] ?? names.values.first
+    }
+
     public static func printRecords(_ records: [DisplayRecord], json: Bool) throws {
         if json {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             FileHandle.standardOutput.write(try encoder.encode(records))
             print()
-        } else if records.isEmpty {
-            print("No online or active displays found (headless or no WindowServer context).")
         } else {
-            for d in records {
-                print("index=\(d.index) id=\(d.id) uuid=\(d.uuid ?? "-") name=\(d.name ?? "-") active=\(d.active) online=\(d.online) asleep=\(d.asleep) builtin=\(d.builtin) main=\(d.main) vendor=\(d.vendor) model=\(d.model) serial=\(d.serial) bounds=\(d.bounds.x),\(d.bounds.y) \(d.bounds.width)x\(d.bounds.height) pixels=\(d.pixelWidth)x\(d.pixelHeight)")
-            }
+            print(text(records))
         }
+    }
+
+    /// One row per display with every selector `--display` accepts.
+    public static func text(_ records: [DisplayRecord]) -> String {
+        guard !records.isEmpty else {
+            return "No displays found (headless or no WindowServer context)."
+        }
+        func number(_ value: Double) -> String { value.rounded() == value ? String(Int(value)) : String(value) }
+        let rows = records.map { d -> [String] in
+            let size = "\(number(d.bounds.width))×\(number(d.bounds.height))"
+            let pixels = Double(d.pixelWidth)
+            let scaled = pixels == d.bounds.width ? size
+                : pixels == 2 * d.bounds.width ? "\(size) @2x"
+                : "\(size) (\(d.pixelWidth)×\(d.pixelHeight) px)"
+            let state = [d.main ? "main" : nil, d.builtin ? "built-in" : nil, d.asleep ? "asleep" : nil,
+                         d.online ? nil : "offline", d.online && !d.active ? "inactive" : nil]
+                .compactMap { $0 }.joined(separator: ", ")
+            return ["\(d.index)", "\(d.id)", d.name ?? "Display \(d.id)", d.uuid ?? "—", scaled,
+                    "\(number(d.bounds.x)),\(number(d.bounds.y))", state]
+        }
+        return CLIText.table([["INDEX", "ID", "NAME", "UUID", "SIZE", "ORIGIN", "STATE"]] + rows)
     }
 }
