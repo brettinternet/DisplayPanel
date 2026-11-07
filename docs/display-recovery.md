@@ -262,8 +262,10 @@ never silently update the saved choice.
 
 After reconnect/input return or wake, DisplayPanel waits for stable inventory and
 restores a differing exact mode once, before sampling the arrangement for
-correction. The saved mode must appear in CoreGraphics' offered list, including
-its ID and flags; no nearest resolution, refresh rate or scale is substituted.
+correction. The saved mode must appear in CoreGraphics' offered list. A same-boot
+renumbering (another mode ID or a moved default marker, every other field equal)
+is used only when exactly one offered mode matches; no nearest resolution, refresh
+rate or scale is substituted.
 A late mode can arrive within the original 15-second transition deadline, and
 arrangement correction waits for it. At the deadline, protection reports the
 unavailable mode (or other blocking reason) without writing it; arrangement
@@ -279,6 +281,8 @@ holds the operation and default-journal locks, rechecks identity and topology at
 staging and commit, uses a public session-only CoreGraphics transaction, and verifies
 the resulting exact mode. A failed write or verification is reported and never
 retried in that transition. Own-operation notifications cannot start another pass.
+A Show that resolves the journal gets one pass, like an input return, so a display
+hidden while a relink offered only a reduced mode table returns to its saved mode.
 Results and refusal reasons appear beside the saved mode in Settings.
 
 Rotation is not changed (the public mode setter does not set rotation). HDR,

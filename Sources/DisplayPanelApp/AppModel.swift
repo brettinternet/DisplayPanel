@@ -628,7 +628,7 @@ final class AppModel: ObservableObject {
                     continue
                 }
                 let current = try captureMode(uuid)
-                if current.mode == saved.mode {
+                if saved.matches(current.mode) {
                     modePending.remove(uuid)
                     modeObserved.insert(uuid)
                     modeResults[uuid] = "The saved mode already matches."
@@ -896,6 +896,14 @@ final class AppModel: ObservableObject {
         modeSample = nil
         arrangementSample = nil
         scheduleArrangementSettlement()
+    }
+
+    /// The final Show restores the modes captured at Hide, which can be a
+    /// relink's reduced table (AW3425DW at 60 Hz without 240 Hz). Its own
+    /// notifications never start a pass, so its input return gets one here.
+    private func protectAfterFinalShow() {
+        guard handoffStatus?.hasUnresolvedJournal != true, handoffInspectionFailure == nil else { return }
+        beginArrangementTransition()
     }
 
     private func scheduleArrangementSettlement() {
@@ -4172,6 +4180,11 @@ final class AppModel: ObservableObject {
             acquiredActionLease = false
             self.runningDisplayActionIDs.remove(id)
             self.finishDisplayActionLease()
+            if stepResults.contains(where: {
+                $0.effect == DisplayActionEffect.show.rawValue && [.done, .partial].contains($0.outcome)
+            }) {
+                self.protectAfterFinalShow()
+            }
             self.displayActionResults[id] = response
             self.lastDisplayActionResultID = id
             self.onStatusChange?()
@@ -6418,6 +6431,7 @@ final class AppModel: ObservableObject {
             }
             hideOperation = .idle
             rearmProtectionAfterDisplayRecovery()
+            protectAfterFinalShow()
             finish(.show, targetUUID: targetUUID, succeeded: true, message: "Shown.",
                    input: inputOutcome, inputWarning: request.returnInputWarning, completion: completion)
         } catch {

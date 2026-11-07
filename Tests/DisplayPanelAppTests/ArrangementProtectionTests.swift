@@ -42,6 +42,7 @@ final class ArrangementProtectionTests: XCTestCase {
         var modeFailure = false
         var modeOnWrite: (() -> Void)?
         var modeBeforeBoundary: (() -> Void)?
+        var onShow: (() -> Void)?
         var order: [String] = []
         var date = Date()
         var journal = DisplayHandoffStatus(state: .none, journalPath: "/tmp/displaypanel-arrangement-fake/current.json")
@@ -75,6 +76,9 @@ final class ArrangementProtectionTests: XCTestCase {
         let model = AppModel(defaults: defaults, displayProvider: { state.records }, now: { state.date },
             idleSecondsProvider: { nil }, isDisplayMirrored: { state.mirrored.contains($0) }, inspectHandoff: {
                 state.modeLockHeld ? DisplayHandoffStatus(state: .busy, journalPath: state.journal.journalPath) : state.journal
+            }, showDisplay: { _, _ in
+                state.onShow?()
+                return .notRequested
             },
             coverDisplays: { _ in [] }, quiesceProtection: { $0(true, nil) }, displayWakeSettleDelay: 0.01,
             captureArrangement: { excluded in
@@ -389,6 +393,36 @@ final class ArrangementProtectionTests: XCTestCase {
         model.displayReconfigured(display: 1, flags: .setModeFlag)
         try await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(state.modeWrites, 1)
+    }
+
+    func testFinalShowGivesEnabledModeProtectionOnePass() async throws {
+        let state = State()
+        let (model, _) = try makeModel(state)
+        let target = state.layout.members[0], source = state.layout.members[1]
+        try model.rememberCurrentMode(uuid: target.uuid)
+        try model.setModeProtectionEnabled(uuid: target.uuid, enabled: true)
+        func identity(_ member: DisplayArrangementMember) -> DisplayHandoffIdentity {
+            DisplayHandoffIdentity(DisplayHideIdentity(uuid: member.uuid, displayID: member.id, name: member.name,
+                                                       vendor: member.vendor, model: member.model, serial: member.serial))
+        }
+        // Hide captured a relink's reduced mode, so the final Show restores it.
+        state.mirrored = [target.id]
+        state.journal = DisplayHandoffStatus(state: .hidden, target: identity(target), source: identity(source),
+                                             journalPath: state.journal.journalPath, journalID: "hidden",
+                                             canShow: true, mirrorTopologyVerified: true)
+        state.onShow = {
+            state.mirrored = []
+            state.modes[target.uuid] = try? State.mode(rate: 60)
+            state.journal = DisplayHandoffStatus(state: .none, journalPath: state.journal.journalPath)
+        }
+        model.refreshHandoffStatus()
+        try await waitFor { !model.protectionQuiescencePending }
+        var shown: DisplayOperationResult?
+        model.show(targetUUID: target.uuid) { shown = $0 }
+        try await waitFor { shown != nil }
+        XCTAssertEqual(shown?.succeeded, true, shown?.message ?? "")
+        try await waitFor { state.modeWrites == 1 }
+        XCTAssertEqual(state.modes[target.uuid]?.refreshRate, 240)
     }
 
     func testModeLateArrivalAndDeadlineNeverApproximateOrRetryVerificationFailure() async throws {

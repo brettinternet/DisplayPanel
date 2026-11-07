@@ -20,6 +20,9 @@ public struct SavedDisplayMode: Codable, Equatable {
         self.mode = mode
     }
 
+    /// Same-boot renumbering (AW3425DW relinks) keeps the saved choice.
+    public func matches(_ current: RecoveryMode) -> Bool { current.isRenumbering(of: mode) }
+
     public func validate() throws {
         guard UUID(uuidString: uuid) != nil, mode.width > 0, mode.height > 0,
               mode.pixelWidth > 0, mode.pixelHeight > 0,
@@ -84,7 +87,7 @@ public struct DisplayModeProtectionController {
 
     public func isAvailable(_ saved: SavedDisplayMode) throws -> Bool {
         let display = try eligible(saved, inventory: records())
-        return availableModes(display.id).contains(saved.mode)
+        return saved.mode.offered(in: availableModes(display.id)) != nil
     }
 
     /// One session-only commit. Both locks and fresh topology/identity checks
@@ -103,8 +106,8 @@ public struct DisplayModeProtectionController {
         let mirrorStates = before.map { mirrored($0.id) }
         let rotations = before.map { rotation($0.id) }
         let originalMode = try currentMode(display.id)
-        guard originalMode != saved.mode else { return false }
-        guard availableModes(display.id).contains(saved.mode) else {
+        guard !saved.matches(originalMode) else { return false }
+        guard let mode = saved.mode.offered(in: availableModes(display.id)) else {
             throw RecoveryError.unsafe("saved mode unavailable for \(saved.uuid): \(saved.mode.description)")
         }
         func boundary() throws {
@@ -115,18 +118,18 @@ public struct DisplayModeProtectionController {
                   fresh.map({ rotation($0.id) }) == rotations,
                   try eligible(saved, inventory: fresh).id == display.id,
                   try currentMode(display.id) == originalMode,
-                  availableModes(display.id).contains(saved.mode) else {
+                  saved.mode.offered(in: availableModes(display.id)) == mode else {
                 throw RecoveryError.unsafe("display topology, identity or mode changed at the write boundary")
             }
         }
-        try transaction.apply(display.id, saved.mode, boundary)
+        try transaction.apply(display.id, mode, boundary)
         for attempt in 0..<6 {
             try revalidate()
             let observed = try eligible(saved, inventory: records())
             guard observed.id == display.id else {
                 throw RecoveryError.unsafe("display identity changed during mode verification")
             }
-            if try currentMode(display.id) == saved.mode { return true }
+            if try currentMode(display.id) == mode { return true }
             if attempt < 5 { convergencePause() }
         }
         throw RecoveryError.unsafe("saved display mode did not verify")

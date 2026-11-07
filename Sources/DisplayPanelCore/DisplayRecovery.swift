@@ -56,6 +56,13 @@ public struct RecoveryMode: Codable, Equatable {
         renumberingInvariant == saved.renumberingInvariant
     }
 
+    /// This mode as `modes` offers it: itself, or its single renumbering.
+    func offered(in modes: [RecoveryMode]) -> RecoveryMode? {
+        if modes.contains(self) { return self }
+        let renumberings = modes.filter { $0.isRenumbering(of: self) }
+        return renumberings.count == 1 ? renumberings[0] : nil
+    }
+
     /// This mode without its table position or default marker.
     var renumberingInvariant: RecoveryMode {
         let defaultFlag: UInt32 = 0x4 // kDisplayModeDefaultFlag
@@ -310,11 +317,8 @@ struct RecoverySnapshot: Codable, Equatable {
     /// renumbering of it; anything else stays for the exact mode check to refuse.
     func remoded(available: (UInt32) -> [RecoveryMode]) -> Self {
         Self(bootSession: bootSession, osBuild: osBuild, userID: userID, displays: displays.map { saved in
-            let modes = available(saved.id)
-            let renumberings = modes.filter { $0.isRenumbering(of: saved.mode) }
-            guard !modes.contains(saved.mode), renumberings.count == 1 else { return saved }
             var display = saved
-            display.mode = renumberings[0]
+            display.mode = saved.mode.offered(in: available(saved.id)) ?? saved.mode
             return display
         }, hostModel: hostModel)
     }

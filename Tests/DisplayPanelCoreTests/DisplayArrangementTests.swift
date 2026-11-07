@@ -423,10 +423,10 @@ final class DisplayArrangementTests: XCTestCase {
         XCTAssertEqual(pauses, 5)
     }
 
-    private func mode(rate: Double) throws -> RecoveryMode {
+    private func mode(rate: Double, id: Int32 = 7, flags: UInt32 = 0) throws -> RecoveryMode {
         try JSONDecoder().decode(RecoveryMode.self, from: JSONSerialization.data(withJSONObject: [
-            "id": 7, "width": 1920, "height": 1080, "pixelWidth": 3840,
-            "pixelHeight": 2160, "refreshRate": rate, "flags": 0
+            "id": id, "width": 1920, "height": 1080, "pixelWidth": 3840,
+            "pixelHeight": 2160, "refreshRate": rate, "flags": flags
         ]))
     }
 
@@ -493,6 +493,30 @@ final class DisplayArrangementTests: XCTestCase {
         verifySuccess = false
         XCTAssertThrowsError(try sut.restore(saved)) { XCTAssertTrue($0.localizedDescription.contains("did not verify")) }
         XCTAssertEqual(commits, 2, "verification retries must not write again")
+    }
+
+    func testModeRestoreAdoptsOnlyASingleSameBootRenumbering() throws {
+        let layout = arrangement()
+        let saved = SavedDisplayMode(display: records(layout)[0], mode: try mode(rate: 240, id: 100, flags: 0x4))
+        let low = try mode(rate: 60, id: 61)
+        let renumbered = try mode(rate: 240, id: 112)
+        var current = low
+        var offered = [low, renumbered]
+        var written: [RecoveryMode] = []
+        let sut = modeController({ layout }, current: { current }, offered: { offered }, transaction: DisplayModeTransaction(
+            begin: { CGDisplayConfigRef(bitPattern: 1)! },
+            prepare: { _, mode in written.append(mode); return { _ in } },
+            complete: { _, _ in current = written.last! }, cancel: { _ in }))
+        XCTAssertTrue(try sut.isAvailable(saved))
+        XCTAssertTrue(try sut.restore(saved))
+        XCTAssertEqual(written, [renumbered], "write the offered mode, not the stale ID")
+        XCTAssertTrue(saved.matches(current))
+        XCTAssertFalse(try sut.restore(saved), "a renumbered current mode already matches")
+        current = low
+        offered = [low, renumbered, try mode(rate: 240, id: 113)]
+        XCTAssertFalse(try sut.isAvailable(saved))
+        XCTAssertThrowsError(try sut.restore(saved), "never pick between two equal modes")
+        XCTAssertEqual(written.count, 1)
     }
 
     func testModeRestoreRejectsMissingExactModeIdentityMirrorsJournalsAndLocks() throws {
