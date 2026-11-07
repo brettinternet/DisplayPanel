@@ -53,10 +53,22 @@ public struct RecoveryMode: Codable, Equatable {
     /// modes within a boot and move its default marker (recorded on AW3425DW:
     /// 3440×1440 at 60 Hz went from mode 61, default, to mode 103).
     func isRenumbering(of saved: RecoveryMode) -> Bool {
+        renumberingInvariant == saved.renumberingInvariant
+    }
+
+    /// This mode without its table position or default marker.
+    var renumberingInvariant: RecoveryMode {
         let defaultFlag: UInt32 = 0x4 // kDisplayModeDefaultFlag
-        return width == saved.width && height == saved.height && pixelWidth == saved.pixelWidth &&
-            pixelHeight == saved.pixelHeight && refreshRate == saved.refreshRate &&
-            flags & ~defaultFlag == saved.flags & ~defaultFlag
+        return RecoveryMode(id: 0, width: width, height: height, pixelWidth: pixelWidth,
+                            pixelHeight: pixelHeight, refreshRate: refreshRate, flags: flags & ~defaultFlag)
+    }
+
+    private init(id: Int32, width: Int, height: Int, pixelWidth: Int, pixelHeight: Int,
+                 refreshRate: Double, flags: UInt32) {
+        self.id = id
+        self.width = width; self.height = height
+        self.pixelWidth = pixelWidth; self.pixelHeight = pixelHeight
+        self.refreshRate = refreshRate; self.flags = flags
     }
 }
 
@@ -133,17 +145,21 @@ struct RecoverySnapshot: Codable, Equatable {
 
     /// Stable projection of the same topology fields checked by `verify`.
     /// Capture timestamps and diagnostic names/provenance are intentionally omitted.
-    func stableTopologyIdentity() -> String? {
+    /// `ignoringRenumbering` also omits display and mode IDs, which a same-boot
+    /// relink can renumber without changing any display (see `renumbered(to:)`).
+    func stableTopologyIdentity(ignoringRenumbering: Bool = false) -> String? {
         let identity = StableRecoveryTopologyIdentity(
             bootSession: bootSession,
             osBuild: osBuild,
             userID: userID,
             displays: displays.map { display in
                 StableRecoveryDisplayIdentity(
-                    uuid: display.uuid, id: display.id, vendor: display.vendor, model: display.model,
+                    uuid: display.uuid, id: ignoringRenumbering ? 0 : display.id, vendor: display.vendor,
+                    model: display.model,
                     serial: display.serial, builtin: display.builtin, main: display.main, active: display.active,
                     x: display.x, y: display.y, rotation: display.rotation, mirrorUUID: display.mirrorUUID,
-                    mode: display.mode, colorSpace: display.colorSpace,
+                    mode: ignoringRenumbering ? display.mode.renumberingInvariant : display.mode,
+                    colorSpace: display.colorSpace,
                     colorProfileIdentity: display.colorProfileDateIndependentDigest.map { "normalized:\($0)" }
                         ?? display.colorProfileDigest.map { "raw:\($0)" },
                     connector: display.connector

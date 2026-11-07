@@ -235,18 +235,20 @@ private struct StableMirrorJournalIdentity: Codable {
 }
 
 extension RecoveryJournal {
+    /// Changes only when this journal's intent does: same-boot display and mode
+    /// renumbering adopted by inspection keeps it (wake checks exact IDs live).
     func wakeResumeIdentity() -> String? {
         let sessionIdentity = publicMirrorSession.flatMap { session -> String? in
             let stable = StablePublicMirrorSessionIdentity(
                 version: session.version,
-                baselineIdentity: session.baseline.stableTopologyIdentity(),
+                baselineIdentity: session.baseline.stableTopologyIdentity(ignoringRenumbering: true),
                 removals: session.removals.map { removal in
                     StablePublicMirrorRemovalIdentity(
-                        id: removal.id, targetUUID: removal.targetUUID, targetID: removal.targetID,
-                        sourceUUID: removal.sourceUUID, sourceID: removal.sourceID,
-                        beforeOperationIdentity: removal.beforeOperation.stableTopologyIdentity(),
+                        id: removal.id, targetUUID: removal.targetUUID, targetID: 0,
+                        sourceUUID: removal.sourceUUID, sourceID: 0,
+                        beforeOperationIdentity: removal.beforeOperation.stableTopologyIdentity(ignoringRenumbering: true),
                         state: removal.state.rawValue, failure: removal.failure,
-                        restoreFromIdentity: removal.restoreFrom?.stableTopologyIdentity()
+                        restoreFromIdentity: removal.restoreFrom?.stableTopologyIdentity(ignoringRenumbering: true)
                     )
                 }
             )
@@ -254,9 +256,14 @@ extension RecoveryJournal {
         }
         return stableRecoveryDigest(StableMirrorJournalIdentity(
             id: id, state: state.rawValue, trigger: trigger, failure: failure,
-            baselineIdentity: (publicMirrorSession?.baseline ?? snapshot).stableTopologyIdentity(),
-            sessionIdentity: sessionIdentity, mirrorTargetID: mirrorTargetID, mirrorSourceID: mirrorSourceID
+            baselineIdentity: wakeBaselineIdentity(),
+            sessionIdentity: sessionIdentity, mirrorTargetID: mirrorTargetID.map { _ in 0 },
+            mirrorSourceID: mirrorSourceID.map { _ in 0 }
         ))
+    }
+
+    func wakeBaselineIdentity() -> String? {
+        (publicMirrorSession?.baseline ?? snapshot).stableTopologyIdentity(ignoringRenumbering: true)
     }
 }
 

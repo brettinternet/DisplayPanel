@@ -210,13 +210,27 @@ final class DisplayHideTests: XCTestCase {
     func testWakeLayoutRepairRetainsBaselineAndRefusesChangedWriterEvidence() throws {
         // A new automatic write path must not act on a changed identity, an
         // unrelated mirror/mode, or a journal/topology changed after inspection.
-        for scenario in ["success", "identity", "external-mirror", "visible-mode", "journal-before",
+        for scenario in ["success", "renumbered", "identity", "external-mirror", "visible-mode", "journal-before",
                          "journal-after-begin", "topology-after-stage", "commit-failure", "wrong-visible-mode",
                          "wrong-visible-origin"] {
             store = RecoveryStore(url: directory.appendingPathComponent("wake-\(scenario).json"))
             let status = try prepareWakeResetStatus(layoutDrift: true)
             let original = try store.load()
             var expectation = try wakeExpectation(status, targetUUID: targetUUID, resumeSession: true)
+            if scenario == "renumbered" {
+                // A relink while asleep swaps the source and target IDs; the
+                // app's next inspection adopts it before wake resume.
+                topology.snapshot = try snapshot { displays in
+                    displays[0]["id"] = self.targetID
+                    displays[1]["id"] = self.sourceID
+                    displays[1]["x"] = 120
+                    displays[2]["x"] = 2040
+                }
+                let renumbered = try wakeExpectation(controller().inspect(), targetUUID: targetUUID, resumeSession: true)
+                XCTAssertEqual(renumbered.journalIdentity, expectation.journalIdentity)
+                XCTAssertEqual(renumbered.baselineIdentity, expectation.baselineIdentity)
+                expectation = renumbered
+            }
             if ["identity", "external-mirror", "visible-mode"].contains(scenario) {
                 let raw = try JSONEncoder().encode(topology.snapshot)
                 var payload = try JSONSerialization.jsonObject(with: raw) as! [String: Any]
@@ -259,7 +273,7 @@ final class DisplayHideTests: XCTestCase {
                     return OpaquePointer(bitPattern: 1)!
                 },
                 stage: { _, target, source in
-                    XCTAssertEqual(source, self.sourceID)
+                    XCTAssertEqual(source, expectation.source.displayID)
                     staged.append(target)
                     if scenario == "topology-after-stage" {
                         self.topology.snapshot = try self.snapshot { $0[0]["x"] = 999 }
@@ -270,6 +284,10 @@ final class DisplayHideTests: XCTestCase {
                     XCTAssertEqual(scope, .forSession)
                     if scenario == "commit-failure" { throw RecoveryError.unsafe("commit failed") }
                     self.topology.snapshot = try self.snapshot { displays in
+                        if scenario == "renumbered" {
+                            displays[0]["id"] = self.targetID
+                            displays[1]["id"] = self.sourceID
+                        }
                         for index in displays.indices {
                             let id = (displays[index]["id"] as! NSNumber).uint32Value
                             if staged.contains(id) {
@@ -293,11 +311,11 @@ final class DisplayHideTests: XCTestCase {
                 stageOrigin: { _, id, x, y in origins[id] = [x, y] }
             )
             let core = controller(transaction: transaction)
-            if scenario == "success" {
+            if scenario == "success" || scenario == "renumbered" {
                 XCTAssertNoThrow(try core.hide(target: expectation.target, source: expectation.source,
-                                               awayInput: nil, wakeExpectation: expectation))
-                XCTAssertEqual(Set(staged), Set([targetID, 9]))
-                XCTAssertEqual(origins, [sourceID: [0, 0]])
+                                               awayInput: nil, wakeExpectation: expectation), scenario)
+                XCTAssertEqual(Set(staged), Set([expectation.target.displayID, 9]))
+                XCTAssertEqual(origins, [expectation.source.displayID: [0, 0]])
                 XCTAssertEqual(commits, 1)
                 XCTAssertTrue(try core.inspect().removals.allSatisfy { $0.topologyVerified && $0.state == "mirrored" })
             } else {
@@ -312,7 +330,8 @@ final class DisplayHideTests: XCTestCase {
             }
             let retained = try store.load()
             XCTAssertEqual(retained.id, original.id)
-            XCTAssertEqual(retained.publicMirrorSession?.baseline, original.publicMirrorSession?.baseline)
+            XCTAssertEqual(retained.publicMirrorSession?.baseline.stableTopologyIdentity(ignoringRenumbering: true),
+                           original.publicMirrorSession?.baseline.stableTopologyIdentity(ignoringRenumbering: true))
             XCTAssertEqual(retained.publicMirrorSession?.removals.map(\.id), original.publicMirrorSession?.removals.map(\.id))
             if scenario.hasPrefix("journal-") {
                 XCTAssertEqual(retained.failure, "another operation changed the journal")
@@ -851,7 +870,7 @@ final class DisplayHideTests: XCTestCase {
         let status = try controller().inspect()
 
         XCTAssertFalse(status.hasUnresolvedRecovery)
-        XCTAssertEqual(status.journal?.baselineIdentity, status.journal?.observedTopologyIdentity)
+        XCTAssertEqual(status.journal?.baselineIdentity, topology.snapshot.stableTopologyIdentity(ignoringRenumbering: true))
         XCTAssertEqual(try store.load().state, .verified)
         XCTAssertEqual(writerCount, 0, "observing macOS restoration must never replay Hide or Show")
     }
@@ -1016,7 +1035,7 @@ final class DisplayHideTests: XCTestCase {
         } else {
             XCTAssertEqual(status.journal?.state, RecoveryState.verified.rawValue)
             XCTAssertTrue(status.removals.allSatisfy { !$0.isUnresolved && $0.state == "restored" })
-            XCTAssertEqual(status.journal?.baselineIdentity, status.journal?.observedTopologyIdentity)
+            XCTAssertEqual(status.journal?.baselineIdentity, topology.snapshot.stableTopologyIdentity(ignoringRenumbering: true))
         }
         return status
     }

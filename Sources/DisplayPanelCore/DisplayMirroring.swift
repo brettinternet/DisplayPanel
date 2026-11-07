@@ -363,7 +363,11 @@ struct MirrorController {
         guard Set(current.displays.map(\.id)) == Set(available.filter(\.online).map(\.id)) else {
             throw RecoveryError.unsafe("display set changed during capture; refusing mirror")
         }
-        let existing = try store.exists() ? store.load() : nil
+        var existing = try store.exists() ? store.load() : nil
+        if var unresolved = existing, !unresolved.state.resolved {
+            try adoptRenumbering(&unresolved, current: current, store: store)
+            existing = unresolved
+        }
         if let wakeExpectation {
             guard let existing else {
                 throw RecoveryError.unsafe("wake resume journal disappeared; inspect recovery before continuing")
@@ -528,7 +532,7 @@ struct MirrorController {
               journal.wakeResumeIdentity() == expectation.journalIdentity,
               before.stableTopologyIdentity() == expectation.observedTopologyIdentity,
               var session = journal.publicMirrorSession,
-              session.baseline.stableTopologyIdentity() == expectation.baselineIdentity,
+              journal.wakeBaselineIdentity() == expectation.baselineIdentity,
               journal.disabledByUsID == nil, !journal.state.resolved else {
             throw RecoveryError.unsafe("wake resume journal, baseline or topology changed")
         }
@@ -666,13 +670,18 @@ struct MirrorController {
     ) throws {
         guard journal.id.uuidString.caseInsensitiveCompare(expectation.journalID) == .orderedSame,
               journal.wakeResumeIdentity() == expectation.journalIdentity,
-              (journal.publicMirrorSession?.baseline ?? journal.snapshot).stableTopologyIdentity() == expectation.baselineIdentity,
+              journal.wakeBaselineIdentity() == expectation.baselineIdentity,
               current.stableTopologyIdentity() == expectation.observedTopologyIdentity,
               expectedTarget == expectation.target, expectedSource == expectation.source,
               matches(expectation.target, record: target), matches(expectation.source, record: source) else {
             throw RecoveryError.unsafe("wake resume journal, session, baseline, topology, or target/source identity changed; no mirror was staged")
         }
-        let baseline = journal.publicMirrorSession?.baseline ?? journal.snapshot
+        var baseline = journal.publicMirrorSession?.baseline ?? journal.snapshot
+        if journal.state.resolved {
+            // Unresolved journals were adopted by the caller; a restored one is
+            // only compared, so translate a same-boot renumbering here.
+            baseline = try baseline.renumbered(to: current).remoded(available: availableModes)
+        }
         try baseline.validateRestoration(to: current)
         if journal.state.resolved {
             try baseline.verify(current)
@@ -698,7 +707,7 @@ struct MirrorController {
     ) throws {
         guard current.stableTopologyIdentity() == expectation.observedTopologyIdentity,
               let pendingSession = pendingJournal.publicMirrorSession,
-              pendingSession.baseline.stableTopologyIdentity() == expectation.baselineIdentity,
+              pendingJournal.wakeBaselineIdentity() == expectation.baselineIdentity,
               let last = pendingSession.removals.last, last == pendingRemoval,
               last.state == .captured,
               last.targetUUID == expectation.target.uuid.lowercased(),

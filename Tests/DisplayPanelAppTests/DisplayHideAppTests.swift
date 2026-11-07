@@ -2084,7 +2084,7 @@ final class DisplayHideAppTests: XCTestCase {
                 clock.addTimeInterval(16)
                 model.displayReconfigured(display: targets[0].id, flags: .addFlag)
             case "identity":
-                connected[1] = Self.display(index: 2, id: 999, uuid: Self.targetUUID, name: "Replacement", main: false)
+                connected[1] = Self.display(index: 2, id: 999, uuid: Self.targetUUID, name: "Replacement", main: false, serial: 999)
             case "journal": journalID = "replacement"
             case "sleep": model.beginDisplaySleepTransition()
             case "unlock": model.displayConfigurationChanged(restartWatcher: true)
@@ -2213,7 +2213,8 @@ final class DisplayHideAppTests: XCTestCase {
                 clock.addTimeInterval(16)
                 model.displayReconfigured(display: 202, flags: .removeFlag)
             case "unsettled": changing = true
-            case "identity": connected[1] = Self.display(index: 2, id: 999, uuid: Self.targetUUID, name: "Target", main: false)
+            case "identity": connected[1] = Self.display(index: 2, id: 999, uuid: Self.targetUUID, name: "Target", main: false,
+                                                         serial: 999)
             case "duplicate": connected.append(connected[1])
             case "journal": status = multiHandoffStatus([removal], observations: [], journalID: "replacement",
                                                         state: .hidden, baselineIdentity: "baseline")
@@ -2456,7 +2457,7 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(stagedTargets, [202, 303])
         XCTAssertEqual(commits, layoutDrift || inputReturn != nil ? 1 : 2)
         XCTAssertEqual(ddcCalls, 0)
-        XCTAssertEqual(final.journal?.baselineIdentity, baseline.stableTopologyIdentity())
+        XCTAssertEqual(final.journal?.baselineIdentity, baseline.stableTopologyIdentity(ignoringRenumbering: true))
         if inputReturn != nil {
             XCTAssertEqual(origins, [101: [0, 0], 404: [-1920, 0]])
             XCTAssertEqual(try journalStore.load().id, journal.id)
@@ -2591,17 +2592,18 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(showCalls, 0, "the explicit request during settle is refused, not replayed later")
     }
 
-    func testSleepResumeRefusesChangedDisplayIDAndKeepsManualRecoveryVisible() async throws {
+    func testSleepResumeRehidesSameBootRenumberedDisplayUnderItsLiveID() async throws {
         let defaults = try makeDefaults()
         let mirrored = sleepRemoval(id: "changed-entry", target: displays[1], source: displays[2], resolved: false)
         let restored = sleepRemoval(id: mirrored.id, target: displays[1], source: displays[2], resolved: true)
         let box = StatusBox(multiHandoffStatus([mirrored], observations: [], journalID: "changed-journal",
                                                state: .hidden, baselineIdentity: "exact-baseline"))
         var currentDisplays = displays
-        var hideCalls = 0
+        var hidden: [UInt32] = []
         let model = makeModel(
             defaults: defaults, displays: displays, displayProvider: { currentDisplays }, status: { box.value },
-            hideDisplay: { _, _, _ in hideCalls += 1; return .notRequested }, displayWakeSettleDelay: 0.01
+            hideDisplay: { target, _, _ in hidden.append(target.displayID); return .notRequested },
+            displayWakeSettleDelay: 0.01
         )
         try await waitUntil { !model.protectionQuiescencePending }
         model.beginDisplaySleepTransition()
@@ -2611,9 +2613,8 @@ final class DisplayHideAppTests: XCTestCase {
         model.displayWakeObserved(screensAwake: true)
         try await waitUntil { !model.displayLifecycleTransitioning }
 
-        XCTAssertEqual(hideCalls, 0)
-        XCTAssertTrue(model.displayResults[Self.targetKey]?.message.contains("recovery journal") == true)
-        XCTAssertTrue(model.displayResults[Self.targetKey]?.inputNeedsAttention == true)
+        // The core still requires this ID to match its journal and the live display.
+        XCTAssertEqual(hidden, [999])
     }
 
     func testSleepResumeRefusesChangedBaselineIdentity() async throws {

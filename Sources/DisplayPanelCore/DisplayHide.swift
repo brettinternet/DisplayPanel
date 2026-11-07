@@ -437,7 +437,7 @@ public struct DisplayHideController {
             showRefusal: unresolved ? refusal : nil,
             failure: journal.failure,
             mirrorTopologyVerified: mirrorTopologyVerified,
-            baselineIdentity: journal.snapshot.stableTopologyIdentity(),
+            baselineIdentity: journal.wakeBaselineIdentity(),
             observedTopologyIdentity: current.stableTopologyIdentity(),
             journalIdentity: journal.wakeResumeIdentity()
         )
@@ -574,7 +574,7 @@ public struct DisplayHideController {
             showRefusal: unresolved.first(where: { !$0.canShow })?.showRefusal,
             failure: journal.failure,
             mirrorTopologyVerified: sessionVerified,
-            baselineIdentity: session.baseline.stableTopologyIdentity(),
+            baselineIdentity: journal.wakeBaselineIdentity(),
             observedTopologyIdentity: current.stableTopologyIdentity(),
             journalIdentity: journal.wakeResumeIdentity(),
             removals: removals
@@ -602,7 +602,7 @@ public struct DisplayHideController {
             isUnresolved: !journal.state.resolved, canShow: false,
             showRefusal: journal.state.resolved ? nil : "This journal is not a public mirror journal. Use dp recovery status --journal '\(store.url.path)' and its recorded CLI recovery action.",
             failure: journal.failure,
-            baselineIdentity: journal.snapshot.stableTopologyIdentity(),
+            baselineIdentity: journal.wakeBaselineIdentity(),
             observedTopologyIdentity: current.stableTopologyIdentity(),
             journalIdentity: journal.wakeResumeIdentity()
         )

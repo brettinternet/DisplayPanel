@@ -5138,7 +5138,7 @@ final class AppModel: ObservableObject {
         }
         let identityChanged = intent.removals.flatMap { [$0.target, $0.source] }.contains { identity in
             let found = displays.filter { $0.uuid?.caseInsensitiveCompare(identity.uuid) == .orderedSame }
-            return !found.isEmpty && (found.count != 1 || found[0].id != identity.id ||
+            return !found.isEmpty && (found.count != 1 ||
                 found[0].vendor != identity.vendor || found[0].model != identity.model || found[0].serial != identity.serial)
         }
         let attributed = inputReturnAttributed
@@ -5253,7 +5253,7 @@ final class AppModel: ObservableObject {
             }
             let identityChanged = intent.removals.flatMap { [$0.target, $0.source] }.contains { identity in
                 let found = displays.filter { $0.uuid?.caseInsensitiveCompare(identity.uuid) == .orderedSame }
-                return !found.isEmpty && (found.count != 1 || found[0].id != identity.id ||
+                return !found.isEmpty && (found.count != 1 ||
                     found[0].vendor != identity.vendor || found[0].model != identity.model || found[0].serial != identity.serial)
             }
             if !ready, !identityChanged, let deadline = sleepWakeDeadline, now() < deadline {
@@ -5316,8 +5316,8 @@ final class AppModel: ObservableObject {
                 recordSleepResumeFailure(removal, reason: "Displays changed during wake recovery.")
                 return
             }
-            let target = coreIdentity(removal.target)
-            let source = coreIdentity(removal.source)
+            let target = liveCoreIdentity(removal.target)
+            let source = liveCoreIdentity(removal.source)
             guard let status = handoffStatus,
                   let journalID = status.journalID,
                   let journalIdentity = status.journalIdentity,
@@ -5359,8 +5359,8 @@ final class AppModel: ObservableObject {
         hideOperation = .hiding(removal.target.uuid)
         onStatusChange?()
         defer { hideOperation = .idle; onStatusChange?() }
-        let target = coreIdentity(removal.target)
-        let source = coreIdentity(removal.source)
+        let target = liveCoreIdentity(removal.target)
+        let source = liveCoreIdentity(removal.source)
         let expectation = DisplayHideWakeExpectation(
             journalID: intent.journalID, journalIdentity: journalIdentity,
             baselineIdentity: intent.baselineIdentity, observedTopologyIdentity: topologyIdentity,
@@ -5414,7 +5414,7 @@ final class AppModel: ObservableObject {
     private func matchesPresentDisplay(_ identity: DisplayHandoffIdentity) -> Bool {
         let matches = displays.filter { $0.uuid?.caseInsensitiveCompare(identity.uuid) == .orderedSame }
         guard matches.count == 1, let display = matches.first else { return false }
-        return display.id == identity.id && display.vendor == identity.vendor && display.model == identity.model &&
+        return display.vendor == identity.vendor && display.model == identity.model &&
             display.serial == identity.serial && display.online && !display.asleep
     }
 
@@ -5440,8 +5440,9 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Numeric IDs are left out: inspection adopts a same-boot renumbering by UUID.
     private func sameSleepDisplayIdentity(_ lhs: DisplayHandoffIdentity, _ rhs: DisplayHandoffIdentity) -> Bool {
-        lhs.uuid.caseInsensitiveCompare(rhs.uuid) == .orderedSame && lhs.id == rhs.id &&
+        lhs.uuid.caseInsensitiveCompare(rhs.uuid) == .orderedSame &&
             lhs.vendor == rhs.vendor && lhs.model == rhs.model && lhs.serial == rhs.serial
     }
 
@@ -6128,6 +6129,14 @@ final class AppModel: ObservableObject {
             model: identity.model,
             serial: identity.serial
         )
+    }
+
+    /// A sleep intent's display under the ID macOS uses now; the core still
+    /// requires that ID to match its journal and the live display exactly.
+    private func liveCoreIdentity(_ identity: DisplayHandoffIdentity) -> DisplayHideIdentity {
+        let live = displays.first { $0.uuid?.caseInsensitiveCompare(identity.uuid) == .orderedSame }
+        return DisplayHideIdentity(uuid: identity.uuid, displayID: live?.id ?? identity.id, name: identity.name,
+                                   vendor: identity.vendor, model: identity.model, serial: identity.serial)
     }
 
     private func coreIdentity(_ identity: DisplayHandoffIdentity) -> DisplayHideIdentity {
