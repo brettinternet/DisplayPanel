@@ -4002,6 +4002,7 @@ final class AppModel: ObservableObject {
         })
         var skippedSteps: [Int: String] = [:]
         var noOpSteps = Set<Int>()
+        var removalShowSteps = Set<Int>()
         var frozenTargets: [Int: DisplayIdentitySnapshot] = [:]
         var preparedHideRequests: [Int: DisplayHideRequest] = [:]
         var preparedArrangements: [Int: ArrangementRestorePlan] = [:]
@@ -4086,6 +4087,7 @@ final class AppModel: ObservableObject {
                 projectedRemovals.insert(key)
                 if let source = step.reviewedRemoval?.sourceUUID { projectedSources[key] = source.lowercased() }
             case .show:
+                if projectedRemovals.contains(key) { removalShowSteps.insert(offset) }
                 projectedBlackouts.remove(key)
                 projectedRemovals.remove(key)
                 projectedSources.removeValue(forKey: key)
@@ -4295,10 +4297,14 @@ final class AppModel: ObservableObject {
                 return
             }
             let alreadyAtDesiredState: Bool
+            // An earlier step's final Show restored every display macOS had already
+            // unmirrored, but switched back only its own monitor's input.
+            let returnsRestoredInput = step.effect == .show && removalShowSteps.contains(offset) &&
+                !self.isBlackoutHidden(uuid) && !self.isRemovedDisplay(uuid) && self.restoredDisplayInput(uuid) != nil
             switch step.effect {
             case .blackOut: alreadyAtDesiredState = self.isBlackoutHidden(uuid)
             case .removeFromDesktop: alreadyAtDesiredState = self.isVerifiedRemovedDisplay(uuid)
-            case .show: alreadyAtDesiredState = !self.isBlackoutHidden(uuid) && !self.isRemovedDisplay(uuid)
+            case .show: alreadyAtDesiredState = !returnsRestoredInput && !self.isBlackoutHidden(uuid) && !self.isRemovedDisplay(uuid)
             case .moveWindows, .restoreArrangement: alreadyAtDesiredState = false
             }
             if alreadyAtDesiredState {
@@ -4384,7 +4390,11 @@ final class AppModel: ObservableObject {
                           preparedRequest: preparedHideRequests[offset], expectedTarget: expectedTarget,
                           completion: complete)
             case .show:
-                self.show(targetUUID: uuid, actionLeaseID: id, completion: complete)
+                if returnsRestoredInput {
+                    self.returnRestoredDisplayInput(targetUUID: uuid, completion: complete)
+                } else {
+                    self.show(targetUUID: uuid, actionLeaseID: id, completion: complete)
+                }
             case .moveWindows:
                 guard let configuration = step.moveWindows else {
                     let result = AppControlWindowMoveResult(refusalReason: .destinationUnavailable)
@@ -6398,6 +6408,72 @@ final class AppModel: ObservableObject {
             finish(.show, targetUUID: targetUUID, succeeded: false,
                    message: "Couldn’t show. \(error.localizedDescription)",
                    input: outcome, inputWarning: request.returnInputWarning, completion: completion)
+        }
+    }
+
+    /// The input a restored, visible display's Show switches back to: only for a
+    /// monitor Hide switches away, matched to its saved identity.
+    private func restoredDisplayInput(_ targetUUID: String) -> (away: UInt8, input: UInt8, display: DisplayRecord)? {
+        guard let configuration = hidePreferences[targetUUID],
+              let away = configuration.awayInput,
+              let input = validatedSavedInput(configuration.returnInput).value,
+              let display = matchingSavedDisplay(configuration.target),
+              isEligibleHideTarget(display), !isDisplayMirrored(display.id) else { return nil }
+        return (away, input, display)
+    }
+
+    /// Returns a display that an earlier Action step already restored to the Mac:
+    /// one DDC write, only after a read finds the monitor on the input Hide switched to.
+    private func returnRestoredDisplayInput(targetUUID: String, completion: @escaping (DisplayOperationResult) -> Void) {
+        guard let (away, input, display) = restoredDisplayInput(targetUUID) else {
+            refuse(.show, targetUUID: targetUUID, error: DisplayHideError.blocked("This display isn’t hidden by DisplayPanel."),
+                   completion: completion)
+            return
+        }
+        let identity = coreIdentity(DisplayIdentitySnapshot(display))
+        hideOperation = .showing(targetUUID)
+        onStatusChange?()
+        Task { @MainActor in
+            let outcome: DisplayInputOutcome
+            do {
+                actionTopologyWriteInProgress = true
+                defer { actionTopologyWriteInProgress = false }
+                outcome = try await performDisplayWrite { [checkDDCInput, selectDDCInput] in
+                    let reading: DDCInputReading
+                    do { reading = try checkDDCInput(identity) } catch {
+                        return DisplayInputOutcome(state: .skipped, requestedInput: input,
+                                                   detail: "DDC input could not be read: \(error.localizedDescription)")
+                    }
+                    guard reading.displayID == identity.displayID,
+                          reading.uuid.caseInsensitiveCompare(identity.uuid) == .orderedSame else {
+                        return DisplayInputOutcome(state: .skipped, requestedInput: input,
+                                                   detail: "The monitor answered as a different display")
+                    }
+                    if reading.current == input {
+                        return DisplayInputOutcome(state: .alreadySelected, requestedInput: input, observedInput: input)
+                    }
+                    guard reading.current == away else {
+                        return DisplayInputOutcome(state: .skipped, requestedInput: input, observedInput: reading.current,
+                                                   detail: "The monitor isn’t on the input Hide switched it to")
+                    }
+                    let selection = try selectDDCInput(identity, input)
+                    switch selection.outcome {
+                    case .alreadySelected:
+                        return DisplayInputOutcome(state: .alreadySelected, requestedInput: input, observedInput: selection.observed)
+                    case .verified:
+                        return DisplayInputOutcome(state: .verified, requestedInput: input, observedInput: selection.observed)
+                    case .unverified:
+                        return DisplayInputOutcome(state: .unverified, requestedInput: input,
+                                                   observedInput: selection.observed, detail: selection.detail)
+                    }
+                }
+            } catch {
+                outcome = DisplayInputOutcome(state: .failed, requestedInput: input,
+                                              detail: "DDC selection failed: \(error.localizedDescription)")
+            }
+            hideOperation = .idle
+            finish(.show, targetUUID: targetUUID, succeeded: true, message: "Shown.",
+                   input: outcome, inputWarning: nil, completion: completion)
         }
     }
 

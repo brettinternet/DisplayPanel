@@ -1993,6 +1993,60 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertFalse(model.handoffStatus?.hasUnresolvedJournal == true)
     }
 
+    /// Waking one hidden monitor can make macOS unmirror its sibling, so the first
+    /// Show restores both; the sibling's Show step must still return its input.
+    func testShowActionReturnsInputOfDisplayAnEarlierStepRestored() async throws {
+        for monitorInput: UInt8 in [0x11, 0x12] {
+            let defaults = try makeDefaults("\(monitorInput)")
+            let targets = [displays[1], displays[2]]
+            var preferences = DisplayHidePreferences()
+            preferences[targets[1].uuid!] = DisplayHideConfiguration(
+                target: DisplayIdentitySnapshot(targets[1]), enabled: true,
+                source: DisplayIdentitySnapshot(displays[0]), awayInput: 0x11, returnInput: 0x0F
+            )
+            defaults.set(try JSONEncoder().encode(preferences), forKey: "displayHidePreferences")
+            var removals = targets.enumerated().map {
+                sleepRemoval(id: "entry-\($0.offset)", target: $0.element, source: displays[0], resolved: false)
+            }
+            var shows: [String] = []
+            var writes: [UInt8] = []
+            let model = makeModel(
+                defaults: defaults, displays: displays,
+                status: { self.multiHandoffStatus(removals, observations: [], journalID: "journal") },
+                showDisplay: { key, _ in
+                    shows.append(String(key.split(separator: "|").last!))
+                    removals = targets.enumerated().map {
+                        self.sleepRemoval(id: "entry-\($0.offset)", target: $0.element, source: self.displays[0], resolved: true)
+                    }
+                    return .notRequested
+                },
+                checkDDCInput: { DDCInputReading(displayID: $0.displayID, uuid: $0.uuid, current: monitorInput) },
+                selectDDCInput: { identity, input in
+                    writes.append(input)
+                    return DDCInputSelection(displayID: identity.displayID, uuid: identity.uuid, original: 0x11,
+                                             requested: input, observed: input, outcome: .verified, detail: nil)
+                }
+            )
+            let action = DisplayAction(name: "Show both", steps: targets.map {
+                DisplayActionStep(target: DisplayIdentitySnapshot($0), effect: .show)
+            })
+            try model.saveDisplayAction(action)
+            try await waitUntil { !model.protectionQuiescencePending }
+            var result: AppControlResponse?
+            model.runDisplayAction(id: action.id) { result = $0 }
+            try await waitUntil { result != nil }
+            XCTAssertEqual(shows, [targets[0].uuid!], "the first Show restored both displays")
+            if monitorInput == 0x11 {
+                XCTAssertEqual(writes, [0x0F])
+                XCTAssertEqual(result?.steps?.map(\.outcome), [.done, .done], result?.summary ?? "")
+                XCTAssertEqual(result?.steps?.last?.inputOutcome, .verified)
+            } else {
+                XCTAssertEqual(writes, [], "never switch a monitor that isn’t on the input Hide chose")
+                XCTAssertEqual(result?.steps?.map(\.outcome), [.done, .partial], result?.summary ?? "")
+            }
+        }
+    }
+
     func testPendingShowActionRefusesChangedStateAndNeverRetriesAWrite() async throws {
         for scenario in ["timeout", "identity", "journal", "sleep", "unlock", "shutdown", "writer"] {
             let defaults = try makeDefaults("\(scenario)")
