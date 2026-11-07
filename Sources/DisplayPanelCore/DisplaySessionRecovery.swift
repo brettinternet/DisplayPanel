@@ -36,17 +36,45 @@ extension RecoveryJournal {
     /// finish after a same-boot renumbering; nil when nothing changed. A
     /// valid journal shares one UUID-to-ID mapping across all its snapshots.
     func renumbered(to current: RecoverySnapshot) throws -> RecoveryJournal? {
-        guard isPublicMirrorOnly, var session = publicMirrorSession else { return nil }
+        guard isPublicMirrorOnly, publicMirrorSession != nil else { return nil }
         let baseline = try snapshot.renumbered(to: current)
         guard baseline != snapshot else { return nil }
         let ids = Dictionary(uniqueKeysWithValues: baseline.displays.map { ($0.uuid, $0.id) })
+        return try adopting(baseline) { display in
+            var display = display
+            display.id = ids[display.uuid] ?? display.id
+            return display
+        }
+    }
+
+    /// A Hide session with saved modes translated to a rebuilt mode table (see
+    /// RecoverySnapshot.remoded); nil when nothing changed. Only current IDs
+    /// can look up a display's modes, so stale IDs adopt nothing.
+    func remoded(to current: RecoverySnapshot, available: (UInt32) -> [RecoveryMode]) throws -> RecoveryJournal? {
+        guard isPublicMirrorOnly, publicMirrorSession != nil, !hasStaleDisplayIDs(current),
+              snapshot.displays.allSatisfy({ saved in current.displays.contains { $0.uuid == saved.uuid } }) else {
+            return nil
+        }
+        let baseline = snapshot.remoded(available: available)
+        guard baseline != snapshot else { return nil }
+        let changes = Dictionary(uniqueKeysWithValues: zip(snapshot.displays, baseline.displays)
+            .filter { $0.mode != $1.mode }.map { ($0.uuid, (old: $0.mode, new: $1.mode)) })
+        return try adopting(baseline) { display in
+            guard let change = changes[display.uuid], display.mode == change.old else { return display }
+            var display = display
+            display.mode = change.new
+            return display
+        }
+    }
+
+    /// This session with `baseline` and every other saved display translated alike.
+    private func adopting(_ baseline: RecoverySnapshot,
+                          _ translateDisplay: (RecoveryDisplay) -> RecoveryDisplay) throws -> RecoveryJournal {
+        guard var session = publicMirrorSession else { throw RecoveryError.unsafe("missing public-mirror session") }
+        let ids = Dictionary(uniqueKeysWithValues: baseline.displays.map { ($0.uuid, $0.id) })
         func translate(_ saved: RecoverySnapshot) -> RecoverySnapshot {
             RecoverySnapshot(bootSession: saved.bootSession, osBuild: saved.osBuild, userID: saved.userID,
-                             displays: saved.displays.map { display in
-                                 var display = display
-                                 display.id = ids[display.uuid] ?? display.id
-                                 return display
-                             }, hostModel: saved.hostModel)
+                             displays: saved.displays.map(translateDisplay), hostModel: saved.hostModel)
         }
         session.baseline = baseline
         for index in session.removals.indices {

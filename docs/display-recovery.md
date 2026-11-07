@@ -145,9 +145,11 @@ Within one boot, macOS can also renumber the captured displays, for example
 when a Show input return relinks two monitors. Inspection and Show then adopt
 macOS's current UUID-to-ID mapping, but only when the boot session, OS build,
 user and display set are unchanged and every display keeps its vendor, model,
-serial, built-in flag, connector and transport location. Mode attributes, layout
-and profiles are still verified exactly, and Show finishes normally. Anything
-less is offered for the recovery below.
+serial, built-in flag, connector and transport location. A relink can also
+renumber a monitor's modes and move its default marker; a saved mode missing
+from the current list adopts the one mode equal in size, pixels, refresh and
+other flags. Layout and profiles are still verified exactly, and Show finishes
+normally. Anything less is offered for the recovery below.
 
 When all captured monitors return as separate, awake displays with the same
 stable identities, DisplayPanel compares two matching observations. If the complete

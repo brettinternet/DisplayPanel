@@ -319,6 +319,7 @@ struct MirrorController {
     var operationLock: () -> RecoveryStore = { RecoveryStore.operationLock() }
     var engine = RecoveryEngine.publicMirror
     var preflightModes: (RecoverySnapshot) throws -> Void = { _ = try RecoveryConfiguration.resolveModes($0) }
+    var availableModes: (UInt32) -> [RecoveryMode] = { DisplayModeProtectionController.modes($0).map(RecoveryMode.init) }
     var transaction = MirrorTransaction()
     var restoreTarget: (RecoverySnapshot, String, () throws -> Void, () throws -> RecoverySnapshot) throws -> Void = {
         try RecoveryConfiguration.restoreTarget($0, targetUUID: $1, revalidate: $2, capture: $3)
@@ -972,7 +973,7 @@ struct MirrorController {
         // The input return can make macOS renumber displays; the caller
         // adopts that into the journal once the topology settles.
         func readyModes(_ observed: RecoverySnapshot) throws -> RecoverySnapshot {
-            let renumbered = try baseline.renumbered(to: observed)
+            let renumbered = try baseline.renumbered(to: observed).remoded(available: availableModes)
             try renumbered.validateRestoration(to: observed)
             try validateShowAvailability(target: renumbered.displays.first { $0.uuid == target.uuid } ?? target,
                                          source: renumbered.displays.first { $0.uuid == source.uuid } ?? source)
@@ -1136,16 +1137,24 @@ struct MirrorController {
         return journal
     }
 
-    /// Caller holds both locks. Persists a same-boot renumbering (see
-    /// RecoveryJournal.renumbered) before anything reads the session's IDs.
-    /// Anything it cannot prove is left for the stale-ID recovery path.
+    /// Caller holds both locks. Persists a same-boot renumbering of display IDs
+    /// and then of modes (see RecoveryJournal.renumbered and remoded) before
+    /// anything reads them. Anything it cannot prove is left for the stale-ID
+    /// recovery path or the exact mode check.
     func adoptRenumbering(_ journal: inout RecoveryJournal, current: RecoverySnapshot, store: RecoveryStore) throws {
-        guard let renumbered = try? journal.renumbered(to: current) else { return }
-        try store.save(renumbered)
-        let ids = zip(journal.snapshot.displays, renumbered.snapshot.displays)
-            .map { "\($1.name ?? $1.uuid) \($0.id)→\($1.id)" }.joined(separator: ", ")
-        showSettleLogger.notice("renumbered journal=\(renumbered.id.uuidString, privacy: .public) \(ids, privacy: .public)")
-        journal = renumbered
+        if let renumbered = try? journal.renumbered(to: current) {
+            try store.save(renumbered)
+            let ids = zip(journal.snapshot.displays, renumbered.snapshot.displays)
+                .map { "\($1.name ?? $1.uuid) \($0.id)→\($1.id)" }.joined(separator: ", ")
+            showSettleLogger.notice("renumbered journal=\(renumbered.id.uuidString, privacy: .public) \(ids, privacy: .public)")
+            journal = renumbered
+        }
+        guard let remoded = try? journal.remoded(to: current, available: availableModes) else { return }
+        try store.save(remoded)
+        let modes = zip(journal.snapshot.displays, remoded.snapshot.displays).filter { $0.mode != $1.mode }
+            .map { "\($1.name ?? $1.uuid) mode \($0.mode.id)→\($1.mode.id)" }.joined(separator: ", ")
+        showSettleLogger.notice("remoded journal=\(remoded.id.uuidString, privacy: .public) \(modes, privacy: .public)")
+        journal = remoded
     }
 
     func reconcileSession(_ journal: inout RecoveryJournal, current: RecoverySnapshot, store: RecoveryStore) {

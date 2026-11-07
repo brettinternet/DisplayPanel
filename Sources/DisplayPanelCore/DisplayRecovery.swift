@@ -48,6 +48,16 @@ public struct RecoveryMode: Codable, Equatable {
 
     // IDs are only meaningful in the captured boot. Still compare the mode's
     // attributes: a reused mode ID alone is not a restoration identity.
+
+    /// The same mode in a rebuilt mode table. A relink can renumber a monitor's
+    /// modes within a boot and move its default marker (recorded on AW3425DW:
+    /// 3440×1440 at 60 Hz went from mode 61, default, to mode 103).
+    func isRenumbering(of saved: RecoveryMode) -> Bool {
+        let defaultFlag: UInt32 = 0x4 // kDisplayModeDefaultFlag
+        return width == saved.width && height == saved.height && pixelWidth == saved.pixelWidth &&
+            pixelHeight == saved.pixelHeight && refreshRate == saved.refreshRate &&
+            flags & ~defaultFlag == saved.flags & ~defaultFlag
+    }
 }
 
 struct RecoveryDisplay: Codable, Equatable {
@@ -64,7 +74,7 @@ struct RecoveryDisplay: Codable, Equatable {
     var y: Int32
     let rotation: Double
     let mirrorUUID: String?
-    let mode: RecoveryMode
+    var mode: RecoveryMode
     let colorSpace: String?
     let colorProfileDigest: String?
     // Optional for legacy journals and profiles ineligible for normalization.
@@ -249,7 +259,8 @@ struct RecoverySnapshot: Codable, Equatable {
     /// macOS can renumber displays within a boot when a monitor relinks. Only
     /// macOS's own UUID-to-ID mapping translates them, and only when the same
     /// session, OS, user and a one-to-one display set keep their hardware and
-    /// connection identity. Nothing else (modes, layout, profiles) is relaxed.
+    /// connection identity. Modes are adopted separately (see remoded); layout
+    /// and profiles never are.
     func renumbered(to current: Self) throws -> Self {
         guard bootSession == current.bootSession, osBuild == current.osBuild, userID == current.userID else {
             throw RecoveryError.unsafe("OS, boot session, or user changed; manual recovery required")
@@ -276,6 +287,20 @@ struct RecoverySnapshot: Codable, Equatable {
         }
         return Self(bootSession: bootSession, osBuild: osBuild, userID: userID,
                     displays: renumbered, hostModel: hostModel)
+    }
+
+    /// Saved modes translated to each display's current mode table, looked up
+    /// by its current ID. A missing mode is replaced only by the one available
+    /// renumbering of it; anything else stays for the exact mode check to refuse.
+    func remoded(available: (UInt32) -> [RecoveryMode]) -> Self {
+        Self(bootSession: bootSession, osBuild: osBuild, userID: userID, displays: displays.map { saved in
+            let modes = available(saved.id)
+            let renumberings = modes.filter { $0.isRenumbering(of: saved.mode) }
+            guard !modes.contains(saved.mode), renumberings.count == 1 else { return saved }
+            var display = saved
+            display.mode = renumberings[0]
+            return display
+        }, hostModel: hostModel)
     }
 
     func verify(_ current: Self) throws {

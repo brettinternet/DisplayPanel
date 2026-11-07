@@ -1089,6 +1089,24 @@ final class DisplayHideTests: XCTestCase {
         XCTAssertEqual(renumbered.snapshot.displays.map(\.id), [8, 7, 9])
         XCTAssertEqual(renumbered.publicMirrorSession?.removals.map(\.targetID), [7, 9])
         XCTAssertEqual(renumbered.publicMirrorSession?.removals.map(\.sourceID), [8, 8])
+
+        // A relink can also rebuild a mode table: the same mode gets a new ID
+        // and may lose or gain its default marker. Only one such mode is adopted.
+        func mode(_ id: Int, flags: Int = 0, refreshRate: Double = 60) throws -> RecoveryMode {
+            try JSONDecoder().decode(RecoveryMode.self, from: JSONSerialization.data(withJSONObject: [
+                "id": id, "width": 1920, "height": 1080, "pixelWidth": 1920, "pixelHeight": 1080,
+                "refreshRate": refreshRate, "flags": flags]))
+        }
+        let moved = try mode(103, flags: 0x4)
+        topology.availableModes[9] = [moved, try mode(104)]
+        _ = try controller().inspect()
+        XCTAssertEqual(try store.load().snapshot, renumbered.snapshot, "an ambiguous mode is never adopted")
+        topology.availableModes[9] = [moved, try mode(104, refreshRate: 30)]
+        _ = try controller().inspect()
+        let remoded = try store.load()
+        XCTAssertEqual(remoded.snapshot.displays.map(\.mode.id), [1, 2, 103])
+        XCTAssertEqual(remoded.publicMirrorSession?.baseline, remoded.snapshot)
+        XCTAssertEqual(remoded.publicMirrorSession?.removals.map { $0.beforeOperation.displays[2].mode }, [moved, moved])
         XCTAssertEqual(writerCount, 0)
     }
 
@@ -1362,6 +1380,7 @@ final class DisplayHideTests: XCTestCase {
                 convergencePause: pause
             ),
             preflightModes: { _ in },
+            availableModes: { self.topology.availableModes[$0] ?? [] },
             transaction: transaction
         )
         return DisplayHideController(
@@ -1445,6 +1464,7 @@ final class DisplayHideTests: XCTestCase {
     private final class FakeTopology {
         var snapshot: RecoverySnapshot
         var asleepDisplayIDs = Set<UInt32>()
+        var availableModes: [UInt32: [RecoveryMode]] = [:]
 
         init(snapshot: RecoverySnapshot) {
             self.snapshot = snapshot

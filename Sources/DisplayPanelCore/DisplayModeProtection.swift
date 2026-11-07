@@ -147,7 +147,7 @@ public struct DisplayModeProtectionController {
         }
     }
 
-    fileprivate static func modes(_ id: UInt32) -> [CGDisplayMode] {
+    static func modes(_ id: UInt32) -> [CGDisplayMode] {
         let options = [kCGDisplayShowDuplicateLowResolutionModes as String: true] as CFDictionary
         return CGDisplayCopyAllDisplayModes(id, options) as? [CGDisplayMode] ?? []
     }
