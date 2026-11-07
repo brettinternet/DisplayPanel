@@ -1227,9 +1227,14 @@ struct MirrorController {
                     changed = true
                     continue
                 }
-                let targetStillMirrored = current.displays.first(where: { $0.uuid == removal.targetUUID })?.mirrorUUID?
+                let target = current.displays.first(where: { $0.uuid == removal.targetUUID })
+                let targetStillMirrored = target?.mirrorUUID?
                     .caseInsensitiveCompare(removal.sourceUUID) == .orderedSame
-                if !targetStillMirrored {
+                // A sleeping source reports no followers, so a connected pair
+                // with neither drawable proves nothing; wake re-inspects.
+                let pairDark = target?.active == false &&
+                    current.displays.first(where: { $0.uuid == removal.sourceUUID })?.active == false
+                if !targetStillMirrored, !pairDark {
                     session.removals[index].state = .needsAttention
                     session.removals[index].failure = "display topology no longer matches this removal; inspect recovery before continuing"
                     changed = true

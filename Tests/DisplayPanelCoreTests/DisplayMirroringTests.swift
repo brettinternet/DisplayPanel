@@ -517,6 +517,18 @@ final class DisplayMirroringTests: XCTestCase {
             XCTAssertTrue(String(describing: error).contains("several displays are removed"))
         }
         XCTAssertEqual(writerCalls, 2, "ambiguous recovery requests never write")
+        // Sleeping displays report inactive and unmirrored (recorded on 26.x).
+        let awake = current
+        current = try changedSnapshot(awake) { displays in
+            for index in displays.indices {
+                displays[index]["active"] = false
+                displays[index].removeValue(forKey: "mirrorUUID")
+            }
+        }
+        let inspector = DisplayHideController(store: scenarioStore, mirror: sut, operationLock: { operation })
+        XCTAssertFalse(try inspector.inspect().removals.contains { $0.state == "needsAttention" },
+                       "an asleep observation never downgrades a removal")
+        current = awake
         XCTAssertEqual(try sut.verifyRemoval(store: scenarioStore, selector: snapshotUUID(2)).state, .mirrored,
                        "verify is a no-write check; it does not Show")
 

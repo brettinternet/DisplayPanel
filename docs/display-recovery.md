@@ -71,6 +71,9 @@ A display that needs attention blocks new removals until it's fixed.
 
 ## Sleep, wake and reboot
 
+Sleeping displays report no mirroring, so inspection while a removed display
+and its source are both dark leaves the removal unchanged until wake.
+
 macOS may undo mirroring on wake and return an off-input monitor late, with a
 changed main display or arrangement. The running app retains the set verified
 hidden before sleep and waits up to 15 seconds for those displays to return.
