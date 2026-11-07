@@ -1261,7 +1261,7 @@ struct MirrorController {
                     current.displays.first(where: { $0.uuid == removal.sourceUUID })?.active == false
                 if !targetStillMirrored, !pairDark {
                     session.removals[index].state = .needsAttention
-                    session.removals[index].failure = "display topology no longer matches this removal; inspect recovery before continuing"
+                    session.removals[index].failure = "The display is no longer mirrored as Hide left it."
                     changed = true
                 } else if session.removals[index].state == .captured || session.removals[index].state == .restoring {
                     session.removals[index].state = .mirrored

@@ -2237,7 +2237,7 @@ final class DisplayHideAppTests: XCTestCase {
             try await waitUntil { !model.displayLifecycleTransitioning }
             XCTAssertEqual(writes, 0, scenario)
             if !["show", "sleep"].contains(scenario) {
-                XCTAssertTrue(model.displayResults[Self.targetKey]?.message.contains("inspect recovery") == true, scenario)
+                XCTAssertTrue(model.displayResults[Self.targetKey]?.message.contains("didn’t re-hide") == true, scenario)
                 connected = displays
                 changing = false
                 model.displayReconfigured(display: 202, flags: .addFlag)
@@ -2423,7 +2423,7 @@ final class DisplayHideAppTests: XCTestCase {
             XCTAssertEqual(commits, 0)
             XCTAssertEqual(try journalStore.load().publicMirrorSession?.removals[0].state, .restoring)
             XCTAssertNotNil(try journalStore.load().publicMirrorSession?.removals[0].restoreFrom)
-            XCTAssertTrue(model.displayResults[Self.targetKey]?.message.contains("inspect recovery") == true)
+            XCTAssertTrue(model.displayResults[Self.targetKey]?.message.contains("didn’t re-hide") == true)
             return
         }
         if inputReturn == "delayed-own" {
@@ -2695,7 +2695,7 @@ final class DisplayHideAppTests: XCTestCase {
 
         XCTAssertEqual(hideCalls, 1, "a refused reapply has a one-attempt budget")
         XCTAssertEqual(model.handoffStatus?.state, DisplayHandoffStatus.State.recovery)
-        XCTAssertTrue(model.displayResults[Self.targetKey]?.message.contains("fake guarded Hide refusal") == true)
+        XCTAssertTrue(model.displayResults[Self.targetKey]?.message.contains("after waking. Fake guarded Hide refusal. Fix the layout") == true)
     }
 
     func testSystemWakeWithoutScreensWakeDoesNotResumeEarly() async throws {

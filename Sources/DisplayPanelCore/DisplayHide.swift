@@ -198,7 +198,7 @@ public struct DisplayHideController {
               Set(current.displays.map(\.id)).count == current.displays.count,
               Set(records.compactMap { $0.uuid?.lowercased() }).count == records.count,
               Set(records.map(\.id)).count == records.count else {
-            throw RecoveryError.unsafe("display identities are ambiguous; keep recovery and reconnect the captured displays")
+            throw RecoveryError.unsafe("display identities are ambiguous; reconnect the captured displays and keep recovery")
         }
         guard try store.exists() else {
             return statusWithoutJournal(records: records, current: current)
@@ -517,11 +517,11 @@ public struct DisplayHideController {
             } else if removal.state == .needsAttention {
                 refusal = removal.failure ?? "This removal needs recovery."
             } else if !relationVerified {
-                refusal = "The exact removed display or its source is unavailable or no longer matches. Reconnect the captured displays and inspect recovery."
+                refusal = "The hidden display or its mirror source changed or is missing. Reconnect both as they were."
             } else if !sessionVerified {
-                refusal = journal.failure ?? "Another removal in this session needs attention; inspect recovery before Show."
+                refusal = journal.failure ?? "Another hidden display needs recovery first."
             } else if removal.state != .mirrored {
-                refusal = "This removal is still in an interrupted operation; inspect recovery before continuing."
+                refusal = "A Hide or Show of this display didn’t finish."
             } else {
                 refusal = nil
             }

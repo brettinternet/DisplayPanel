@@ -231,7 +231,7 @@ a changed journal or baseline, unrelated mirrors, changed visible modes,
 unrepresentable origins, interrupted operations, missing displays and unsettled
 topology cause no write. A failed or unverified transaction stops without retry.
 The journal is retained, and the display's result directs you to correct the
-layout in System Settings and inspect recovery. A late return does not revive
+layout in System Settings. A late return does not revive
 expired intent; use explicit recovery. Settlement and the background automation
 observer inspect without reconciling away journal intent or interruption evidence.
 

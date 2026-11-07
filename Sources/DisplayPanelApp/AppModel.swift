@@ -4792,10 +4792,10 @@ final class AppModel: ObservableObject {
                             let removal = self.handoffStatus?.removal(for: uuid)
                             return removal?.state == "mirrored" && removal?.topologyVerified == true
                         }) else {
-                            throw DisplayHideError.recoveryRequired("The new Hide could not be verified. Inspect recovery before continuing.")
+                            throw DisplayHideError.recoveryRequired("Couldn’t confirm the new Hide.")
                         }
                     } else if self.handoffStatus?.hasUnresolvedJournal != false || self.handoffInspectionFailure != nil {
-                        throw DisplayHideError.recoveryRequired("The new desktop could not be verified. Inspect recovery before continuing.")
+                        throw DisplayHideError.recoveryRequired("Couldn’t confirm the new desktop.")
                     }
                     self.sessionRecoveryResult = hideAgain
                         ? "Hidden again. Inputs weren’t switched."
@@ -5304,7 +5304,7 @@ final class AppModel: ObservableObject {
             if expired {
                 error = .unavailable("Show stopped: displays did not settle within 15 seconds. Try again once they settle.")
             } else if identityChanged || !unchanged {
-                error = .recoveryRequired("Show stopped: the captured display identities or recovery journal changed. Inspect recovery before trying again.")
+                error = .recoveryRequired("Show stopped: the displays or their recovery record changed.")
             } else if !stable || !ready || isShuttingDown || runningActionInterrupted {
                 error = .unavailable("Show was interrupted before displays settled. Try again once they settle.")
             } else {
@@ -5430,7 +5430,7 @@ final class AppModel: ObservableObject {
         // If macOS kept the verified mirror topology, there is nothing to reapply.
         if status.state != .none, status.mirrorTopologyVerified {
             guard sleepRemovalsStillHidden(intent.journalRemovals, in: status) else {
-                recordSleepResumeFailure(intent.removals.first, reason: "The mirrors didn’t verify after wake. Inspect recovery.")
+                recordSleepResumeFailure(intent.removals.first, reason: "The mirrors didn’t verify.")
                 return
             }
             return
@@ -5441,7 +5441,7 @@ final class AppModel: ObservableObject {
         }
         guard status.state == .none,
               sleepRemovalsMatchRestoredBaseline(intent.journalRemovals, in: status) else {
-            recordSleepResumeFailure(intent.removals.first, reason: status.reason ?? "Recovery inspection did not verify the saved baseline. Inspect recovery before continuing.")
+            recordSleepResumeFailure(intent.removals.first, reason: status.reason ?? "The layout didn’t match the one saved at Hide.")
             return
         }
 
@@ -5480,7 +5480,7 @@ final class AppModel: ObservableObject {
                 displays = displayProvider()
                 refreshHandoffStatus()
                 guard resumedRemovalsMatch(applied, baselineIdentity: intent.baselineIdentity) else {
-                    recordSleepResumeFailure(removal, reason: "Hide didn’t verify the mirror session. The journal is kept; inspect recovery.")
+                    recordSleepResumeFailure(removal, reason: "Hide didn’t verify the mirror.")
                     return
                 }
             } catch {
@@ -5595,7 +5595,7 @@ final class AppModel: ObservableObject {
         displayHideLogger.notice("rehide target=\(key, privacy: .public) context=\(context, privacy: .public) refused=\(reason, privacy: .public)")
         displayResults[key] = DisplayOperationResult(
             action: .hide, succeeded: false,
-            message: "DisplayPanel didn’t re-hide this display \(context). \(reason) Fix the layout in System Settings → Displays, then inspect recovery.",
+            message: "DisplayPanel didn’t re-hide this display \(context). \(Self.sentence(readableProblem(reason))) Fix the layout in System Settings → Displays.",
             inputMessage: nil, inputOutcome: nil, inputNeedsAttention: true, offersDisplaysSettings: true
         )
         onStatusChange?()
@@ -6739,6 +6739,10 @@ final class AppModel: ObservableObject {
         for tail in [" Journal kept", " Manual recovery:", " Input return:", " Input recovery:", " The journal is retained."] {
             if let range = result.range(of: tail) { result = String(result[..<range.lowerBound]) }
         }
+        // CLI guidance; Settings shows recovery itself.
+        result = result.replacingOccurrences(
+            of: "(;|,? then| and) (inspect|keep) recovery( status| evidence)?( before (Show|continuing)| and confirm again)?(?=$|[.;])",
+            with: "", options: .regularExpression)
         let cut = result.count != full
         while let range = result.range(of: "display recovery: ") {
             let sentenceStart = range.lowerBound == result.startIndex || result[..<range.lowerBound].hasSuffix(". ")

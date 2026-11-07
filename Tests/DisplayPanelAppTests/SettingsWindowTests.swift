@@ -1535,7 +1535,7 @@ final class SettingsWindowTests: XCTestCase {
             journalID: "settings-capture-fixture",
             reason: "An unfinished recovery journal needs review."
         )
-        let wakeReason = "display topology no longer matches this removal; inspect recovery before continuing"
+        let wakeReason = "The display is no longer mirrored as Hide left it."
         func fixtureIdentity(_ display: DisplayRecord) -> DisplayHandoffIdentity {
             DisplayHandoffIdentity(DisplayHideIdentity(
                 uuid: display.uuid ?? "unavailable-\(display.id)", displayID: display.id,
