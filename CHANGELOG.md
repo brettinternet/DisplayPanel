@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.5
+
+- Choose a display's refresh rate in Settings or with `dp app refresh-rate`; mode protection keeps the choice.
+- Run Hide, Show and protected-mode changes off the main thread, so the app stays responsive and no longer reports a false "mode unavailable".
+- Keep Show, wake re-hide and mode protection working when macOS renumbers displays or their modes after a relink.
+- Restore protected modes after the final Show.
+- Keep running an Action's later Shows after one fails, and return a sibling display's input when an earlier step restored it.
+- Don't ask to switch inputs for a Show already confirmed on the Mac, and leave removed displays unchanged while they sleep.
+- Show recovery problems in Settings without CLI text or repeated controls.
+- Add `dp app quit`, which keeps an unresolved display journal. The installer uses it and reopens the app.
+
 ## 0.9.4
 
 - Run Actions from the menu bar under Run action.
