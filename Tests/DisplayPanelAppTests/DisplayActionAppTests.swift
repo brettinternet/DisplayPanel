@@ -210,7 +210,8 @@ final class DisplayActionAppTests: XCTestCase {
         let retained = try XCTUnwrap(model.displayResults[targetUUID.lowercased()])
         XCTAssertTrue(retained.needsAttention)
         XCTAssertTrue(retained.inputMessage?.contains("fake return-input failure") == true)
-        XCTAssertEqual(retained.undoInputCommand, undoCommand)
+        XCTAssertEqual(retained.inputOutcome?.recoveryCommand, undoCommand)
+        XCTAssertNil(retained.undoInputCommand, "undoing a Show’s return would hand the monitor back")
         XCTAssertEqual(retained.inputOutcome?.state, .failed)
         XCTAssertEqual(model.controlDisplayOutcome, .partial)
         XCTAssertEqual(

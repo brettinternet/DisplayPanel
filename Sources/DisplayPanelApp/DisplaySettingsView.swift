@@ -95,9 +95,10 @@ struct DisplaySettingsView: View {
                 Spacer(minLength: 8)
                 primaryAction(tile)
             }
-            if let result = model.displayResults[tile.id] {
+            let result = model.displayResults[tile.id]
+            if let result {
                 if !result.succeeded {
-                    resultLabel(result.message, attention: true)
+                    resultLabel(failureMessage(result, tile: tile), attention: true)
                     if result.offersDisplaysSettings {
                         Button("Open Displays Settings") { openDisplaysSettings() }
                     }
@@ -112,9 +113,6 @@ struct DisplaySettingsView: View {
                         }
                     }
                 }
-                if let command = result.undoInputCommand {
-                    CommandCopyRow("Undo input switch", command: command)
-                }
             }
             if let note = actionNote(tile) {
                 Text(note)
@@ -122,12 +120,33 @@ struct DisplaySettingsView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if tile.status == .needsRecovery, let note = model.recoveryCheckNote {
-                resultLabel(note, attention: true)
+            if tile.status == .needsRecovery, ownsRecoveryCheck {
+                recoveryCheckNote
             }
-            if model.pageRecoveryProblem == nil, isJournalTarget(tile), let status = model.handoffStatus {
-                recoveryDetails(status, targetUUID: tile.uuid)
+            let status = model.pageRecoveryProblem == nil && isJournalTarget(tile) ? model.handoffStatus : nil
+            if status != nil || result?.undoInputCommand != nil {
+                recoveryDetails(status, targetUUID: tile.uuid, undoInputCommand: result?.undoInputCommand)
             }
+        }
+    }
+
+    /// A failed Hide or Show on a display that needs recovery usually failed for
+    /// the reason its state line already shows.
+    private func failureMessage(_ result: DisplayOperationResult, tile: DisplayTile) -> String {
+        let problem = stateLine(tile).trimmingCharacters(in: CharacterSet(charactersIn: " ."))
+        guard tile.status == .needsRecovery, !problem.isEmpty, result.message.contains(problem) else { return result.message }
+        return result.action == .hide ? "Couldn’t hide." : "Couldn’t show."
+    }
+
+    /// Check Again and its result appear once: in the previous-session section when shown.
+    private var ownsRecoveryCheck: Bool { model.handoffStatus?.sessionRecovery == nil }
+
+    @ViewBuilder
+    private var recoveryCheckNote: some View {
+        if let note = model.recoveryCheckNote {
+            Text(note)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -181,7 +200,7 @@ struct DisplaySettingsView: View {
             }
             .disabled(tile.actionBlocker != nil)
             .accessibilityLabel("\(title) \(tile.name)")
-        } else if tile.status == .needsRecovery {
+        } else if tile.status == .needsRecovery, ownsRecoveryCheck {
             // Display changes are checked automatically; this is for fixes made elsewhere.
             Button("Check Again") { model.checkRecoveryAgain() }
                 .accessibilityLabel("Check \(tile.name) again")
@@ -534,22 +553,19 @@ struct DisplaySettingsView: View {
     private func sessionRecoverySection(_ recovery: DisplaySessionRecovery) -> some View {
         Section {
             Text(recovery.displayNames.joined(separator: ", "))
-            HStack {
-                Button("Hide again") {
-                    recoveryHidesAgain = true
-                    pendingSessionRecovery = recovery
-                }
-                Button("Keep displays shown") {
-                    recoveryHidesAgain = false
-                    pendingSessionRecovery = recovery
-                }
-            }
-            .disabled(!recovery.canRecover || model.sessionRecoveryBlocker != nil)
             if let blocker = model.sessionRecoveryBlocker {
-                Text(blocker).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                Button("Check Again") { model.checkRecoveryAgain() }
-                if let note = model.recoveryCheckNote {
-                    resultLabel(note, attention: true)
+                recoveryProblemRow(blocker, checksAgain: true)
+                recoveryCheckNote
+            } else {
+                HStack {
+                    Button("Hide again") {
+                        recoveryHidesAgain = true
+                        pendingSessionRecovery = recovery
+                    }
+                    Button("Keep displays shown") {
+                        recoveryHidesAgain = false
+                        pendingSessionRecovery = recovery
+                    }
                 }
             }
         } header: {
@@ -560,67 +576,74 @@ struct DisplaySettingsView: View {
     /// A recovery problem that no display tile shows.
     private func pageRecoverySection(_ problem: String) -> some View {
         Section {
-            Label {
-                Text("Display recovery needs attention")
-                Text(problem)
-                    .textSelection(.enabled)
-            } icon: {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-            }
-            Button("Check Again") { model.checkRecoveryAgain() }
-            if let note = model.recoveryCheckNote {
-                resultLabel(note, attention: true)
+            recoveryProblemRow(problem, checksAgain: ownsRecoveryCheck)
+            if ownsRecoveryCheck {
+                recoveryCheckNote
             }
             if let status = model.handoffStatus {
                 recoveryDetails(status)
             }
+        } header: {
+            Text("Display recovery")
         }
     }
 
-    private func recoveryDetails(_ status: DisplayHandoffStatus, targetUUID: String? = nil) -> some View {
+    /// Display changes are rechecked automatically; Check Again is for fixes made elsewhere.
+    private func recoveryProblemRow(_ problem: String, checksAgain: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            resultLabel(problem, attention: true)
+            if checksAgain {
+                Spacer(minLength: 8)
+                Button("Check Again") { model.checkRecoveryAgain() }
+            }
+        }
+    }
+
+    private func recoveryDetails(_ status: DisplayHandoffStatus?, targetUUID: String? = nil,
+                                 undoInputCommand: String? = nil) -> some View {
         DisclosureGroup("Recovery details") {
-            if status.state == .recovery {
-                Text(status.sessionRecovery != nil
-                     ? "This Hide can’t be replayed. If a monitor is missing, switch it back to this Mac; if it’s mirrored, turn off mirroring in System Settings."
-                     : "If Restore is refused, fix mirroring and arrangement in System Settings, then Check Again.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                HStack {
-                    Button("Open Displays Settings") { openDisplaysSettings() }
-                    Button("Check Again") { model.checkRecoveryAgain() }
+            if let undoInputCommand {
+                CommandCopyRow("Undo input switch", command: undoInputCommand)
+            }
+            if let status {
+                recoveryRows(status, targetUUID: targetUUID)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func recoveryRows(_ status: DisplayHandoffStatus, targetUUID: String?) -> some View {
+        if status.state == .recovery {
+            Button("Open Displays Settings") { openDisplaysSettings() }
+        }
+        CommandCopyRow("Journal", command: status.journalPath)
+        if status.sessionRecovery != nil {
+            CommandCopyRow("Status command", command: status.inspectionCommand)
+        } else if let selected = targetUUID.flatMap({ status.removal(for: $0) }) {
+            removalDetails(selected)
+            let command = "dp recovery restore --display \(shellQuote(selected.target.uuid)) --journal \(shellQuote(status.journalPath))"
+            CommandCopyRow("Recovery command", command: command)
+        } else if !status.removals.isEmpty {
+            ForEach(status.removals.filter(\.isUnresolved)) { removal in
+                removalDetails(removal)
+                let command = "dp recovery restore --display \(shellQuote(removal.target.uuid)) --journal \(shellQuote(status.journalPath))"
+                CommandCopyRow("Restore \(removal.target.name)", command: command)
+            }
+            CommandCopyRow("Status command", command: status.inspectionCommand)
+        } else {
+            if let target = status.target {
+                LabeledContent("Hidden display") {
+                    Text("\(target.name)\n\(target.identityDetail)").textSelection(.enabled)
                 }
             }
-            CommandCopyRow("Journal", command: status.journalPath)
-            if status.sessionRecovery != nil {
-                CommandCopyRow("Status command", command: status.inspectionCommand)
-            } else if let selected = targetUUID.flatMap({ status.removal(for: $0) }) {
-                removalDetails(selected)
-                let command = "dp recovery restore --display \(shellQuote(selected.target.uuid)) --journal \(shellQuote(status.journalPath))"
-                CommandCopyRow("Recovery command", command: command)
-            } else if !status.removals.isEmpty {
-                ForEach(status.removals.filter(\.isUnresolved)) { removal in
-                    removalDetails(removal)
-                    let command = "dp recovery restore --display \(shellQuote(removal.target.uuid)) --journal \(shellQuote(status.journalPath))"
-                    CommandCopyRow("Restore \(removal.target.name)", command: command)
+            if let source = status.source {
+                LabeledContent("Mirrored onto") {
+                    Text("\(source.name)\n\(source.identityDetail)").textSelection(.enabled)
                 }
-                CommandCopyRow("Status command", command: status.inspectionCommand)
-            } else {
-                if let target = status.target {
-                    LabeledContent("Hidden display") {
-                        Text("\(target.name)\n\(target.identityDetail)").textSelection(.enabled)
-                    }
-                }
-                if let source = status.source {
-                    LabeledContent("Mirrored onto") {
-                        Text("\(source.name)\n\(source.identityDetail)").textSelection(.enabled)
-                    }
-                }
-                let command = status.state == .unsupported || status.inspectionFailure != nil
-                    ? status.inspectionCommand : status.recoveryCommand ?? status.inspectionCommand
-                CommandCopyRow("Recovery command", command: command)
             }
+            let command = status.state == .unsupported || status.inspectionFailure != nil
+                ? status.inspectionCommand : status.recoveryCommand ?? status.inspectionCommand
+            CommandCopyRow("Recovery command", command: command)
         }
     }
 
@@ -633,7 +656,7 @@ struct DisplaySettingsView: View {
                 Text("\(removal.source.name)\n\(removal.source.identityDetail)").textSelection(.enabled)
             }
             if let reason = removal.reason {
-                Text(reason).foregroundStyle(.orange).textSelection(.enabled)
+                Text(model.readableProblem(reason)).foregroundStyle(.orange).textSelection(.enabled)
             }
         }
     }

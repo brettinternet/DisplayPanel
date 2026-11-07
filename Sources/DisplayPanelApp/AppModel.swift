@@ -2933,7 +2933,7 @@ final class AppModel: ObservableObject {
     /// A display recovery problem that needs the user; a healthy hidden display isn't one.
     var displayRecoveryProblem: String? {
         if let failure = handoffInspectionFailure {
-            return "Couldn’t check display recovery: \(failure)"
+            return "Couldn’t check display recovery: \(readableProblem(failure))"
         }
         guard let status = handoffStatus else { return nil }
         switch status.state {
@@ -2942,7 +2942,7 @@ final class AppModel: ObservableObject {
         case .hidden where status.canShow:
             return nil
         case .hidden, .recovery, .unsupported:
-            return status.reason ?? "\(status.target?.name ?? "A display") needs recovery."
+            return status.reason.map(readableProblem) ?? "\(status.target?.name ?? "A display") needs recovery."
         }
     }
 
@@ -4601,7 +4601,7 @@ final class AppModel: ObservableObject {
         if protectionQuiescencePending { return Self.automationStopping.localizedDescription }
         if let failure = protectionQuiescenceFailure { return failure }
         if !blackoutHiddenDisplays.isEmpty { return "Show blacked-out displays before recovering hidden displays." }
-        return handoffStatus?.sessionRecovery?.blocker
+        return handoffStatus?.sessionRecovery?.blocker.map(readableProblem)
     }
 
     /// Explicitly chooses the outcome for the whole previous-session Hide set.
@@ -6491,7 +6491,7 @@ final class AppModel: ObservableObject {
         let result = DisplayOperationResult(
             action: action,
             succeeded: succeeded,
-            message: message,
+            message: readableProblem(message),
             inputMessage: line?.text,
             inputOutcome: input,
             inputNeedsAttention: line?.needsAttention ?? false,
@@ -6522,12 +6522,12 @@ final class AppModel: ObservableObject {
         let result = DisplayOperationResult(
             action: action,
             succeeded: false,
-            message: "Couldn’t \(action == .hide ? "hide" : "show"). \(error.localizedDescription)",
+            message: readableProblem("Couldn’t \(action == .hide ? "hide" : "show"). \(error.localizedDescription)"),
             inputMessage: nil,
             inputOutcome: nil,
             inputNeedsAttention: false
         )
-        displayHideLogger.notice("\(action == .hide ? "hide" : "show", privacy: .public) target=\(targetUUID, privacy: .public) refused=\(result.message, privacy: .public)")
+        displayHideLogger.notice("\(action == .hide ? "hide" : "show", privacy: .public) target=\(targetUUID, privacy: .public) refused=\(error.localizedDescription, privacy: .public)")
         if case .actionInProgress? = error as? DisplayHideError {
             completion?(result)
             return
@@ -6559,6 +6559,48 @@ final class AppModel: ObservableObject {
         case .failed:
             return ("Couldn’t switch the monitor to \(input).\(detail) Use the monitor’s buttons.", true)
         }
+    }
+
+    /// A backend recovery error as Settings and the menu show it. The CLI
+    /// fallbacks and journal guidance stay in the log and Recovery details;
+    /// display UUIDs become names.
+    func readableProblem(_ text: String) -> String {
+        var names: [String: String] = [:]
+        for configuration in hidePreferences.configurations.values {
+            for reference in [configuration.target, configuration.source].compactMap({ $0 }) {
+                if let name = reference.name { names[reference.uuid.lowercased()] = name }
+            }
+        }
+        for removal in handoffStatus?.removals ?? [] {
+            names[removal.target.uuid.lowercased()] = removal.target.name
+            names[removal.source.uuid.lowercased()] = removal.source.name
+        }
+        for display in displays {
+            if let uuid = display.uuid, let name = display.name { names[uuid.lowercased()] = name }
+        }
+        return Self.readableProblem(text, names: names)
+    }
+
+    static func readableProblem(_ text: String, names: [String: String]) -> String {
+        var result = text
+        let full = result.count
+        for tail in [" Journal kept", " Manual recovery:", " Input return:", " Input recovery:", " The journal is retained."] {
+            if let range = result.range(of: tail) { result = String(result[..<range.lowerBound]) }
+        }
+        let cut = result.count != full
+        while let range = result.range(of: "display recovery: ") {
+            let sentenceStart = range.lowerBound == result.startIndex || result[..<range.lowerBound].hasSuffix(". ")
+            let next = result[range.upperBound...].prefix(1)
+            result.replaceSubrange(range.lowerBound..<result.index(range.upperBound, offsetBy: next.count),
+                                   with: sentenceStart ? next.uppercased() : String(next))
+        }
+        let uuid = "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
+        result = result.replacingOccurrences(of: " \\(\(uuid)\\)", with: "", options: .regularExpression)
+        for (key, name) in names {
+            result = result.replacingOccurrences(of: key, with: name, options: .caseInsensitive)
+        }
+        guard cut else { return result }
+        return sentence(result.trimmingCharacters(in: CharacterSet(charactersIn: " ;,:.")))
     }
 
     /// Ends backend detail text with exactly one sentence terminator.

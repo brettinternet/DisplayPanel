@@ -204,15 +204,18 @@ brightness.
 
 ## Results
 
-Desktop and input results are reported separately on the selected display:
+Desktop and input results are reported separately on the selected display.
+Messages name the problem only; journal paths and CLI fallbacks stay in the log
+and **Recovery details**. A failure that repeats the display's recovery reason
+reads just **Couldn't show.**
 
 | Case | Desktop | Input |
 | --- | --- | --- |
 | Everything works | Hidden | Switched |
 | Input can't be confirmed | Hidden | Check the monitor |
 | No DDC | Hidden | Skipped; use monitor buttons |
-| Input write fails | Not hidden | Failed, with a switch-back command |
-| Mirroring fails after input switched | Failed; recovery offered | Switch-back command shown |
+| Input write fails | Not hidden | Failed; switch-back command in **Recovery details** |
+| Mirroring fails after input switched | Failed; recovery offered | Switch-back command in **Recovery details** |
 | Show: layout fails | Not restored; journal retained | May already have switched; outcome shown |
 | Show: input fails | Restored only if fresh layout/mode checks pass | Failed |
 

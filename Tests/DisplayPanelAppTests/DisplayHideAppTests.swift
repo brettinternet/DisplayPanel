@@ -1139,7 +1139,7 @@ final class DisplayHideAppTests: XCTestCase {
             "Couldn’t switch the monitor to DisplayPort 1. fake DDC write failure after desktop restore. Use the monitor’s buttons."
         )
         XCTAssertTrue(shownResult.needsAttention)
-        XCTAssertEqual(shownResult.undoInputCommand, "dp ddc-input --display '\(Self.targetUUID)' --set 0x11")
+        XCTAssertNil(shownResult.undoInputCommand, "undoing a Show’s return would hand the monitor back")
         XCTAssertEqual(shownResult.menuLine, shownResult.inputMessage)
         XCTAssertNil(model.notice)
         XCTAssertEqual(model.displayTiles.first { $0.id == Self.targetKey }?.status, .on)
@@ -1326,7 +1326,8 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(hideCalls, 1)
         XCTAssertEqual(model.handoffStatus?.state, .recovery)
         XCTAssertFalse(result.succeeded)
-        XCTAssertTrue(result.message.contains("dp recovery restore --journal"), result.message)
+        XCTAssertEqual(result.message, "Couldn’t hide. Hide stopped before topology change.",
+                       "CLI fallbacks stay out of Settings and the menu")
         XCTAssertEqual(result.inputMessage, "Couldn’t switch the monitor to HDMI 1. fake write failed. Use the monitor’s buttons.")
         XCTAssertEqual(result.inputOutcome?.recoveryCommand, command)
         XCTAssertEqual(result.undoInputCommand, command)

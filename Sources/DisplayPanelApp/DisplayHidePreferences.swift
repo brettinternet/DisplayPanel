@@ -205,9 +205,10 @@ struct DisplayOperationResult: Equatable {
     /// A short line for the menu: the failure, or else the unacknowledged input outcome.
     var menuLine: String? { succeeded ? (inputWarningDismissed ? nil : inputMessage) : message }
 
-    /// The command that puts the monitor back on the input it had before
-    /// DisplayPanel switched it, offered when the result needs attention.
-    var undoInputCommand: String? { needsAttention ? inputOutcome?.recoveryCommand : nil }
+    /// The command that puts the monitor back on the input it had before Hide
+    /// switched it, offered when the result needs attention. Undoing a Show's
+    /// return would hand the monitor back to the other computer.
+    var undoInputCommand: String? { action == .hide && needsAttention ? inputOutcome?.recoveryCommand : nil }
 }
 
 /// One display in the Displays tab, in arrangement order.
