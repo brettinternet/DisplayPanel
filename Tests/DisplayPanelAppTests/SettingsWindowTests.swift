@@ -711,7 +711,7 @@ final class SettingsWindowTests: XCTestCase {
         defer { parent.close() }
 
         let content = try XCTUnwrap(sheet.contentView)
-        let guidance = "Turn on Remove from desktop for this display in Settings → Displays first."
+        let guidance = "Set this display’s Hide to Remove from desktop in Settings → Displays first."
         XCTAssertEqual(model.displayActionRemovalSetupReason(for: Self.sideUUID), guidance)
         content.layoutSubtreeIfNeeded()
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
@@ -1078,7 +1078,7 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("Turn on Experimental features"))
         }
         XCTAssertTrue(delegate.makeMenu().items.contains { $0.title == "Hide DELL S2721DGF" })
-        XCTAssertNil(try removalSwitch(in: model), "removal setup stays out of Settings")
+        XCTAssertEqual(try sideDisplaySwitchCount(model), 1, "removal setup stays out of Settings")
 
         model.acceptExperimentalConsent()
         XCTAssertTrue(defaults.bool(forKey: "experimentalFeaturesEnabled"))
@@ -1087,7 +1087,7 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertNil(try sideTile(model).actionBlocker)
         XCTAssertNoThrow(try model.makeHideRequest(targetUUID: Self.sideUUID))
         XCTAssertTrue(delegate.makeMenu().items.contains { $0.title == "Hide DELL S2721DGF" })
-        XCTAssertEqual(try removalSwitch(in: model)?.state, .on)
+        XCTAssertEqual(try sideDisplaySwitchCount(model), 0, "Remove from desktop replaces Keep windows off")
         let reloaded = try makeModel(keepingDefaults: true).0
         XCTAssertTrue(reloaded.experimentalFeaturesEnabled)
 
@@ -1897,8 +1897,10 @@ final class SettingsWindowTests: XCTestCase {
         window.sendEvent(up)
     }
 
-    /// Opens the side display in Displays and returns its Remove from desktop switch, if shown.
-    private func removalSwitch(in model: AppModel) throws -> NSSwitch? {
+    /// Opens the side display in Displays and returns how many switches it shows.
+    /// Hide's style is a menu picker, which exposes no native control; Remove
+    /// from desktop drops the Windows section and its Keep windows off switch.
+    private func sideDisplaySwitchCount(_ model: AppModel) throws -> Int {
         let controller = SettingsWindowController(model: model)
         controller.present()
         controller.selectDisplay(uuid: Self.sideUUID)
@@ -1906,17 +1908,12 @@ final class SettingsWindowTests: XCTestCase {
         defer { window.close() }
         window.setContentSize(NSSize(width: 680, height: 1200))
         let content = try XCTUnwrap(window.contentView)
-        let expectedState: NSControl.StateValue = model.hideRemovesFromDesktop(displays[1]) ? .on : .off
+        let expected = model.hideRemovesFromDesktop(displays[1]) ? 0 : 1
         spin {
             content.layoutSubtreeIfNeeded()
-            let switches = nativeViews(in: content).compactMap { $0 as? NSSwitch }
-            // Hide precedes Windows, which is absent while removal is on; without Experimental, Hide has no switch.
-            return model.experimentalFeaturesEnabled
-                ? switches.count == (expectedState == .on ? 1 : 2) && switches.first?.state == expectedState
-                : switches.count == 1
+            return nativeViews(in: content).compactMap { $0 as? NSSwitch }.count == expected
         }
-        let switches = nativeViews(in: content).compactMap { $0 as? NSSwitch }
-        return model.experimentalFeaturesEnabled ? switches.first : nil
+        return nativeViews(in: content).compactMap { $0 as? NSSwitch }.count
     }
 
     private var hiddenDisplays: [DisplayRecord] {

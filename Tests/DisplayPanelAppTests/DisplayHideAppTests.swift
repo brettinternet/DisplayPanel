@@ -895,10 +895,11 @@ final class DisplayHideAppTests: XCTestCase {
         window.setContentSize(NSSize(width: 680, height: 1200))
         settle(window)
 
-        let toggle = try XCTUnwrap(removalSwitch(in: window), controlSummary(window))
-        XCTAssertEqual(toggle.state, .off)
-        XCTAssertTrue(toggle.isEnabled, "an external main display can be configured for removal")
-        toggle.performClick(nil)
+        XCTAssertFalse(model.hideRemovesFromDesktop(displays[0]))
+        XCTAssertNil(model.removalIneligibleReason(for: displays[0]), "an external main display can be configured for removal")
+        XCTAssertFalse(model.hideConfigurationFrozen(for: Self.mainUUID))
+        // SwiftUI's menu Picker is not an NSPopUpButton; exercise its binding through the model.
+        model.setHideEnabled(true, for: displays[0])
         settle(window)
 
         let configuration = try XCTUnwrap(model.hideConfiguration(for: Self.mainUUID))
@@ -3148,12 +3149,11 @@ final class DisplayHideAppTests: XCTestCase {
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 680, height: 1200))
         settle(window)
-        let toggle = try XCTUnwrap(removalSwitch(in: window), controlSummary(window))
-        XCTAssertEqual(toggle.state, .off)
         XCTAssertEqual(model.displayTiles.first { $0.id == Self.targetKey }?.action, .hide)
         XCTAssertFalse(model.hideRemovesFromDesktop(displays[1]), "Hide blacks out until removal is on")
 
-        toggle.performClick(nil)
+        // SwiftUI's menu Picker is not an NSPopUpButton; exercise its binding through the model.
+        model.setHideEnabled(true, for: displays[1])
         settle(window)
         let configuration = try XCTUnwrap(model.hideConfiguration(for: Self.targetUUID))
         XCTAssertTrue(configuration.enabled)
@@ -3248,13 +3248,13 @@ final class DisplayHideAppTests: XCTestCase {
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(NSSize(width: 680, height: 1200))
         settle(window)
-        XCTAssertNil(removalSwitch(in: window), "a journal target has no removal setup")
         XCTAssertTrue(controls(in: window).compactMap { $0 as? NSPopUpButton }.isEmpty)
 
         controller.selectDisplay(uuid: Self.sourceUUID)
         settle(window)
-        let toggle = try XCTUnwrap(removalSwitch(in: window), controlSummary(window))
-        XCTAssertTrue(toggle.isEnabled, "a separate display’s Hide setup stays editable during another display’s recovery")
+        XCTAssertNil(model.removalIneligibleReason(for: displays[2]))
+        XCTAssertFalse(model.hideConfigurationFrozen(for: Self.sourceUUID),
+                       "a separate display’s Hide setup stays editable during another display’s recovery")
     }
 
     func testNativeMenuArrowEventsReachShowAction() throws {
@@ -3427,8 +3427,8 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(window.contentLayoutRect.width, 440, "long names never widen the window")
         let field = try XCTUnwrap(controls(in: window).compactMap { $0 as? NSTextField }.first { $0.isEditable },
                                   controlSummary(window))
+        controls(in: window).forEach { assertInsideContent($0, of: window) }
         assertInsideContent(field, of: window)
-        try assertInsideContent(XCTUnwrap(removalSwitch(in: window)), of: window)
 
         box.value = handoffStatus(.recovery, target: target, source: main, journalID: "long-content-journal",
                                   canShow: false, reason: longError)
@@ -4482,11 +4482,6 @@ final class DisplayHideAppTests: XCTestCase {
 
     private func controls(in window: NSWindow) -> [NSControl] {
         window.contentView.map(nativeControls) ?? []
-    }
-
-    /// Hide precedes Keep windows off; ignore Mode Protection when it is disabled.
-    private func removalSwitch(in window: NSWindow) -> NSSwitch? {
-        controls(in: window).compactMap { $0 as? NSSwitch }.first(where: \.isEnabled)
     }
 
     private func controlSummary(_ window: NSWindow) -> String {

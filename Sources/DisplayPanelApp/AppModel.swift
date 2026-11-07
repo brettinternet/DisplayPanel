@@ -2459,7 +2459,7 @@ final class AppModel: ObservableObject {
             return .protectionCleanup(Self.automationCleanupRetryMessage)
         }
         guard configuration.enabled else {
-            return .unavailable("Turn on Remove from desktop for this display first.")
+            return .unavailable("Set this display’s Hide to Remove from desktop first.")
         }
         guard let target = matchingSavedDisplay(configuration.target) else {
             return .identityChanged(savedIdentityProblem(configuration.target) ?? "The saved target identity is unavailable.")
@@ -2547,8 +2547,8 @@ final class AppModel: ObservableObject {
         return nil
     }
 
-    /// Hide removes a display from the desktop when Experimental features and
-    /// its Remove from desktop switch are on; otherwise Hide blacks it out.
+    /// Hide removes a display from the desktop when Experimental features are on
+    /// and its Hide style is Remove from desktop; otherwise Hide blacks it out.
     func hideRemovesFromDesktop(_ display: DisplayRecord) -> Bool {
         guard experimentalFeaturesEnabled, let uuid = display.uuid,
               hidePreferences[uuid]?.enabled == true else { return false }
@@ -2986,7 +2986,7 @@ final class AppModel: ObservableObject {
     static let displayChangedBlocker = "The display changed. Review it and run the Action again."
     static let experimentalRemovalBlocker = "Turn on Experimental features in General to remove a display from the desktop."
     static let setupChangedBlocker = "Displays setup changed since review. Save this Action to accept the change."
-    static let removalSetupBlocker = "Turn on Remove from desktop for this display in Settings → Displays first."
+    static let removalSetupBlocker = "Set this display’s Hide to Remove from desktop in Settings → Displays first."
 
     /// Acting on a request that waited would act on a state its sender didn't
     /// see; a second Toggle Hide would undo the first.
@@ -3132,7 +3132,7 @@ final class AppModel: ObservableObject {
         return input.value.map { "Switches the monitor back to \(MonitorInput.name($0))." }
     }
 
-    /// Turns Remove from desktop on or off for a display.
+    /// Sets a display's Hide style to Remove from desktop or Black out.
     func setHideEnabled(_ enabled: Bool, for display: DisplayRecord) {
         guard let targetUUID = display.uuid,
               !hideConfigurationFrozen(for: targetUUID),
@@ -4746,7 +4746,7 @@ final class AppModel: ObservableObject {
             throw DisplayHideError.unavailable(Self.experimentalRemovalBlocker)
         }
         guard let configuration = hidePreferences[targetUUID] else {
-            throw DisplayHideError.unavailable("Turn on Remove from desktop for this display first.")
+            throw DisplayHideError.unavailable("Set this display’s Hide to Remove from desktop first.")
         }
         if let refusal = hideReadiness(for: configuration, actionLeaseID: actionLeaseID) { throw refusal }
         guard let source = configuration.source else {
@@ -6388,7 +6388,7 @@ final class AppModel: ObservableObject {
         guard let configuration = hidePreferences[targetUUID],
               let target = snapshot(for: configuration.target) else {
             let issue = hidePreferences[targetUUID].flatMap { savedIdentityProblem($0.target) }
-                ?? "Turn on Remove from desktop for this display first."
+                ?? "Set this display’s Hide to Remove from desktop first."
             throw DisplayHideError.identityChanged(issue)
         }
         guard let source = configuration.source,

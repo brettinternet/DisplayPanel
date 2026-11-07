@@ -347,15 +347,15 @@ struct DisplaySettingsView: View {
                 let configuration = tile.uuid.flatMap(model.hideConfiguration)
                 let frozen = tile.uuid.map(model.hideConfigurationFrozen(for:)) ?? true
                 Section {
-                    Toggle(isOn: Binding(
+                    Picker("Style", selection: Binding(
                         get: { reason == nil && configuration?.enabled == true },
                         set: { model.setHideEnabled($0, for: display) }
                     )) {
-                        Text("Remove from desktop")
-                        Text("Mirror onto another display instead of blacking it out.")
+                        Text("Black out").tag(false)
+                        Text("Remove from desktop").tag(true)
                     }
                     .disabled(reason != nil || frozen)
-                    .accessibilityLabel("Remove \(tile.name) from desktop")
+                    .accessibilityLabel("Hide style for \(tile.name)")
                     if reason == nil, let configuration, configuration.enabled, let uuid = tile.uuid {
                         sourcePicker(configuration, uuid: uuid, tiles: tiles)
                             .disabled(frozen)
@@ -503,7 +503,7 @@ struct DisplaySettingsView: View {
             return "Show this display to change its removal settings."
         }
         let mainDisplayNote = "When the main display is mirrored, macOS decides where the menu bar, Dock and windows go."
-        guard let configuration, configuration.enabled else { return isMain ? mainDisplayNote : nil }
+        guard let configuration, configuration.enabled else { return nil }
         var lines: [String] = []
         if let away = configuration.awayInput {
             let awayName = MonitorInput.name(away)

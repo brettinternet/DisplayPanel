@@ -9,7 +9,7 @@ same thing.
 | Style | What happens | How to choose it |
 | --- | --- | --- |
 | **Black out** (default) | A black window covers the display; its desktop stays put | Default, or `dp app hide --display UUID --style black-out` |
-| **Remove from desktop** | The display [mirrors](display-mirroring.md) another, so windows move off it; optionally switches the monitor's input | Experimental features, then the display's **Remove from desktop** switch |
+| **Remove from desktop** | The display [mirrors](display-mirroring.md) another, so windows move off it; optionally switches the monitor's input | Experimental features, then **Displays → Hide → Style** |
 
 Neither style turns the monitor off or cuts its signal.
 
@@ -63,14 +63,15 @@ occupancy details.
 ## Experimental features
 
 Turn on **General → Experimental features** and accept the prompt once. This
-enables **Remove from desktop** with optional input switching.
+adds **Remove from desktop** to each display's **Hide → Style**, with optional
+input switching.
 
 Turning it off makes new Hides black out instead. Displays already removed stay
 removed, and Show and recovery keep working.
 
 ### Remove from desktop
 
-Turn on **Remove from desktop** for an external display, then set:
+Set an external display's **Hide → Style** to **Remove from desktop**, then set:
 
 | Control | Meaning |
 | --- | --- |

@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Clear a hidden display's failed Hide or Show error once it's back on the desktop, including when another display's Show restored it.
+- Choose each display's Hide style (Black out or Remove from desktop) from a Style menu in Settings → Displays → Hide.
 
 ## 0.9.9
 
