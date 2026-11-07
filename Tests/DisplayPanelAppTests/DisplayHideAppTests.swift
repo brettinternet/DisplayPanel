@@ -2059,6 +2059,7 @@ final class DisplayHideAppTests: XCTestCase {
             var clock = Date()
             var journalID = "journal"
             var shows = 0
+            var shown: [String] = []
             var hides = 0
             let model = AppModel(
                 defaults: defaults, displayProvider: { connected }, now: { clock },
@@ -2066,7 +2067,10 @@ final class DisplayHideAppTests: XCTestCase {
                     self.multiHandoffStatus(removals, observations: [], journalID: journalID, baselineIdentity: "baseline")
                 },
                 sleepResumeHideDisplay: { _, _, _ in hides += 1; return .notRequested },
-                showDisplay: { _, _ in shows += 1; throw RecoveryError.unsafe("synthetic restore failure") },
+                showDisplay: { target, _ in
+                    shows += 1; shown.append(target)
+                    throw RecoveryError.unsafe("synthetic restore failure")
+                },
                 quiesceProtection: { $0(true, nil) }, displayWakeSettleDelay: 0.01
             )
             let action = DisplayAction(name: "Show both", steps: targets.map {
@@ -2093,16 +2097,18 @@ final class DisplayHideAppTests: XCTestCase {
             }
             try await waitUntil { result != nil }
             XCTAssertFalse(result?.ok == true, scenario)
-            XCTAssertEqual(result?.steps?.last?.outcome, .notRun, scenario)
+            // A Show that ran and failed doesn't keep the other display hidden.
+            XCTAssertEqual(result?.steps?.last?.outcome, scenario == "writer" ? .failed : .notRun, scenario)
             XCTAssertNil(model.runningDisplayAction, scenario)
-            XCTAssertEqual(shows, scenario == "writer" ? 1 : 0, scenario)
+            XCTAssertEqual(shows, scenario == "writer" ? 2 : 0, scenario)
             XCTAssertTrue(model.handoffStatus?.hasUnresolvedJournal == true, scenario)
             if scenario == "timeout" { XCTAssertTrue(result?.summary.contains("15 seconds") == true) }
             if scenario == "sleep" { model.displayWakeObserved(screensAwake: true) }
             model.displayReconfigured(display: targets[0].id, flags: .addFlag)
             model.displayParametersChanged()
             try await Task.sleep(nanoseconds: 60_000_000)
-            XCTAssertEqual(shows, scenario == "writer" ? 1 : 0, "no replay: \(scenario)")
+            XCTAssertEqual(shows, scenario == "writer" ? 2 : 0, "no replay: \(scenario)")
+            if scenario == "writer" { XCTAssertEqual(shown, targets.compactMap { $0.uuid.map { "journal|\($0)" } }, "each display is shown once") }
             XCTAssertEqual(completions, 1, scenario)
             XCTAssertEqual(hides, 0, scenario)
         }

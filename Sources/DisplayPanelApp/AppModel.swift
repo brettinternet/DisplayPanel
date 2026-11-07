@@ -4132,6 +4132,9 @@ final class AppModel: ObservableObject {
             } else if action.steps.count == 1, let onlyStep = stepResults.first,
                [.done, .partial, .noOp].contains(aggregate) {
                 summary = onlyStep.desktopSummary
+            } else if let failed = stepResults.first(where: { ![.done, .noOp, .skipped, .partial].contains($0.outcome) }),
+                      failed.index < stoppingAtIndex ?? .max {
+                summary = "Step \(failed.index) of \(action.steps.count) didn’t complete: \(failed.desktopSummary)"
             } else if stoppingAtIndex == nil, aggregate == .partial {
                 let steps = stepResults.filter { $0.outcome == .partial }.map { "\($0.index)" }
                 summary = "Action completed; check the monitor input for Step \(steps.joined(separator: ", "))."
@@ -4173,6 +4176,13 @@ final class AppModel: ObservableObject {
             self.lastDisplayActionResultID = id
             self.onStatusChange?()
             completion?(response)
+        }
+
+        // Each Show revalidates its own display, so a Show that ran and failed
+        // in a run of Shows doesn't keep the later steps' displays hidden.
+        func continuesPastFailedShow(_ offset: Int) -> Bool {
+            offset + 1 < action.steps.count && action.steps[offset...].allSatisfy { $0.effect == .show } &&
+                !self.runningActionInterrupted && !self.displayLifecycleTransitioning
         }
 
         func appendNotRun(from index: Int) {
@@ -4290,7 +4300,7 @@ final class AppModel: ObservableObject {
                     desktopSummary: action.steps.count > 1 ? Self.boundedActionStepText(blocker.message) : Self.bounded(blocker.message),
                     windowMove: step.effect == .moveWindows
                         ? AppControlWindowMoveResult(refusalReason: blocker.windowMoveReason) : nil))
-                stoppingOutcome = outcome
+                stoppingOutcome = stoppingOutcome ?? outcome
                 stoppingAtIndex = offset + 1
                 appendNotRun(from: offset + 1)
                 finishRun()
@@ -4371,7 +4381,8 @@ final class AppModel: ObservableObject {
                         runStep(offset + 1)
                     }
                 } else {
-                    stoppingOutcome = resultOutcome
+                    stoppingOutcome = stoppingOutcome ?? resultOutcome
+                    if continuesPastFailedShow(offset) { runStep(offset + 1); return }
                     stoppingAtIndex = offset + 1
                     appendNotRun(from: offset + 1)
                     finishRun()
