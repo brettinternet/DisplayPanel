@@ -402,7 +402,8 @@ final class DisplayHideTests: XCTestCase {
                         modeAvailable = true
                         self.topology.snapshot = scenario == "separate" ? baseline : bothHidden
                         if scenario == "identity-after" {
-                            self.topology.snapshot = try! self.snapshot { $0[1]["id"] = 88 }
+                            // A renumbering alone is adopted; changed hardware identity is not.
+                            self.topology.snapshot = try! self.snapshot { $0[1]["id"] = 88; $0[1]["serial"] = 999 }
                         }
                     }
                 }), preflightModes: { _ in
@@ -1061,35 +1062,33 @@ final class DisplayHideTests: XCTestCase {
         XCTAssertEqual(writerCount, 0)
     }
 
-    /// macOS can renumber displays within one boot when a monitor relinks;
-    /// the journal then can never pass Show and must still be recoverable.
-    func testSameBootRenumberedDisplaysOfferSessionRecovery() throws {
+    /// macOS can renumber displays within one boot when a monitor relinks.
+    /// Inspection adopts macOS's UUID-to-ID mapping so the Hide stays
+    /// showable, but changed hardware identity still needs session recovery.
+    func testSameBootRenumberedDisplaysKeepShowOnlyWithUnchangedIdentity() throws {
         let old = try previousBootJournal()
         topology.snapshot = try snapshot { displays in
-            displays[2]["active"] = false
-            displays[2]["mirrorUUID"] = self.sourceUUID
-        }
-        XCTAssertNil(try controller().inspect().sessionRecovery, "unchanged IDs keep normal Show")
-
-        topology.snapshot = try snapshot { displays in
             displays[0]["id"] = 8
             displays[1]["id"] = 7
+            displays[1]["serial"] = 99
             displays[2]["active"] = false
             displays[2]["mirrorUUID"] = self.sourceUUID
         }
-        XCTAssertThrowsError(try old.snapshot.validateRestoration(to: topology.snapshot))
         XCTAssertNotNil(try XCTUnwrap(controller().inspect().sessionRecovery).blocker)
+        XCTAssertEqual(try store.load().snapshot, old.snapshot, "changed hardware identity is never renumbered")
 
         topology.snapshot = try snapshot { displays in
             displays[0]["id"] = 8
             displays[1]["id"] = 7
-            displays[2]["y"] = -20
+            displays[2]["active"] = false
+            displays[2]["mirrorUUID"] = self.sourceUUID
         }
-        let confirmation = try XCTUnwrap(controller().inspect().sessionRecovery)
-        XCTAssertTrue(confirmation.canRecover)
-        try controller().recoverSession(confirmation, hideAgain: false)
-        XCTAssertFalse(try controller().inspect().hasUnresolvedRecovery)
-        XCTAssertEqual(try store.load().supersedesJournalID, old.id)
+        XCTAssertNil(try controller().inspect().sessionRecovery)
+        let renumbered = try store.load()
+        XCTAssertEqual(renumbered.id, old.id)
+        XCTAssertEqual(renumbered.snapshot.displays.map(\.id), [8, 7, 9])
+        XCTAssertEqual(renumbered.publicMirrorSession?.removals.map(\.targetID), [7, 9])
+        XCTAssertEqual(renumbered.publicMirrorSession?.removals.map(\.sourceID), [8, 8])
         XCTAssertEqual(writerCount, 0)
     }
 

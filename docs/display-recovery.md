@@ -17,7 +17,7 @@ Run these from your logged-in desktop session.
 | `recovery rehearse --timeout 5s` | No | Save, start the helper, verify at the deadline |
 | `recovery restore [--display UUID]` | **Yes** | Restore one removed display (or a saved layout), then verify |
 | `recovery guard --timeout 15s` | **Yes** | Save, then restore on deadline, exit or signal |
-| `recovery keep-shown --consent-recovery` | No | Archive a previous-boot or renumbered public Hide journal and accept the current desktop |
+| `recovery keep-shown --consent-recovery` | No | Archive a previous-boot or unmatched renumbered public Hide journal and accept the current desktop |
 | `recovery hide-again --consent-recovery` | **Yes** | Archive the old journal and hide its targets using a fresh baseline; no input switching |
 
 ```text
@@ -136,9 +136,15 @@ turn off mirroring in System Settings → Displays.
 
 A reboot ends the old Hide session. Numeric display and mode IDs may now belong
 to different things, so DisplayPanel never restores or edits the old baseline to
-make its checks pass. The same applies within one boot when macOS renumbers the
-captured displays, for example after a monitor returns from another input: Show
-refuses the stale IDs and the journal is offered for this recovery instead.
+make its checks pass.
+
+Within one boot, macOS can also renumber the captured displays, for example
+when a Show input return relinks two monitors. Inspection and Show then adopt
+macOS's current UUID-to-ID mapping, but only when the boot session, OS build,
+user and display set are unchanged and every display keeps its vendor, model,
+serial, built-in flag, connector and transport location. Mode attributes, layout
+and profiles are still verified exactly, and Show finishes normally. Anything
+less is offered for the recovery below.
 
 When all captured monitors return as separate, awake displays with the same
 stable identities, DisplayPanel compares two matching observations. If the complete

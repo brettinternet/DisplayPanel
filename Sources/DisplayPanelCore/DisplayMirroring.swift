@@ -818,6 +818,7 @@ struct MirrorController {
         }
         if journal.state.resolved && noOpWhenAlreadyResolved { return journal }
         let initialCurrent = try engine.capture()
+        try adoptRenumbering(&journal, current: initialCurrent, store: store)
         reconcileSession(&journal, current: initialCurrent, store: store)
         guard let reconciled = journal.publicMirrorSession else {
             throw RecoveryError.unsafe("public-mirror session disappeared; keep the journal")
@@ -877,6 +878,11 @@ struct MirrorController {
         let current = try prepareShow(journal, baseline: session.baseline, target: target, source: source,
                                       store: store, returnInputBeforeRestore: returnInputBeforeRestore,
                                       relinkInput: relinkInput)
+        try adoptRenumbering(&journal, current: current, store: store)
+        guard let renumbered = journal.publicMirrorSession else {
+            throw RecoveryError.unsafe("public-mirror session disappeared; keep the journal")
+        }
+        session = renumbered
         guard MirrorSessionTopology.matches(baseline: session.baseline, removals: session.removals, current: current) ||
                 MirrorSessionTopology.canRestoreFinalLayout(baseline: session.baseline, removals: session.removals,
                                                            targetUUID: selected.targetUUID, current: current) ||
@@ -962,15 +968,21 @@ struct MirrorController {
                              target: RecoveryDisplay, source: RecoveryDisplay, store: RecoveryStore,
                              returnInputBeforeRestore: ((RecoveryDisplay) throws -> Bool)?,
                              relinkInput: ((RecoveryDisplay) throws -> Bool)?) throws -> RecoverySnapshot {
-        let current = try engine.capture()
-        try baseline.validateRestoration(to: current)
-        try validateShowAvailability(target: target, source: source)
         let removals = journal.publicMirrorSession?.removals ?? []
-        func showModes(_ observed: RecoverySnapshot) -> RecoverySnapshot {
-            MirrorSessionTopology.showModeBaseline(baseline, removals: removals, showing: target.uuid, current: observed)
+        // The input return can make macOS renumber displays; the caller
+        // adopts that into the journal once the topology settles.
+        func readyModes(_ observed: RecoverySnapshot) throws -> RecoverySnapshot {
+            let renumbered = try baseline.renumbered(to: observed)
+            try renumbered.validateRestoration(to: observed)
+            try validateShowAvailability(target: renumbered.displays.first { $0.uuid == target.uuid } ?? target,
+                                         source: renumbered.displays.first { $0.uuid == source.uuid } ?? source)
+            return MirrorSessionTopology.showModeBaseline(renumbered, removals: removals, showing: target.uuid,
+                                                          current: observed)
         }
+        let current = try engine.capture()
+        let modes = try readyModes(current)
         do {
-            try preflightModes(showModes(current))
+            try preflightModes(modes)
         } catch let error as RecoveryError {
             // Only the selected monitor's missing mode can be addressed by
             // this input return. Never switch another removal's input.
@@ -1016,9 +1028,7 @@ struct MirrorController {
                 }
                 do {
                     let observed = try engine.capture()
-                    try baseline.validateRestoration(to: observed)
-                    try validateShowAvailability(target: target, source: source)
-                    try preflightModes(showModes(observed))
+                    try preflightModes(readyModes(observed))
                     let identity = observed.stableTopologyIdentity()
                     if identity != preIdentity { relinked = true }
                     note(attempt, "ready#\(identity?.prefix(8) ?? "none")")
@@ -1124,6 +1134,18 @@ struct MirrorController {
             throw RecoveryError.unsafe(selected.failure ?? "selected removal needs attention; inspect recovery status")
         }
         return journal
+    }
+
+    /// Caller holds both locks. Persists a same-boot renumbering (see
+    /// RecoveryJournal.renumbered) before anything reads the session's IDs.
+    /// Anything it cannot prove is left for the stale-ID recovery path.
+    func adoptRenumbering(_ journal: inout RecoveryJournal, current: RecoverySnapshot, store: RecoveryStore) throws {
+        guard let renumbered = try? journal.renumbered(to: current) else { return }
+        try store.save(renumbered)
+        let ids = zip(journal.snapshot.displays, renumbered.snapshot.displays)
+            .map { "\($1.name ?? $1.uuid) \($0.id)→\($1.id)" }.joined(separator: ", ")
+        showSettleLogger.notice("renumbered journal=\(renumbered.id.uuidString, privacy: .public) \(ids, privacy: .public)")
+        journal = renumbered
     }
 
     func reconcileSession(_ journal: inout RecoveryJournal, current: RecoverySnapshot, store: RecoveryStore) {

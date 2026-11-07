@@ -16,10 +16,10 @@ enum PublicMirrorRemovalState: String, Codable {
 struct PublicMirrorRemoval: Codable, Equatable, Identifiable {
     let id: UUID
     let targetUUID: String
-    let targetID: UInt32
+    var targetID: UInt32
     let sourceUUID: String
-    let sourceID: UInt32
-    let beforeOperation: RecoverySnapshot
+    var sourceID: UInt32
+    var beforeOperation: RecoverySnapshot
     var state: PublicMirrorRemovalState
     var failure: String?
     // Durable pre-Show snapshot. Partial-Show postconditions must survive a
@@ -40,7 +40,7 @@ struct PublicMirrorRemoval: Codable, Equatable, Identifiable {
 
 struct PublicMirrorSession: Codable, Equatable {
     let version: Int
-    let baseline: RecoverySnapshot
+    var baseline: RecoverySnapshot
     var removals: [PublicMirrorRemoval]
 
     init(baseline: RecoverySnapshot, removals: [PublicMirrorRemoval]) {
@@ -54,7 +54,7 @@ struct RecoveryJournal: Codable {
     var version: Int
     let id: UUID
     let createdAt: Date
-    let snapshot: RecoverySnapshot
+    var snapshot: RecoverySnapshot
     let verifyOnly: Bool
     let deadline: Date?
     var state: RecoveryState

@@ -1421,6 +1421,58 @@ final class DisplayMirroringTests: XCTestCase {
         }
     }
 
+    // Regression (2026-11-07): the input return relinked both monitors and
+    // macOS swapped their numeric IDs mid-settle. Show must adopt macOS's
+    // UUID-to-ID mapping and finish, but never across changed hardware identity.
+    func testShowAdoptsSameBootRenumberingOnlyWithUnchangedIdentity() throws {
+        for changedSerial in [false, true] {
+            let store = RecoveryStore(url: directory.appendingPathComponent("renumbered-\(changedSerial).json"))
+            let original = try snapshot()
+            let mirrored = try snapshot { $0[1]["mirrorUUID"] = self.sourceUUID; $0[1]["active"] = false }
+            let swapped = try changedSnapshot(mirrored) { displays in
+                displays[0]["id"] = 8
+                displays[1]["id"] = 7
+                if changedSerial { displays[1]["serial"] = 99 }
+            }
+            var current = original
+            var restored: [RecoverySnapshot] = []
+            var sut = HandoffController(mirror: controller(original), report: { _ in })
+            sut.reselectPause = {}
+            sut.mirror.records = { self.records(current) }
+            sut.mirror.engine.capture = { current }
+            sut.mirror.engine.apply = { restored.append($0); current = $0 }
+            sut.mirror.transaction = MirrorTransaction(
+                begin: { OpaquePointer(bitPattern: 1)! }, stage: { _, _, _ in },
+                complete: { _, _ in current = mirrored }, cancel: { _ in })
+            try sut.away(selector: "8", source: "7", input: nil, store: store)
+            let id = try store.load().id
+            sut.open = { uuid, allowInactive in
+                let target = try DDC.resolveDisplay(selector: uuid, records: self.records(current), allowInactive: allowInactive)
+                return (target, DDCChannel(getVCP: { _ in (17, 0) }, setVCP: { _, _ in XCTFail("fake selector only") }))
+            }
+            sut.select = { requested, _, displayID, uuid, originalInput in
+                current = swapped
+                return DDCInputSelection(displayID: displayID, uuid: uuid, original: originalInput, requested: requested,
+                    observed: requested, outcome: .verified, detail: nil)
+            }
+            if changedSerial {
+                XCTAssertThrowsError(try sut.guardedBack(expectedJournalID: id, input: 15, store: store)) { error in
+                    XCTAssertTrue(error.localizedDescription.contains("refusing to guess"), error.localizedDescription)
+                }
+                XCTAssertTrue(restored.isEmpty)
+                XCTAssertFalse(try store.load().state.resolved)
+                XCTAssertEqual(try store.load().snapshot, original, "a refused renumbering keeps the journal as captured")
+                continue
+            }
+            XCTAssertEqual(try sut.guardedBack(expectedJournalID: id, input: 15, store: store).state, .verified)
+            let saved = try store.load()
+            XCTAssertTrue(saved.state.resolved)
+            XCTAssertEqual(saved.snapshot.displays.map(\.id), [8, 7, 9])
+            XCTAssertEqual(saved.publicMirrorSession?.removals.map(\.targetID), [7])
+            XCTAssertEqual(restored.last?.displays.map(\.id), [8, 7, 9], "restore writes macOS's current IDs")
+        }
+    }
+
     func testShowAttemptsKnownReturnInputWhenPreReadIsMalformed() throws {
         let original = try snapshot()
         let mirrored = try snapshot { $0[1]["mirrorUUID"] = self.sourceUUID; $0[1]["active"] = false }

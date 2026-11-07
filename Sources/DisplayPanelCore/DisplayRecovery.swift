@@ -52,7 +52,7 @@ public struct RecoveryMode: Codable, Equatable {
 
 struct RecoveryDisplay: Codable, Equatable {
     let uuid: String
-    let id: UInt32
+    var id: UInt32
     let name: String?
     let vendor: UInt32
     let model: UInt32
@@ -244,6 +244,38 @@ struct RecoverySnapshot: Codable, Equatable {
                 throw RecoveryError.unsafe("ICC profile changed for \(original.uuid); no proven creation-time-only match; manual recovery required")
             }
         }
+    }
+
+    /// macOS can renumber displays within a boot when a monitor relinks. Only
+    /// macOS's own UUID-to-ID mapping translates them, and only when the same
+    /// session, OS, user and a one-to-one display set keep their hardware and
+    /// connection identity. Nothing else (modes, layout, profiles) is relaxed.
+    func renumbered(to current: Self) throws -> Self {
+        guard bootSession == current.bootSession, osBuild == current.osBuild, userID == current.userID else {
+            throw RecoveryError.unsafe("OS, boot session, or user changed; manual recovery required")
+        }
+        guard !displays.isEmpty, Set(displays.map(\.uuid)).count == displays.count,
+              Set(current.displays.map(\.uuid)).count == current.displays.count,
+              Set(current.displays.map(\.id)).count == current.displays.count,
+              Set(displays.map(\.uuid)) == Set(current.displays.map(\.uuid)) else {
+            throw RecoveryError.unsafe("display set changed; reconnect missing displays first; private re-enable requires qualified retained identity")
+        }
+        let renumbered = try displays.map { saved in
+            let now = current.displays.first { $0.uuid == saved.uuid }!
+            guard saved.id == now.id || (
+                saved.vendor == now.vendor && saved.model == now.model && saved.serial == now.serial &&
+                    saved.builtin == now.builtin && saved.connector == now.connector &&
+                    saved.identityEvidence?.transport == now.identityEvidence?.transport &&
+                    saved.identityEvidence?.transportLocation == now.identityEvidence?.transportLocation
+            ) else {
+                throw RecoveryError.unsafe("identity or connector changed for \(saved.name ?? saved.uuid); refusing to guess")
+            }
+            var display = saved
+            display.id = now.id
+            return display
+        }
+        return Self(bootSession: bootSession, osBuild: osBuild, userID: userID,
+                    displays: renumbered, hostModel: hostModel)
     }
 
     func verify(_ current: Self) throws {

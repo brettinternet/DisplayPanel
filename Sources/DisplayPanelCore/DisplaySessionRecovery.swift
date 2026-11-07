@@ -32,6 +32,40 @@ extension RecoveryJournal {
         }
     }
 
+    /// A Hide session translated to macOS's current numbering, so Show can
+    /// finish after a same-boot renumbering; nil when nothing changed. A
+    /// valid journal shares one UUID-to-ID mapping across all its snapshots.
+    func renumbered(to current: RecoverySnapshot) throws -> RecoveryJournal? {
+        guard isPublicMirrorOnly, var session = publicMirrorSession else { return nil }
+        let baseline = try snapshot.renumbered(to: current)
+        guard baseline != snapshot else { return nil }
+        let ids = Dictionary(uniqueKeysWithValues: baseline.displays.map { ($0.uuid, $0.id) })
+        func translate(_ saved: RecoverySnapshot) -> RecoverySnapshot {
+            RecoverySnapshot(bootSession: saved.bootSession, osBuild: saved.osBuild, userID: saved.userID,
+                             displays: saved.displays.map { display in
+                                 var display = display
+                                 display.id = ids[display.uuid] ?? display.id
+                                 return display
+                             }, hostModel: saved.hostModel)
+        }
+        session.baseline = baseline
+        for index in session.removals.indices {
+            session.removals[index].targetID = ids[session.removals[index].targetUUID] ?? 0
+            session.removals[index].sourceID = ids[session.removals[index].sourceUUID] ?? 0
+            session.removals[index].beforeOperation = translate(session.removals[index].beforeOperation)
+            session.removals[index].restoreFrom = session.removals[index].restoreFrom.map(translate)
+        }
+        var journal = self
+        journal.snapshot = baseline
+        journal.publicMirrorSession = session
+        if session.removals.count == 1, mirrorTargetID != nil || mirrorSourceID != nil {
+            journal.mirrorTargetID = session.removals[0].targetID
+            journal.mirrorSourceID = session.removals[0].sourceID
+        }
+        try journal.validate()
+        return journal
+    }
+
     var recoveryPairs: [(target: String, source: String)] {
         if let session = publicMirrorSession {
             return session.removals.filter { !$0.state.resolved }.map { ($0.targetUUID, $0.sourceUUID) }

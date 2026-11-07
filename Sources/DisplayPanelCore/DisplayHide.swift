@@ -205,6 +205,7 @@ public struct DisplayHideController {
         }
 
         var journal = try store.load()
+        try mirror.adoptRenumbering(&journal, current: current, store: store)
         if let recovery = mirror.sessionRecovery(journal: journal, current: current, available: records) {
             if !preservingMirrorIntent, recovery.canAutomaticallyKeepShown {
                 try mirror.recoverCurrentDesktopLocked(recovery, hideAgain: false, automatic: true, store: store)

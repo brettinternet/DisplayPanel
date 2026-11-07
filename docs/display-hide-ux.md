@@ -192,7 +192,7 @@ Removed displays stay listed even when disconnected. Reconnect the same
 monitor, then **Check Again**. Recovery problems also appear as a banner and in
 the menu as **Review Display Recovery…**.
 
-After reboot, or when macOS renumbers the hidden displays, **Recover hidden
+After reboot, or when macOS renumbers displays it can't match by identity, **Recover hidden
 displays** offers **Hide again** or **Keep displays shown** for the whole Hide set. Both accept the current layout;
 neither shows displays or switches inputs. Missing monitors must reconnect and
 existing mirrors must be turned off first. See
