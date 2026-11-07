@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.9
 
 - Showing the hidden main display while other displays stay hidden makes it main again; Restore repairs one that came back without the main role.
 - Keep other hidden displays marked Hidden while one needs recovery; their Show says which display to restore first.
