@@ -6,6 +6,7 @@
 - Name displays hidden by mirroring instead of "Display 1".
 - Say why arrangement protection is paused, such as "Paused while displays sleep or are off.", instead of recovery errors.
 - Warn when `dp app` talks to a newer DisplayPanel; the README shows how to link the app's bundled `dp`.
+- Hide a display that other hidden displays mirror onto; their mirrors move to its source.
 
 ## 0.9.6
 

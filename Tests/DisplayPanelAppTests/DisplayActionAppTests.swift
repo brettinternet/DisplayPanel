@@ -695,12 +695,13 @@ final class DisplayActionAppTests: XCTestCase {
         model.setHideEnabled(true, for: try XCTUnwrap(displays.first { $0.uuid == mainUUID }))
         model.setHideSource(alternateUUID, for: mainUUID)
         let removeMainSetup = model.currentReviewedRemovalSetup(for: mainUUID)
-        let hiddenEarlierSource = DisplayAction(name: "Remove earlier mirror source", steps: [
+        // Removing an earlier step's mirror source moves that removal onto its source.
+        let removeEarlierSource = DisplayAction(name: "Remove earlier mirror source", steps: [
             DisplayActionStep(target: target, effect: .removeFromDesktop, reviewedRemoval: reviewedTarget),
             DisplayActionStep(target: main, effect: .removeFromDesktop, reviewedRemoval: removeMainSetup)
         ])
-        XCTAssertTrue(model.displayActionValidation(for: hiddenEarlierSource)?.contains("Step 2:") == true)
-        XCTAssertThrowsError(try model.saveDisplayAction(hiddenEarlierSource))
+        XCTAssertNil(model.displayActionValidation(for: removeEarlierSource))
+        try model.saveDisplayAction(removeEarlierSource)
 
         let stateDependent = DisplayAction(name: "State dependent visibility", steps: [
             DisplayActionStep(target: main, effect: .blackOut),
@@ -1110,6 +1111,18 @@ final class DisplayActionAppTests: XCTestCase {
             removeB
         ])
         try model.saveDisplayAction(action)
+
+        // Removing the source without Show first moves the removed target onto its source.
+        XCTAssertNil(model.hideReadiness(for: try XCTUnwrap(model.hideConfiguration(for: mainUUID))))
+        let removeBoth = DisplayAction(name: "Remove target then its source", steps: [
+            DisplayActionStep(
+                target: DisplayIdentitySnapshot(target), effect: .removeFromDesktop,
+                reviewedRemoval: ReviewedRemovalSetup(removeEnabled: true, sourceUUID: mainUUID, awayInput: 0x11)
+            ),
+            removeB
+        ])
+        try model.saveDisplayAction(removeBoth)
+        XCTAssertNil(model.displayActionRunBlocker(for: removeBoth))
 
         XCTAssertNil(model.displayActionRunBlocker(for: action), "projected Show must release the verified source and its live mirror-set membership")
         let response = await run(model, id: action.id)

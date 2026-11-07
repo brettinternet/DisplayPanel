@@ -1496,7 +1496,6 @@ final class AppModel: ObservableObject {
 
     private func staticDisplayActionConflict(in action: DisplayAction) -> DisplayActionValidationError? {
         var hidden = Set<String>()
-        var removalSources: [String: String] = [:]
         for (offset, step) in action.steps.enumerated() {
             guard let target = step.target else { continue }
             let targetKey = target.uuid.lowercased()
@@ -1512,17 +1511,12 @@ final class AppModel: ObservableObject {
                     let sourceName = displays.first(where: { $0.uuid?.lowercased() == sourceKey })?.settingsName ?? source
                     return .staticConflict(offset + 1, "its mirror source \(sourceName) is hidden by an earlier step.")
                 }
-                if removalSources.values.contains(targetKey) {
-                    return .staticConflict(offset + 1, "this display is a mirror source for an earlier Remove step.")
-                }
-                removalSources[targetKey] = sourceKey
             }
             switch step.effect {
             case .blackOut, .removeFromDesktop:
                 hidden.insert(targetKey)
             case .show:
                 hidden.remove(targetKey)
-                removalSources.removeValue(forKey: targetKey)
             case .moveWindows, .restoreArrangement:
                 break
             }
@@ -1692,7 +1686,10 @@ final class AppModel: ObservableObject {
                 case .blackOut: hiddenBlackouts.insert(key)
                 case .removeFromDesktop:
                     hiddenRemovals.insert(key)
-                    if let source = step.reviewedRemoval?.sourceUUID { sources[key] = source.lowercased() }
+                    if let source = step.reviewedRemoval?.sourceUUID?.lowercased() {
+                        for (follower, followed) in sources where followed == key { sources[follower] = source }
+                        sources[key] = source
+                    }
                 case .show:
                     hiddenBlackouts.remove(key)
                     hiddenRemovals.remove(key)
@@ -2482,18 +2479,15 @@ final class AppModel: ObservableObject {
             }
             hiddenRemovals.remove(targetUUID.lowercased())
         }
-        let projectedMirrorSources = projectedSources?.values.contains(targetUUID.lowercased()) == true
-        let liveMirrorSourceStillProjected = projectedSources == nil && isMirrorSource(targetUUID)
-        if projectedMirrorSources || liveMirrorSourceStillProjected {
-            return .unavailable("Another removed display mirrors onto this display. Show that display first.")
-        }
         if !verifiedRemovalNoOp {
             if let reason = removalIneligibleReason(for: target) {
                 return .unavailable(reason)
             }
-            let targetMirrorReleasedByProjection = projectedSources != nil && isMirrorSource(targetUUID) &&
-                projectedSources?.values.contains(targetUUID.lowercased()) != true
-            guard !isDisplayMirrored(target.id) || targetMirrorReleasedByProjection else {
+            // Removed displays mirroring onto this one move with it to its source.
+            if isDisplayMirrored(target.id), !journalVerifiedHiddenMirrorSources.contains(where: { $0.id == target.id }) {
+                if isMirrorSource(targetUUID) {
+                    return .recoveryRequired("A removed display mirrors onto this one and needs recovery.")
+                }
                 return .unavailable("macOS is already mirroring this display. Turn off mirroring in System Settings → Displays first.")
             }
         }
@@ -4236,7 +4230,10 @@ final class AppModel: ObservableObject {
                 projectedBlackouts.insert(key)
             case .removeFromDesktop:
                 projectedRemovals.insert(key)
-                if let source = step.reviewedRemoval?.sourceUUID { projectedSources[key] = source.lowercased() }
+                if let source = step.reviewedRemoval?.sourceUUID?.lowercased() {
+                    for (follower, followed) in projectedSources where followed == key { projectedSources[follower] = source }
+                    projectedSources[key] = source
+                }
             case .show:
                 if projectedRemovals.contains(key) { removalShowSteps.insert(offset) }
                 projectedBlackouts.remove(key)

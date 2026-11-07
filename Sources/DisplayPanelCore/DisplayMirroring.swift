@@ -57,10 +57,6 @@ struct MirrorTransaction {
         try check(CGConfigureDisplayOrigin($0, $1, $2, $3), "stage wake origin")
     }
 
-    func apply(target: UInt32, source: UInt32, revalidate: () throws -> Void) throws {
-        try apply(removals: [(target, source)], origins: [], revalidate: revalidate)
-    }
-
     func apply(removals: [(UInt32, UInt32)], origins: [(UInt32, Int32, Int32)],
                revalidate: () throws -> Void) throws {
         try revalidate()
@@ -127,6 +123,21 @@ enum HiddenMirrorTopology {
 enum MirrorSessionTopology {
     static func activeRemovals(_ removals: [PublicMirrorRemoval]) -> [PublicMirrorRemoval] {
         removals.filter { !$0.state.resolved }
+    }
+
+    /// Hiding a display that other removals mirror onto moves them onto its
+    /// source. They keep the old source until the move verifies, so an
+    /// interrupted Hide matches either the old or the moved topology.
+    static func moving(_ removals: [PublicMirrorRemoval], onto mover: PublicMirrorRemoval) -> [PublicMirrorRemoval] {
+        removals.map { removal in
+            guard !removal.state.resolved, removal.id != mover.id,
+                  removal.sourceUUID == mover.targetUUID else { return removal }
+            var moved = removal
+            moved.sourceUUID = mover.sourceUUID
+            moved.sourceID = mover.sourceID
+            moved.movedBy = mover.id
+            return moved
+        }
     }
 
     static func matches(baseline: RecoverySnapshot, removals: [PublicMirrorRemoval],
@@ -434,9 +445,6 @@ struct MirrorController {
         guard !activeRemovals.contains(where: { $0.targetUUID == targetSaved.uuid }) else {
             throw RecoveryError.unsafe("this display is already removed from the desktop")
         }
-        guard !activeRemovals.contains(where: { $0.sourceUUID == targetSaved.uuid }) else {
-            throw RecoveryError.unsafe("this display is a source for another removed display; show those displays first")
-        }
         guard !activeRemovals.contains(where: { $0.targetUUID == sourceSaved.uuid }) else {
             throw RecoveryError.unsafe("cannot remove a display that another removal mirrors onto")
         }
@@ -461,6 +469,10 @@ struct MirrorController {
         try preflightModes(baseline)
 
         let removal = PublicMirrorRemoval(target: targetSaved, source: sourceSaved, beforeOperation: current)
+        // Removals mirroring onto the target move with it, staged first so the
+        // target is no longer a mirror source when it joins the source's set.
+        let followers = activeRemovals.filter { $0.sourceUUID == targetSaved.uuid }
+        let pairs = followers.map { ($0.targetID, sourceRecord.id) } + [(target.id, sourceRecord.id)]
         session.removals.append(removal)
         journal.version = 3
         journal.publicMirrorSession = session
@@ -479,7 +491,7 @@ struct MirrorController {
             // Durable per-display intent precedes both input switching and
             // topology changes. A second Hide cannot replace healthy entries.
             try beforeMirror(targetSaved)
-            try transaction.apply(target: target.id, source: sourceRecord.id) {
+            try transaction.apply(removals: pairs, origins: []) {
                 try current.verify(engine.capture())
                 if let wakeExpectation, let existing {
                     try validateWakeResumeWriteBoundary(
@@ -492,7 +504,8 @@ struct MirrorController {
             try engine.converge {
                 let observedTopology = try engine.capture()
                 guard let observed = journal.publicMirrorSession,
-                      MirrorSessionTopology.matches(baseline: baseline, removals: observed.removals,
+                      MirrorSessionTopology.matches(baseline: baseline,
+                                                    removals: MirrorSessionTopology.moving(observed.removals, onto: removal),
                                                     current: observedTopology),
                       currentTarget.main || observedTopology.displays.first(where: \.main)?.uuid == mainBefore else {
                     throw RecoveryError.unsafe("mirror session verification mismatch")
@@ -502,6 +515,7 @@ struct MirrorController {
                   let index = savedSession.removals.firstIndex(where: { $0.id == removal.id }) else {
                 throw RecoveryError.unsafe("durable removal entry disappeared")
             }
+            savedSession.removals = MirrorSessionTopology.moving(savedSession.removals, onto: removal)
             savedSession.removals[index].state = .mirrored
             savedSession.removals[index].failure = nil
             journal.publicMirrorSession = savedSession
@@ -1203,6 +1217,16 @@ struct MirrorController {
              MirrorSessionTopology.matchesWakeLayout(baseline: session.baseline, removals: session.removals,
                                                      current: current)) { return }
         var changed = false
+        // An interrupted Hide that moved other removals completes only when
+        // the moved topology is observed; otherwise they keep their source.
+        for mover in MirrorSessionTopology.activeRemovals(session.removals) {
+            let moved = MirrorSessionTopology.moving(session.removals, onto: mover)
+            if moved != session.removals,
+               MirrorSessionTopology.matches(baseline: session.baseline, removals: moved, current: current) {
+                session.removals = moved
+                changed = true
+            }
+        }
         if MirrorSessionTopology.matches(baseline: session.baseline, removals: session.removals, current: current) {
             for index in session.removals.indices where !session.removals[index].state.resolved {
                 if session.removals[index].state != .mirrored || session.removals[index].failure != nil ||

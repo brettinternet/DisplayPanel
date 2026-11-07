@@ -17,8 +17,11 @@ struct PublicMirrorRemoval: Codable, Equatable, Identifiable {
     let id: UUID
     let targetUUID: String
     var targetID: UInt32
-    let sourceUUID: String
+    // Changes only when a later Hide removes this display's source and moves
+    // the mirror onto that Hide's source (movedBy).
+    var sourceUUID: String
     var sourceID: UInt32
+    var movedBy: UUID?
     var beforeOperation: RecoverySnapshot
     var state: PublicMirrorRemovalState
     var failure: String?
@@ -146,9 +149,17 @@ struct RecoveryJournal: Codable {
                     try snapshot.validateRestoration(to: restoreFrom)
                     try RecoveryJournal(snapshot: restoreFrom).validate()
                 }
+                // A moved mirror's source was checked by the Hide that moved it.
+                let sourceOperation = try removal.movedBy.map { id -> RecoverySnapshot in
+                    guard let mover = publicMirrorSession.removals.first(where: { $0.id == id }),
+                          mover.id != removal.id else {
+                        throw RecoveryError.unsafe("invalid moved public mirror source")
+                    }
+                    return mover.beforeOperation
+                } ?? removal.beforeOperation
                 guard let operationTarget = removal.beforeOperation.displays.first(where: { $0.uuid == removal.targetUUID }),
                       operationTarget.mirrorUUID == nil, operationTarget.active,
-                      let operationSource = removal.beforeOperation.displays.first(where: { $0.uuid == removal.sourceUUID }),
+                      let operationSource = sourceOperation.displays.first(where: { $0.uuid == removal.sourceUUID }),
                       operationSource.active, operationSource.mirrorUUID == nil else {
                     throw RecoveryError.unsafe("invalid public mirror pre-operation topology")
                 }
