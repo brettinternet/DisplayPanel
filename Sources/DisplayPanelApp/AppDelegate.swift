@@ -730,7 +730,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let model else { return }
         model.refreshHandoffStatus()
         guard let status = model.handoffStatus, status.hasUnresolvedJournal else {
-            NSApp.terminate(nil)
+            terminateFromRunLoop()
             return
         }
         let unresolved = status.removals.filter(\.isUnresolved)
@@ -872,7 +872,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return controlResponse(ok: false, summary: message, error: message, outcome: .busy)
             }
             quitKeepingJournal = true
-            DispatchQueue.main.async { NSApp.terminate(nil) }
+            terminateFromRunLoop()
             return controlResponse(ok: true, summary: "Quitting")
         }
         return controlResponse(ok: true)
@@ -922,6 +922,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    /// Quits from a run-loop timer. Inside a main-queue job (a Task or completion),
+    /// `.terminateLater` would wait on main-queue work that can't run until that job returns.
+    private func terminateFromRunLoop() {
+        NSApp.perform(#selector(NSApplication.terminate(_:)), with: nil, afterDelay: 0)
     }
 
     @objc private func screenConfigurationChanged(_ notification: Notification) {
