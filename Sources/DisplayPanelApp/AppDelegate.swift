@@ -769,7 +769,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             settingsWindowController?.selectDisplay(uuid: displayUUID)
         } else if let tab {
             settingsWindowController?.select(tab)
-        } else if model.displayRecoveryProblem != nil {
+        } else if model.shownRecoveryProblem != nil {
             if let uuid = model.handoffStatus?.target?.uuid {
                 settingsWindowController?.selectDisplay(uuid: uuid)
             } else {

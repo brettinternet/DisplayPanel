@@ -43,7 +43,7 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             // Displays shows recovery itself, on the affected display or above the
             // displays; elsewhere the banner leads there.
-            if let problem = model.displayRecoveryProblem, navigation.tab != .displays {
+            if let problem = model.shownRecoveryProblem, navigation.tab != .displays {
                 recoveryBanner(problem)
                     .padding([.top, .horizontal], 16)
             }

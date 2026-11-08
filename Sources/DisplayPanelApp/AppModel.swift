@@ -282,6 +282,9 @@ final class AppModel: ObservableObject {
     private var waitingForDisplayRuleIDs = Set<UUID>()
     private var protectionRearmRequired = false
     private var sleepHideResumeIntent: SleepHideResumeIntent?
+    /// The journal and its displays that were verified Hidden when displays
+    /// began sleeping or changing.
+    private var lifecycleHiddenTargets: (journalID: String, uuids: Set<String>)?
     private var sleepLifecycleActive = false
     private var screensAwakeAfterSleep = false
     private var sleepWakeSettlement: Task<Void, Never>?
@@ -3165,6 +3168,11 @@ final class AppModel: ObservableObject {
                 tile.action = .show
                 return
             }
+            if let uuid = tile.uuid, holdsHiddenThroughLifecycle {
+                tile.action = .show
+                tile.actionBlocker = showWait(allowingInputReturnWait: canWaitForInputReturnShow([uuid]))?.localizedDescription
+                return
+            }
             if let uuid = tile.uuid, let off = handoffStatus?.turnedOff(for: uuid) {
                 tile.action = .show
                 tile.actionBlocker = off.canShow ? showWait()?.localizedDescription
@@ -3206,7 +3214,7 @@ final class AppModel: ObservableObject {
         default:
             break
         }
-        if isBlackoutHidden(uuid) { return .hidden }
+        if isBlackoutHidden(uuid) || isJournalTarget && holdsHiddenThroughLifecycle { return .hidden }
         if isJournalTarget, let uuid, let off = handoffStatus?.turnedOff(for: uuid) {
             return off.state == "off" && off.canShow ? .hidden : .needsRecovery
         }
@@ -3247,6 +3255,26 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Hidden displays read as asleep or unmirrored until they finish waking or
+    /// changing. Displays verified Hidden before that keep showing Hidden; the
+    /// settled inspection decides whether they need recovery.
+    private var holdsHiddenThroughLifecycle: Bool {
+        guard displayLifecycleTransitioning, handoffInspectionFailure == nil,
+              let held = lifecycleHiddenTargets, let status = handoffStatus,
+              status.state != .busy, status.journalID == held.journalID else { return false }
+        return Self.unresolvedTargetUUIDs(status) == held.uuids
+    }
+
+    private static func unresolvedTargetUUIDs(_ status: DisplayHandoffStatus) -> Set<String> {
+        Set((status.removals.filter(\.isUnresolved).map(\.target) + status.turnedOff.filter(\.isUnresolved).map(\.target))
+            .map { $0.uuid.lowercased() })
+    }
+
+    /// The recovery problem Settings shows.
+    var shownRecoveryProblem: String? {
+        holdsHiddenThroughLifecycle ? nil : displayRecoveryProblem
+    }
+
     /// A hidden display that came back connected but unmirrored and without a
     /// desktop is showing another input; only the monitor's own menu brings it back.
     func offInputRecoveryNote(for tile: DisplayTile) -> String? {
@@ -3259,7 +3287,7 @@ final class AppModel: ObservableObject {
     /// A recovery problem that no display shows, such as an inspection failure
     /// or a journal without a target display; Displays shows it above the displays.
     var pageRecoveryProblem: String? {
-        guard let problem = displayRecoveryProblem,
+        guard let problem = shownRecoveryProblem,
               !displayTiles.contains(where: { $0.status == .needsRecovery }) else { return nil }
         return problem
     }
@@ -5400,6 +5428,12 @@ final class AppModel: ObservableObject {
 
     func setDisplayLifecycleTransitioning(_ transitioning: Bool) {
         guard displayLifecycleTransitioning != transitioning else { return }
+        lifecycleHiddenTargets = nil
+        if transitioning, handoffInspectionFailure == nil, let status = handoffStatus,
+           status.state == .hidden, status.sessionRecovery == nil, let journalID = status.journalID {
+            let uuids = Self.unresolvedTargetUUIDs(status)
+            if !uuids.isEmpty { lifecycleHiddenTargets = (journalID, uuids) }
+        }
         displayLifecycleTransitioning = transitioning
         if transitioning, runningDisplayAction != nil { runningActionInterrupted = true }
         if handoffStatus?.hasUnresolvedJournal == true {

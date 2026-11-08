@@ -2895,6 +2895,39 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertTrue(model.displayLifecycleTransitioning)
     }
 
+    /// Waking displays read as asleep and unmirrored; that only needs recovery
+    /// if it lasts past wake settlement.
+    func testWakingHiddenDisplayStaysHiddenUntilDisplaysSettle() async throws {
+        let defaults = try makeDefaults()
+        let hidden = sleepRemoval(id: "wake-entry", target: displays[1], source: displays[2], resolved: false)
+        let waking = sleepRemoval(id: hidden.id, target: displays[1], source: displays[2], resolved: false,
+                                  canShow: false, topologyVerified: false)
+        let box = StatusBox(multiHandoffStatus([hidden], observations: [], journalID: "wake-journal",
+                                               state: .hidden, baselineIdentity: "exact-baseline"))
+        let model = makeModel(
+            defaults: defaults, displays: displays, status: { box.value },
+            sleepResumeHideDisplay: { _, _, _ in throw RecoveryError.unsafe("fake guarded Hide refusal") },
+            displayWakeSettleDelay: 0.01
+        )
+        try await waitUntil { !model.protectionQuiescencePending }
+        model.beginDisplaySleepTransition()
+        box.value = multiHandoffStatus([waking], observations: [], journalID: "wake-journal",
+                                       state: .recovery, baselineIdentity: "exact-baseline")
+        model.displayWakeObserved(screensAwake: false)
+
+        let tile = try XCTUnwrap(model.displayTiles.first { $0.uuid == Self.targetUUID })
+        XCTAssertEqual(tile.status, .hidden)
+        XCTAssertEqual(tile.actionBlocker, DisplayHideError.sleeping.localizedDescription)
+        XCTAssertNil(model.shownRecoveryProblem)
+        XCTAssertNil(model.pageRecoveryProblem)
+        XCTAssertNotNil(model.displayRecoveryProblem, "gates still see the unverified journal")
+
+        model.displayWakeObserved(screensAwake: true)
+        try await waitUntil { !model.displayLifecycleTransitioning }
+        XCTAssertEqual(model.displayTiles.first { $0.uuid == Self.targetUUID }?.status, .needsRecovery)
+        XCTAssertNotNil(model.shownRecoveryProblem)
+    }
+
     func testWakeReadinessDeadlineCannotBeExtendedByDuplicateNotifications() async throws {
         let defaults = try makeDefaults()
         let mirrored = sleepRemoval(id: "deadline-entry", target: displays[1], source: displays[2], resolved: false)

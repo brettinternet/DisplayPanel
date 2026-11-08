@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Hidden displays stay Hidden while they wake from sleep instead of briefly showing Needs recovery. Recovery appears only if they still don't check out once displays settle.
+
 ## 0.9.10
 
 - Add a **Turn off** Hide style (experimental) for monitors with no other input: the Mac stops sending a signal until Show turns the display back on and restores its layout. Works on the main display; one display at a time, and not while Hide mirrors another display.
