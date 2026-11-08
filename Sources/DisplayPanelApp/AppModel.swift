@@ -5400,6 +5400,21 @@ final class AppModel: ObservableObject {
             removals.allSatisfy { $0.canShow && !isBlackoutHidden($0.target.uuid) }
     }
 
+    /// The hidden displays a Show of `targetUUID` can show together with it, by tile UUID.
+    func showTogetherTargets(with targetUUID: String) -> [String]? {
+        guard !hideOperation.isBusy, runningDisplayAction == nil else { return nil }
+        let targets = hiddenDisplayTiles.compactMap(\.uuid).filter(isRemovedDisplay)
+        guard targets.contains(where: { $0.caseInsensitiveCompare(targetUUID) == .orderedSame }),
+              canShowTogether(targets) else { return nil }
+        return targets
+    }
+
+    func displayNames(_ uuids: [String]) -> String {
+        uuids.map { uuid in
+            displayTiles.first { $0.uuid?.caseInsensitiveCompare(uuid) == .orderedSame }?.name ?? uuid
+        }.formatted(.list(type: .and))
+    }
+
     /// Results follow `targets`. A refusal or failure applies to all of them:
     /// Core restores every display or none.
     func showTogether(_ targets: [String], actionLeaseID: UUID? = nil,

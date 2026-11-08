@@ -109,6 +109,16 @@ public struct BlackoutOptions: Equatable {
     }
 }
 
+public struct HandoffBackTarget: Equatable {
+    public let selector: String
+    public let input: UInt8?
+
+    public init(selector: String, input: UInt8? = nil) {
+        self.selector = selector
+        self.input = input
+    }
+}
+
 public enum PanelCommand: Equatable {
     case list(json: Bool)
     case probe(json: Bool)
@@ -116,7 +126,8 @@ public enum PanelCommand: Equatable {
     case unmirror(journalPath: String?)
     case unmirrorTarget(selector: String, journalPath: String?)
     case away(selector: String, source: String, input: UInt8?, journalPath: String?)
-    case back(selector: String, input: UInt8?, journalPath: String?)
+    /// More than one target shows them together.
+    case back(targets: [HandoffBackTarget], journalPath: String?)
     case recovery(action: RecoveryAction, timeout: TimeInterval?, journalPath: String?)
     case recoverySelected(action: RecoveryAction, timeout: TimeInterval?, selector: String, journalPath: String?)
     case recoveryHelper(journalPath: String, id: UUID)
@@ -315,6 +326,9 @@ public enum CLIParser {
     private static func parseHandoff(_ args: [String], command: String) throws -> PanelCommand {
         var values: [String: String] = [:]
         var consent = false
+        // back may list several displays; each --input applies to the --display before it.
+        var displays: [(selector: String, input: String?)] = []
+        var leadingInput: String?
         let valueFlags = ["--display", "--journal", "--input"] + (command == "away" ? ["--source"] : [])
         var i = 0
         while i < args.count {
@@ -323,26 +337,42 @@ public enum CLIParser {
                 guard !consent else { throw CLIParseError.duplicateOption(option) }
                 consent = true
             } else if valueFlags.contains(option) {
-                guard values[option] == nil else { throw CLIParseError.duplicateOption(option) }
                 i += 1
                 guard i < args.count, !args[i].isEmpty, !args[i].hasPrefix("--") else {
                     throw CLIParseError.missingValue(option)
                 }
-                values[option] = args[i]
+                switch option {
+                case "--display":
+                    guard command == "back" || displays.isEmpty else { throw CLIParseError.duplicateOption(option) }
+                    displays.append((args[i], displays.isEmpty ? leadingInput : nil))
+                case "--input":
+                    if displays.isEmpty, leadingInput == nil {
+                        leadingInput = args[i]
+                    } else if let last = displays.indices.last, displays[last].input == nil {
+                        displays[last].input = args[i]
+                    } else {
+                        throw CLIParseError.duplicateOption(option)
+                    }
+                default:
+                    guard values[option] == nil else { throw CLIParseError.duplicateOption(option) }
+                    values[option] = args[i]
+                }
             } else {
                 throw CLIParseError.unknownOption(option)
             }
             i += 1
         }
-        guard consent, let selector = values["--display"] else { throw CLIParseError.handoffRequirements(command) }
-        var input: UInt8?
-        if let raw = values["--input"] {
-            guard let parsed = DDCInput.parseValue(raw) else { throw CLIParseError.invalidInputValue(raw) }
-            input = parsed
+        guard consent, !displays.isEmpty else { throw CLIParseError.handoffRequirements(command) }
+        let targets = try displays.map { display in
+            try HandoffBackTarget(selector: display.selector, input: display.input.map { raw in
+                guard let parsed = DDCInput.parseValue(raw) else { throw CLIParseError.invalidInputValue(raw) }
+                return parsed
+            })
         }
-        if command == "back" { return .back(selector: selector, input: input, journalPath: values["--journal"]) }
+        guard Set(targets.map(\.selector)).count == targets.count else { throw CLIParseError.duplicateOption("--display") }
+        if command == "back" { return .back(targets: targets, journalPath: values["--journal"]) }
         guard let source = values["--source"] else { throw CLIParseError.handoffRequirements(command) }
-        return .away(selector: selector, source: source, input: input, journalPath: values["--journal"])
+        return .away(selector: targets[0].selector, source: source, input: targets[0].input, journalPath: values["--journal"])
     }
 
     private static func parseMirror(_ args: [String], restore: Bool) throws -> PanelCommand {

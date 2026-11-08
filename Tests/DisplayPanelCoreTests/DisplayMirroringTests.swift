@@ -1169,6 +1169,7 @@ final class DisplayMirroringTests: XCTestCase {
             var reads = 0
             var sut = HandoffController(mirror: controller(original))
             sut.reselectPause = {}
+            sut.confirmPause = {}
             sut.mirror.records = { self.records(current) }
             sut.mirror.engine.capture = { current }
             sut.mirror.engine.apply = { saved in
@@ -1269,7 +1270,9 @@ final class DisplayMirroringTests: XCTestCase {
                 }
             } else { try back() }
             XCTAssertEqual(events.first, scenario == "no-input" ? "unhide" : "open", scenario)
-            XCTAssertEqual(events.last, "unhide", "desktop restoration must follow the optional input return")
+            let restored = try XCTUnwrap(events.lastIndex(of: "unhide"), scenario)
+            XCTAssertTrue(events[(restored + 1)...].allSatisfy { ["open", "read"].contains($0) },
+                          "desktop restoration follows the optional input return; only a confirming read follows it")
             if scenario == "unhide-failure" {
                 XCTAssertEqual(events.filter { $0 == "back-input" }.count, 3,
                                "one return and one re-selection precede restore; input is not retried when restore fails")
@@ -1279,7 +1282,10 @@ final class DisplayMirroringTests: XCTestCase {
                 XCTAssertEqual(try store.load().state, .restored)
             }
             if scenario == "no-input" { XCTAssertEqual(events, ["unhide"]) }
-            if scenario == "unverified" { XCTAssertTrue(messages.contains { $0.contains("Input switch is unverified") }) }
+            if scenario == "unverified" {
+                XCTAssertTrue(messages.contains { $0.contains("Input switch is unverified") })
+                XCTAssertTrue(messages.contains { $0.contains("Confirmed the monitor is on") }, "\(messages)")
+            }
         }
     }
 
@@ -1531,8 +1537,9 @@ final class DisplayMirroringTests: XCTestCase {
     // relinks both and can make macOS unmirror the sibling. Show together returns
     // each input only after the previous relink settles, then writes the layout once.
     func testShowTogetherSettlesEachInputBeforeOneLayoutWrite() throws {
-        for settles in [true, false] {
-            let store = RecoveryStore(url: directory.appendingPathComponent("together-\(settles).json"))
+        // The last case: the first monitor's saved mode disappears while the second settles.
+        for (settles, siblingLosesMode) in [(true, false), (false, false), (true, true)] {
+            let store = RecoveryStore(url: directory.appendingPathComponent("together-\(settles)\(siblingLosesMode).json"))
             let baseline = try sessionSnapshot([:])
             var current = baseline
             var active: [Int: Int] = [:]
@@ -1540,6 +1547,7 @@ final class DisplayMirroringTests: XCTestCase {
             var capturesAfterSwitch: Int?
             var unpluggedSamples = 0
             var lastSelected = ""
+            var siblingModeLost = false
             var events: [String] = []
             var sut = HandoffController(mirror: controller(baseline), report: { _ in })
             sut.reselectPause = {}
@@ -1560,6 +1568,11 @@ final class DisplayMirroringTests: XCTestCase {
             try sut.away(selector: "8", source: "7", input: nil, store: store)
             try sut.away(selector: "9", source: "7", input: nil, store: store)
             let id = try store.load().id
+            sut.mirror.preflightModes = { snapshot in
+                if siblingModeLost, snapshot.displays.contains(where: { $0.uuid == self.snapshotUUID(2) }) {
+                    throw RecoveryError.modeUnavailable(displayUUID: self.snapshotUUID(2), mode: "fake")
+                }
+            }
             sut.open = { uuid, allowInactive in
                 let target = try DDC.resolveDisplay(selector: uuid, records: self.records(current), allowInactive: allowInactive)
                 return (target, DDCChannel(getVCP: { _ in (17, 0) }, setVCP: { _, _ in XCTFail("fake selector only") }))
@@ -1573,24 +1586,32 @@ final class DisplayMirroringTests: XCTestCase {
                     current = try self.sessionSnapshot([2: 1]) // macOS unmirrored the sibling
                 } else {
                     unpluggedSamples = settles ? 3 : .max
+                    siblingModeLost = siblingLosesMode
                 }
                 return DDCInputSelection(displayID: displayID, uuid: uuid, original: originalInput, requested: requested,
                     observed: requested, outcome: .verified, detail: nil)
             }
             let inputs = [snapshotUUID(2): UInt8(15), snapshotUUID(3): UInt8(16)]
-            guard settles else {
+            guard settles, !siblingLosesMode else {
                 XCTAssertThrowsError(try sut.guardedBackAll(expectedJournalID: id, inputs: inputs, store: store)) { error in
                     let failure = error as? DisplayHandoffOperationFailure
                     XCTAssertEqual(failure?.inputOutcomes[self.snapshotUUID(2)]?.state, .verified)
                     XCTAssertEqual(failure?.inputOutcomes[self.snapshotUUID(3)]?.state, .verified)
                 }
                 XCTAssertEqual(events.count, 2)
-                XCTAssertFalse(events.contains { $0.hasPrefix("layout") }, "no layout write during an unsettled relink")
+                XCTAssertFalse(events.contains { $0.hasPrefix("layout") }, "no layout write during an unsettled relink or without every saved mode")
                 XCTAssertEqual(try store.load().state, .mirrored, "retry Show from the recorded session")
                 continue
             }
-            let outcomes = try sut.guardedBackAll(expectedJournalID: id, inputs: inputs, store: store)
-            XCTAssertEqual(outcomes.mapValues(\.state), [snapshotUUID(2): .verified, snapshotUUID(3): .verified])
+            // dp back: listing every hidden display shows them together; a partial list never does.
+            XCTAssertThrowsError(try sut.back(targets: [HandoffBackTarget(selector: "8", input: 15),
+                                                        HandoffBackTarget(selector: "7")], store: store))
+            XCTAssertTrue(events.isEmpty)
+            var reports: [String] = []
+            sut.report = { reports.append($0) }
+            try sut.back(targets: [HandoffBackTarget(selector: "8", input: 15),
+                                   HandoffBackTarget(selector: snapshotUUID(3), input: 16)], store: store)
+            XCTAssertEqual(reports.filter { $0.contains(": on ") }.count, 2, "both inputs verified: \(reports)")
             XCTAssertEqual(events, ["input 8 after 0", "input 9 after 20", "layout after 19"],
                            "each input waits three quiet seconds after its relink; one layout write follows")
             XCTAssertNoThrow(try baseline.verify(current))
@@ -1706,17 +1727,24 @@ final class DisplayMirroringTests: XCTestCase {
         XCTAssertEqual(try CLIParser.parse(["away", "--display", "8", "--source", "7", "--consent-away", "--input", "hdmi1"]),
                        .away(selector: "8", source: "7", input: 17, journalPath: nil))
         XCTAssertEqual(try CLIParser.parse(["back", "--display", "8", "--consent-back", "--input", "0x0F", "--journal", "/private/j.json"]),
-                       .back(selector: "8", input: 15, journalPath: "/private/j.json"))
+                       .back(targets: [HandoffBackTarget(selector: "8", input: 15)], journalPath: "/private/j.json"))
         XCTAssertEqual(try CLIParser.parse(["back", "--display", "8", "--consent-back"]),
-                       .back(selector: "8", input: nil, journalPath: nil))
+                       .back(targets: [HandoffBackTarget(selector: "8")], journalPath: nil))
         XCTAssertEqual(try CLIParser.parse(["away", "--display", "8", "--source", "7", "--consent-away"]),
                        .away(selector: "8", source: "7", input: nil, journalPath: nil))
+        // Each --input switches the display listed before it, never a neighbor.
+        XCTAssertEqual(try CLIParser.parse(["back", "--input", "dp1", "--display", "8", "--display", "9", "--consent-back"]),
+                       .back(targets: [HandoffBackTarget(selector: "8", input: 15), HandoffBackTarget(selector: "9")],
+                             journalPath: nil))
+        XCTAssertEqual(try CLIParser.parse(["back", "--display", "8", "--display", "9", "--input", "hdmi1", "--consent-back"]),
+                       .back(targets: [HandoffBackTarget(selector: "8"), HandoffBackTarget(selector: "9", input: 17)],
+                             journalPath: nil))
         for command in ["away", "back"] {
             XCTAssertEqual(try CLIParser.parse([command, "--help"]), .help(command: command))
             XCTAssertTrue(CLIHelp.text(for: command).contains("monitor's input button"))
             let base = [command, "--display", "8", "--consent-\(command)"] + (command == "away" ? ["--source", "7"] : [])
             for extra in [["--input", "0"], ["--input", "256"], ["--input", "bogus"], ["--input"],
-                          ["--input", "dp1", "--input", "hdmi1"], ["--display", "9"], ["--consent-\(command)"], ["--bogus"]] {
+                          ["--input", "dp1", "--input", "hdmi1"], ["--display", command == "away" ? "9" : "8"], ["--consent-\(command)"], ["--bogus"]] {
                 XCTAssertThrowsError(try CLIParser.parse(base + extra))
             }
         }

@@ -15,7 +15,9 @@ dp back --display TARGET_UUID --input dp1 --consent-back
   stays on.
 - Use the same `--journal` for both commands.
 - `back` shows only the selected target. The last `back` restores the original
-  layout exactly.
+  layout exactly. Listing every display one session hid shows them together;
+  each `--input` applies to the `--display` before it:
+  `dp back --display A --input dp1 --display B --input hdmi1 --consent-back`.
 
 The app's **Mirror** and **Switch input** Hide styles and Show use this same path.
 
@@ -41,7 +43,7 @@ At most two writes of the same input (one re-send when readback still shows the
 previous input), no automatic rollback. A verified or unconfirmed Show/back return
 that never relinks is re-selected once through the observed previous input. The switch-back command is
 printed, not saved, so keep the output or use the monitor's input button.
-Some monitors stop answering DDC for seconds after a switch. The app's Show reads
+Some monitors stop answering DDC for seconds after a switch. Show and `back` read
 an unconfirmed return again (no write) once the layout is restored; a read of the
 Mac input confirms it.
 
@@ -62,8 +64,9 @@ same Action, or **Show All Displays**, sends that sibling one return-input
 write, only after a read finds the monitor on its Hide input.
 
 Displays one session mirrored share a mirror set: one input return relinks the
-others. When **Show All Displays**, or consecutive Show steps of an Action, show
-every display that session hides, they show together. Each monitor's input
+others. When **Show All Displays**, consecutive Show steps of an Action, or `dp back`
+show every display that session hides, they show together. Showing one of them
+from a tile or the menu asks whether to show them together. Each monitor's input
 returns in turn and settles before the next; the journaled layout is then
 restored and verified in one write. A failed input return or settle writes no
 layout and leaves every display hidden, so Show can be retried.

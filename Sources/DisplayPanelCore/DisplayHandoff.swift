@@ -334,14 +334,17 @@ enum HiddenMirrorSourceOverlayAuthorization {
 public enum DisplayHandoff {
     public static var defaultJournalPath: String { RecoveryStore.defaultURL.path }
 
-    public static func run(selector: String, source: String?, input: UInt8?, journalPath: String?) throws {
-        let store = RecoveryStore(url: journalPath.map { URL(fileURLWithPath: $0) } ?? RecoveryStore.defaultURL)
-        let controller = HandoffController(mirror: .production)
-        if let source {
-            try controller.away(selector: selector, source: source, input: input, store: store)
-        } else {
-            try controller.back(selector: selector, input: input, store: store)
-        }
+    public static func away(selector: String, source: String, input: UInt8?, journalPath: String?) throws {
+        try HandoffController(mirror: .production).away(selector: selector, source: source, input: input,
+                                                        store: store(journalPath))
+    }
+
+    public static func back(targets: [HandoffBackTarget], journalPath: String?) throws {
+        try HandoffController(mirror: .production).back(targets: targets, store: store(journalPath))
+    }
+
+    private static func store(_ journalPath: String?) -> RecoveryStore {
+        RecoveryStore(url: journalPath.map { URL(fileURLWithPath: $0) } ?? RecoveryStore.defaultURL)
     }
 
     /// Reads the shared default journal under the same operation/journal locks
@@ -598,11 +601,48 @@ struct HandoffController {
         }
     }
 
+    /// Several targets must be every display one session hid; they show together.
+    func back(targets: [HandoffBackTarget], store: RecoveryStore) throws {
+        guard targets.count > 1 else {
+            guard let target = targets.first else { throw RecoveryError.unsafe("no display to show") }
+            return try back(selector: target.selector, input: target.input, store: store)
+        }
+        let journal = try store.load()
+        let hidden = Set(journal.publicMirrorSession?.removals.filter { !$0.state.resolved }.map(\.targetUUID) ?? [])
+        var uuids: [String] = []
+        var inputs: [String: UInt8] = [:]
+        for target in targets {
+            let uuid = try mirror.removalUUID(target.selector)
+            uuids.append(uuid)
+            inputs[uuid] = target.input
+        }
+        guard Set(uuids) == hidden else {
+            throw RecoveryError.unsafe("Show together needs every display this session hid: \(hidden.sorted().joined(separator: ", "))")
+        }
+        let outcomes = try guardedBackAll(expectedJournalID: journal.id, inputs: inputs, store: store)
+        for uuid in uuids {
+            guard let outcome = outcomes[uuid] else {
+                report("\(uuid): no --input given; use the monitor's input button.")
+                continue
+            }
+            let input = MonitorInput.name(outcome.requestedInput ?? 0)
+            switch outcome.state {
+            case .verified, .alreadySelected: report("\(uuid): on \(input).")
+            default:
+                report("\(uuid): \(outcome.detail ?? "couldn't confirm the switch to \(input)")" +
+                       (outcome.recoveryCommand.map { " Recovery: \($0)" } ?? ""))
+            }
+        }
+        report("Shown together; arrangement restored and verified. Journal: \(store.url.path)")
+    }
+
     func back(selector: String, input: UInt8?, store: RecoveryStore) throws {
         var inputFailure: Error?
         var previousInput: UInt8?
         var returned: DisplayInputOutcome.State?
+        var returnTarget: RecoveryDisplay?
         let returnInput: ((RecoveryDisplay) throws -> DisplayInputOutcome.State)? = input == nil ? nil : { target in
+            returnTarget = target
             do {
                 let state = try switchInput(input, target: target, returning: true, previous: { previousInput = $0 }) {
                     report("Input recovery: \($0)")
@@ -618,6 +658,7 @@ struct HandoffController {
             guard returned == .verified || returned == .unverified, let input, let previousInput,
                   let back = reselect(input, through: previousInput, target: target) else { return false }
             report("Re-selected the Mac input through \(MonitorInput.name(previousInput)) to relink the monitor.")
+            returned = back.state
             guard back.state != .failed else {
                 throw RecoveryError.unsafe("\(back.detail ?? "DDC selection failed"); retry back or use the monitor's input button")
             }
@@ -632,6 +673,10 @@ struct HandoffController {
         }
         if let inputFailure { throw inputFailure }
         if input == nil { report("No --input given; use the monitor's input button.") }
+        if returned == .unverified, let input, let returnTarget,
+           confirmReturn(DisplayInputOutcome(state: .unverified, requestedInput: input), target: returnTarget).state == .verified {
+            report("Confirmed the monitor is on \(MonitorInput.name(input)).")
+        }
         let remaining = journal.publicMirrorSession?.removals.filter { !$0.state.resolved }.count ?? 0
         if remaining > 0 {
             report("Shown and verified; \(remaining) more still hidden. Positions may shift slightly until the last one is shown. Journal: \(store.url.path)")

@@ -650,6 +650,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func showDisplayFromMenu(_ sender: NSMenuItem) {
         guard let uuid = sender.representedObject as? String else { return }
+        if let targets = model.showTogetherTargets(with: uuid) {
+            let alert = NSAlert()
+            alert.messageText = "Show \(model.displayNames(targets)) together?"
+            alert.addButton(withTitle: "Show Together")
+            alert.addButton(withTitle: "Show Only \(model.displayNames([uuid]))")
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate(ignoringOtherApps: true)
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                model.showTogether(targets) { [weak self] results in
+                    if !results.allSatisfy(\.succeeded) { self?.showSettings(displayUUID: uuid) }
+                }
+                return
+            case .alertSecondButtonReturn: break
+            default: return
+            }
+        }
         model.show(targetUUID: uuid) { [weak self] in self?.revealFailure($0, displayUUID: uuid) }
     }
 
@@ -742,6 +759,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             status.turnedOff.first(where: \.isUnresolved)?.target.uuid ?? status.target?.uuid
         guard let target, model.canShowHiddenDisplay else {
             showSettings(tab: .displays, displayUUID: target)
+            return
+        }
+        if let targets = model.showTogetherTargets(with: target) {
+            model.showTogether(targets) { [weak self] results in
+                guard let self else { return }
+                if results.allSatisfy(\.succeeded) {
+                    self.showAndQuitRemainingDisplays()
+                } else {
+                    self.showSettings(tab: .displays, displayUUID: target)
+                }
+            }
             return
         }
         model.show(targetUUID: target) { [weak self] result in

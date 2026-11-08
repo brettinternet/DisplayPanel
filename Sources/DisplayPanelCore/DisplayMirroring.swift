@@ -995,13 +995,7 @@ struct MirrorController {
             if journal.state.resolved { return journal }
             throw RecoveryError.unsafe("no unresolved display removal; inspect recovery status")
         }
-        let selectedUUID = try selector.map { selector -> String in
-            if let requested = UUID(uuidString: selector) { return requested.uuidString.lowercased() }
-            if let record = DisplaySelector.resolve(selector, in: try records()), let uuid = record.uuid {
-                return uuid.lowercased()
-            }
-            throw RecoveryError.unsafe("missing or ambiguous removal selector; use its captured UUID from recovery status")
-        }
+        let selectedUUID = try selector.map(removalUUID)
         if let disconnect = turnedOff.first(where: { $0.targetUUID == selectedUUID }) ??
             (selectedUUID == nil && active.isEmpty && turnedOff.count == 1 ? turnedOff.first : nil) {
             return try showTurnedOff(&journal, disconnectID: disconnect.id, store: store)
@@ -1296,14 +1290,7 @@ struct MirrorController {
         let active = MirrorSessionTopology.activeRemovals(session.removals)
         let selected: PublicMirrorRemoval
         if let selector {
-            let uuid: String
-            if let parsed = UUID(uuidString: selector) {
-                uuid = parsed.uuidString.lowercased()
-            } else if let record = DisplaySelector.resolve(selector, in: try records()), let recordUUID = record.uuid {
-                uuid = recordUUID.lowercased()
-            } else {
-                throw RecoveryError.unsafe("missing or ambiguous removal selector; use its captured UUID from recovery status")
-            }
+            let uuid = try removalUUID(selector)
             if let disconnect = session.disconnects?.last(where: { $0.targetUUID == uuid }) {
                 guard disconnect.state.resolved ||
                         (disconnect.state == .off && MirrorSessionTopology.matches(session, current: current)) else {
@@ -1544,6 +1531,15 @@ struct MirrorController {
         expected.uuid.caseInsensitiveCompare(record.uuid ?? "") == .orderedSame &&
             expected.displayID == record.id && expected.vendor == record.vendor &&
             expected.model == record.model && expected.serial == record.serial
+    }
+
+    /// A removal's lowercase UUID; a hidden display may be offline, so a UUID needs no record.
+    func removalUUID(_ selector: String) throws -> String {
+        if let requested = UUID(uuidString: selector) { return requested.uuidString.lowercased() }
+        if let record = DisplaySelector.resolve(selector, in: try records()), let uuid = record.uuid {
+            return uuid.lowercased()
+        }
+        throw RecoveryError.unsafe("missing or ambiguous removal selector; use its captured UUID from recovery status")
     }
 
     private func fallback(_ error: Error, store: RecoveryStore, selector: String? = nil) -> RecoveryError {

@@ -9,6 +9,12 @@ struct DisplaySettingsView: View {
     @State private var customInputs: [String: String] = [:]
     @State private var pendingSessionRecovery: DisplaySessionRecovery?
     @State private var recoveryHidesAgain = false
+    @State private var showTogetherChoice: ShowTogetherChoice?
+
+    private struct ShowTogetherChoice {
+        let uuid: String
+        let targets: [String]
+    }
 
     var body: some View {
         let tiles = model.displayTiles
@@ -76,6 +82,13 @@ struct DisplaySettingsView: View {
             Text(recoveryHidesAgain
                  ? "Hides \(names) again. The current arrangement and modes become the new baseline. Inputs aren’t switched."
                  : "Clears recovery for \(names) without changing display settings.")
+        }
+        .alert(showTogetherChoice.map { "Show \(model.displayNames($0.targets)) together?" } ?? "",
+               isPresented: Binding(get: { showTogetherChoice != nil }, set: { if !$0 { showTogetherChoice = nil } }),
+               presenting: showTogetherChoice) { choice in
+            Button("Show Together") { model.showTogether(choice.targets) { _ in } }
+            Button("Show Only \(model.displayNames([choice.uuid]))") { model.show(targetUUID: choice.uuid) }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -205,6 +218,8 @@ struct DisplaySettingsView: View {
             Button(title) {
                 if action == .hide {
                     model.hide(targetUUID: uuid)
+                } else if let targets = model.showTogetherTargets(with: uuid) {
+                    showTogetherChoice = ShowTogetherChoice(uuid: uuid, targets: targets)
                 } else {
                     model.show(targetUUID: uuid)
                 }

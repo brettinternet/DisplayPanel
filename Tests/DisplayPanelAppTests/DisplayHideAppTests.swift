@@ -2355,10 +2355,13 @@ final class DisplayHideAppTests: XCTestCase {
             try model.saveDisplayAction(action)
             try await waitUntil { !model.protectionQuiescencePending }
             if showAll {
+                // A single Show of either display offers both.
+                XCTAssertEqual(model.showTogetherTargets(with: targets[1].uuid!.lowercased()), targets.map(\.uuid!))
                 var results: [String: DisplayOperationResult] = [:]
                 model.showAllDisplays { results[$0] = $1 }
                 try await waitUntil { results.count == 2 }
                 XCTAssertEqual(results.values.map(\.inputOutcome?.state), [.verified, .verified])
+                XCTAssertNil(model.showTogetherTargets(with: targets[0].uuid!))
             } else {
                 var result: AppControlResponse?
                 model.runDisplayAction(id: action.id) { result = $0 }

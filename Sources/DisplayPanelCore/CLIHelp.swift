@@ -118,13 +118,17 @@ public enum CLIHelp {
         case "away", "back":
             return """
             Usage: dp away --display <selector> --source <selector> --consent-away [--input <code>] [--journal <path>]
-            Usage: dp back --display <selector> --consent-back [--input <code>] [--journal <path>]
+            Usage: dp back --display <selector> [--input <code>] [--display <selector> [--input <code>]]...
+                           --consent-back [--journal <path>]
 
             away captures a durable mirror journal, optionally selects the monitor input,
             then hides its separate desktop by public session-scoped mirroring.
             back requires the selected target, Shows only that entry and verifies the
             topology FIRST, then optionally selects that target's input. Other removals
             remain hidden; the final back verifies the original session baseline. No DDC failure blocks unhide.
+            Listing every display the session hid shows them together: each input returns
+            and settles in turn, then one layout write. Each --input applies to the --display
+            before it. An unconfirmed input return is read again (no write) after Show.
             --input accepts dp1, dp2, hdmi1, hdmi2, decimal 1..255 or hex 0x01..0xFF.
             DDC is attempted only with --input and a successful pre-read. Otherwise use
             the monitor's input button. Mirroring keeps the Mac signal on: no automatic
