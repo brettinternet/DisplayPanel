@@ -170,10 +170,11 @@ struct DisplaySettingsView: View {
             let source = tile.uuid.flatMap { model.handoffStatus?.removal(for: $0)?.source.name }
             return "Mirrored onto \(source ?? "another display") until you show it"
         case .hiding:
-            switch tile.display.map(model.hideChoice(of:)) {
-            case .turnOff?: return "Turning off…"
-            case .switchInput?: return "Switching input…"
-            default: return "Mirroring…"
+            guard let display = tile.display else { return "Hiding…" }
+            switch model.hideStyle(of: display) {
+            case .turnOff: return "Turning off…"
+            case .removeFromDesktop: return model.hideChoice(of: display) == .switchInput ? "Switching input…" : "Mirroring…"
+            case .blackOut, .configured: return "Blacking out…"
             }
         case .showing:
             return "Showing…"
@@ -227,7 +228,7 @@ struct DisplaySettingsView: View {
             return model.showReturnInputNote(for: tile.uuid)
         case .hide?:
             guard let display = tile.display, model.hideStyle(of: display) == .blackOut else { return nil }
-            return "Hide blacks out this display until you show it."
+            return model.hideFallbackReason(for: display) ?? "Hide blacks out this display until you show it."
         case nil:
             return nil
         }

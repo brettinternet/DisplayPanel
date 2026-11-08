@@ -72,7 +72,7 @@ the public Hide journal.
   architecture, setter and awake checks below. One display at a time.
 - Turn off and the Mirror and Switch input styles refuse each other: on
   26B123, turning a display off dropped another display's Hide mirror (trial
-  below).
+  below). A style-driven Hide blacks out instead; Action steps refuse.
 - Hide from Settings, the menu or `dp app hide` turns a display off when Turn
   off is its style. An Action's Turn off step does so regardless of the style;
   its Show step turns the display back on.

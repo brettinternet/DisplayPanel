@@ -654,6 +654,38 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(turnedOff.count, 1)
     }
 
+    /// Turning off a display made macOS drop a Hide mirror (DP-101), so a Turn
+    /// off display blacks out instead while another display is mirrored.
+    func testTurnOffStyleBlacksOutWhileAnotherDisplayIsMirrored() async throws {
+        let defaults = try makeDefaults()
+        let main = displays[0]
+        let target = displays[1]
+        let removed = Self.display(index: 4, id: 404, uuid: Self.replacementUUID, name: "Removed", main: false, active: false)
+        let removal = DisplayHandoffRemoval(
+            id: "entry-one", target: handoffIdentity(removed), source: handoffIdentity(main),
+            state: "mirrored", isUnresolved: true, canShow: true, reason: nil, topologyVerified: true
+        )
+        let status = multiHandoffStatus([removal], observations: [
+            observation(removed, state: .hiddenByDisplayPanel, source: main, journalTarget: true),
+            observation(main, state: .separate)
+        ], journalID: "mirror-session")
+        let model = makeModel(
+            defaults: defaults, displays: displays + [removed], status: { status },
+            isDisplayMirrored: { $0 == removed.id },
+            turnOffDisplay: { _ in XCTFail("Turn off can drop the Hide mirror") }
+        )
+        model.setHideChoice(.turnOff, for: target)
+        XCTAssertEqual(model.hideChoice(of: target), .turnOff, "Settings keeps the chosen style")
+        try await waitUntil { !model.protectionQuiescencePending }
+        let tile = try XCTUnwrap(model.displayTiles.first { $0.id == Self.targetKey })
+        XCTAssertEqual(tile.action, .hide)
+        XCTAssertNil(tile.actionBlocker)
+
+        let hidden = try await hideAndWait(model)
+        XCTAssertTrue(hidden.succeeded, hidden.message)
+        XCTAssertTrue(model.isBlackoutHidden(Self.targetUUID))
+    }
+
     /// A turned-off display leaves `displays`, so an Action's Show must find it
     /// in the journal, and an Action may never turn off two displays.
     func testActionTurnOffAndShowStepsUseTheTurnOffJournal() async throws {
@@ -1996,12 +2028,13 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertTrue(model.hideRemovesFromDesktop(displays[1]))
         XCTAssertFalse(model.hideRemovesFromDesktop(displays[2]))
 
-        // Removal never mirrors onto a blacked-out display.
+        // Removal never mirrors onto a blacked-out display; Hide blacks out instead.
         model.hide(targetUUID: Self.sourceUUID)
         XCTAssertTrue(model.isBlackoutHidden(Self.sourceUUID))
-        XCTAssertEqual(model.displayTiles.first { $0.id == Self.targetKey }?.actionBlocker,
-                       "The display it mirrors onto is hidden. Show it first.")
+        XCTAssertFalse(model.hideRemovesFromDesktop(displays[1]))
+        XCTAssertNil(model.displayTiles.first { $0.id == Self.targetKey }?.actionBlocker)
         model.show(targetUUID: Self.sourceUUID)
+        XCTAssertTrue(model.hideRemovesFromDesktop(displays[1]), "the chosen style returns once its source shows")
         XCTAssertNil(model.displayTiles.first { $0.id == Self.targetKey }?.actionBlocker)
 
         // Black out leaves a removed display alone, which doesn't count as visible.

@@ -2679,13 +2679,37 @@ final class AppModel: ObservableObject {
         hideStyle(of: display) == .removeFromDesktop
     }
 
-    /// The style Hide uses for this display: Black out unless Experimental
-    /// features are on and the display can leave the desktop.
+    /// The style Hide uses for this display: its chosen style, or Black out
+    /// while that style can't run alongside the displays already hidden.
     func hideStyle(of display: DisplayRecord) -> DisplayHideStyle {
+        hideFallbackReason(for: display) == nil ? chosenHideStyle(of: display) : .blackOut
+    }
+
+    /// The style chosen in Settings: Black out unless Experimental features
+    /// are on and the display can leave the desktop.
+    private func chosenHideStyle(of display: DisplayRecord) -> DisplayHideStyle {
         guard experimentalFeaturesEnabled, let uuid = display.uuid, let configuration = hidePreferences[uuid],
               removalIneligibleReason(for: display) == nil else { return .blackOut }
         if configuration.turnsOff == true { return .turnOff }
         return configuration.enabled ? .removeFromDesktop : .blackOut
+    }
+
+    /// Why Hide blacks out this display instead of its chosen style, or nil.
+    /// macOS can drop Hide mirrors when a display turns off, so Turn off and
+    /// Mirror never run together; Mirror also needs its source visible.
+    func hideFallbackReason(for display: DisplayRecord) -> String? {
+        let style = chosenHideStyle(of: display)
+        guard style != .blackOut, let uuid = display.uuid?.lowercased() else { return nil }
+        if !turnedOffDisplayUUIDs.subtracting([uuid]).isEmpty {
+            return "Hide blacks out this display while another display is turned off."
+        }
+        let mirrored = Set(unresolvedHandoffRemovals.map { $0.target.uuid.lowercased() }).subtracting([uuid])
+        if style == .turnOff {
+            return mirrored.isEmpty ? nil : "Hide blacks out this display while another display is mirrored."
+        }
+        guard let source = hidePreferences[uuid]?.source?.uuid.lowercased(),
+              mirrored.contains(source) || isBlackoutHidden(source) else { return nil }
+        return "Hide blacks out this display while the display it mirrors onto is hidden."
     }
 
     func isBlackoutHidden(_ uuid: String?) -> Bool {
@@ -3317,7 +3341,7 @@ final class AppModel: ObservableObject {
 
     /// The Hide style as Settings offers it.
     func hideChoice(of display: DisplayRecord) -> DisplayHideChoice {
-        switch hideStyle(of: display) {
+        switch chosenHideStyle(of: display) {
         case .turnOff: return .turnOff
         case .removeFromDesktop:
             return display.uuid.flatMap { hidePreferences[$0] }?.choosesSwitchInput == true ? .switchInput : .mirror
@@ -5132,7 +5156,7 @@ final class AppModel: ObservableObject {
                     refuse(.hide, targetUUID: targetUUID, error: DisplayHideError.identityChanged(reason), completion: completion)
                     return
                 }
-            } else if hideStyle(of: display) != .turnOff {
+            } else if chosenHideStyle(of: display) != .turnOff {
                 refuse(.hide, targetUUID: targetUUID, error: DisplayHideError.unavailable(
                     "Set this display’s Hide to Turn off in Settings → Displays first."
                 ), completion: completion)
@@ -6837,7 +6861,7 @@ final class AppModel: ObservableObject {
             ) {
                 throw DisplayHideError.identityChanged(reason)
             }
-            guard let display = matchingDisplay(target), manualAction != nil || hideStyle(of: display) == .turnOff else {
+            guard let display = matchingDisplay(target), manualAction != nil || chosenHideStyle(of: display) == .turnOff else {
                 throw DisplayHideError.identityChanged("The display or its Hide setting changed before Turn off began. Try again.")
             }
             if let blocker = turnOffReadiness(for: display, allowingCurrentOperation: true, actionLeaseID: actionLeaseID) {

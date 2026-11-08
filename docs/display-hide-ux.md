@@ -122,7 +122,9 @@ Show: turn on by saved ID (one write) → verify identity → restore mode, posi
   Built-in and mirrored displays are refused, and another usable physical
   display must stay on.
 - One display at a time, and not while Hide mirrors a display (or the
-  reverse): macOS can drop Hide mirrors when a display turns off.
+  reverse): macOS can drop Hide mirrors when a display turns off. Hide from
+  Settings, the menu or `dp app hide` blacks the display out instead, as it
+  does for a Mirror display whose source is hidden. Action steps still refuse.
 - No input switching or DDC.
 - Wake, relaunch and rules never turn a display off again. If macOS turns it
   back on (for example after sleep), it stays **Hidden** and Show puts its
