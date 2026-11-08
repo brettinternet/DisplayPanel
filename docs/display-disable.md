@@ -87,6 +87,10 @@ the public Hide journal, so it can coexist with displays removed by mirroring.
        └─ nothing written ─→ cancelled    └─ not back ─→ needsAttention
   ```
 
+- macOS may apply its saved layout for the remaining displays, including a
+  different main. Turn off gives main back with one public write and leaves
+  the rest of that layout until Show. A turned-off main has no role to keep;
+  macOS picks the next one.
 - Show reconnects only the saved ID after the same exact identity checks,
   waits up to 10 seconds for the display to return, then restores its mode,
   position and main role (the whole saved layout when it's the last hidden
@@ -96,6 +100,20 @@ the public Hide journal, so it can coexist with displays removed by mirroring.
   layout without a private write.
 - Logout or reboot ends it. Previous-session recovery offers only **Keep
   displays shown** when nothing else was removed.
+
+### Trial: 26B123, 2026-11-07
+
+Four external displays on Apple Silicon, nothing else hidden, one Turn off
+and one Show per display. Each made one private write each way.
+
+| Display | Turn off | Show |
+| --- | --- | --- |
+| Dell AW3423DW (main, no DDC) | Turned off; macOS picked another main | Back without the monitor's buttons; mode, origin and main role matched the capture taken before |
+| DELL S2721DGF | Turned off, but macOS made another display main, so DisplayPanel reported "The display didn't turn off." (fixed above) | Back without the monitor's buttons |
+
+Not tried live: Turn off alongside displays hidden by mirroring, app quit and
+relaunch, display sleep and wake, and macOS reconnecting the display itself.
+Fake-writer tests cover each.
 
 ## Safety checks
 

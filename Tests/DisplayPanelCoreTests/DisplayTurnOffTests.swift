@@ -35,6 +35,8 @@ final class DisplayTurnOffTests: XCTestCase {
         var duringStage: () throws -> Void = {}
         var environment: (inout RecoveryEligibilityEnvironment) -> Void = { _ in }
         var transactionAvailable = true
+        /// macOS applies its saved layout for the remaining displays on turn-off.
+        var mainAfterTurnOff: Int?
 
         func id(_ index: Int) -> UInt32 { UInt32(index + 6) }
         func uuid(_ index: Int) -> String { String(format: "00000000-0000-0000-0000-%012d", index) }
@@ -123,6 +125,7 @@ final class DisplayTurnOffTests: XCTestCase {
                         self.writes.append("\(enabled ? "on" : "off") \(id)")
                         if !enabled {
                             self.off.insert(self.index(id))
+                            if let main = self.mainAfterTurnOff { self.mainOverride = main }
                         } else if self.returns {
                             self.off.remove(self.index(id))
                             // macOS returns a display beside the others, not as main.
@@ -136,6 +139,7 @@ final class DisplayTurnOffTests: XCTestCase {
 
         func controller(directory: URL) -> MirrorController {
             var staged: (UInt32, UInt32)?
+            var origins: [(Int, Int32)] = []
             let operation = RecoveryStore(url: directory.appendingPathComponent("operation"))
             var controller = MirrorController(
                 records: { try self.records() }, operationLock: { operation },
@@ -150,9 +154,16 @@ final class DisplayTurnOffTests: XCTestCase {
                     begin: { OpaquePointer(bitPattern: 1)! },
                     stage: { _, target, source in staged = (target, source) },
                     complete: { _, _ in
-                        let (target, source) = try XCTUnwrap(staged)
-                        self.mirrors[self.index(target)] = self.index(source)
-                    }, cancel: { _ in XCTFail("fake public writer has no rollback") }),
+                        if let (target, source) = staged { self.mirrors[self.index(target)] = self.index(source) }
+                        if !origins.isEmpty {
+                            self.writes.append("origins")
+                            self.mainOverride = origins.first { $0.1 == 0 }?.0
+                            self.order = origins.sorted { $0.1 < $1.1 }.map(\.0)
+                        }
+                        staged = nil
+                        origins = []
+                    }, cancel: { _ in XCTFail("fake public writer has no rollback") },
+                    stageOrigin: { _, id, x, _ in origins.append((self.index(id), x)) }),
                 restoreTarget: { _, uuid, revalidate, _ in
                     try revalidate()
                     let index = try XCTUnwrap((1...3).first { self.uuid($0) == uuid })
@@ -295,6 +306,25 @@ final class DisplayTurnOffTests: XCTestCase {
         _ = try sut.unmirror(store: store, selector: world.uuid(2))
         XCTAssertEqual(world.writes, ["off 8", "on 8"])
         XCTAssertEqual(world.applies, 1)
+        XCTAssertEqual(try world.snapshot(), baseline)
+        XCTAssertEqual(try store.load().state, .restored)
+    }
+
+    /// Regression (26B123 trial): macOS applied its saved layout for the other
+    /// displays, making another one main; Turn off reported a false failure.
+    func testTurnOffGivesMainBackWhenMacOSMovesIt() throws {
+        let baseline = try world.snapshot()
+        let sut = world.controller(directory: directory)
+        world.mainAfterTurnOff = 3
+        _ = try sut.turnOff(world.identity(2), store: store)
+        XCTAssertEqual(world.writes, ["off 8", "origins"])
+        XCTAssertEqual(try disconnect(2).state, .off)
+        XCTAssertNil(try disconnect(2).failure)
+        XCTAssertEqual(try store.load().state, .mirrored)
+        XCTAssertEqual(try world.snapshot().displays.first(where: \.main)?.uuid, world.uuid(1))
+
+        _ = try sut.unmirror(store: store, selector: world.uuid(2))
+        XCTAssertEqual(world.writes, ["off 8", "origins", "on 8"])
         XCTAssertEqual(try world.snapshot(), baseline)
         XCTAssertEqual(try store.load().state, .restored)
     }

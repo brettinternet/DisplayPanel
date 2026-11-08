@@ -199,14 +199,43 @@ extension MirrorController {
             try? store.save(journal)
             throw error
         }
+        // macOS may apply its saved arrangement for the remaining displays,
+        // including another main (seen on 26B123). Keep that arrangement but
+        // give main back with one public write, as dragging the menu bar
+        // would. Positions return on Show. A turned-off main has no role to
+        // keep: macOS picks the next main.
+        let others = current.excluding([target.uuid])
+        let moved = RecoveryError.unsafe("It turned off, but macOS changed the other displays. Show it to put them back.")
         do {
-            try settle {
+            var previous: String?
+            let observed = try settle {
                 let observed = try engine.capture()
+                let identity = observed.stableTopologyIdentity()
+                defer { previous = identity }
                 guard !observed.displays.contains(where: { $0.uuid == target.uuid }),
-                      let session = journal.publicMirrorSession,
-                      MirrorSessionTopology.matches(session, current: observed) else {
+                      (try? others.validateRestoration(to: observed)) != nil,
+                      identity != nil, identity == previous else {
                     throw RecoveryError.unsafe("The display didn't turn off.")
                 }
+                return observed
+            }
+            if !target.main, let savedMain = current.displays.first(where: \.main),
+               let main = observed.displays.first(where: { $0.uuid == savedMain.uuid }),
+               !main.main, main.active, main.mirrorUUID == nil {
+                let origins = try observed.displays.filter { $0.active && $0.mirrorUUID == nil }
+                    .sorted { $0.uuid != main.uuid && $1.uuid == main.uuid }
+                    .map { display -> (UInt32, Int32, Int32) in
+                        guard let x = Int32(exactly: Int64(display.x) - Int64(main.x)),
+                              let y = Int32(exactly: Int64(display.y) - Int64(main.y)) else { throw moved }
+                        return (display.id, x, y)
+                    }
+                do {
+                    try self.transaction.apply(removals: [], origins: origins) { try observed.verify(engine.capture()) }
+                } catch { throw moved }
+            }
+            try engine.converge {
+                guard let session = journal.publicMirrorSession,
+                      MirrorSessionTopology.matches(session, current: try engine.capture()) else { throw moved }
             }
         } catch {
             // Commit ran: keep `off` so Show can reconnect the saved ID once.
