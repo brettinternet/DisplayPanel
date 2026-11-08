@@ -713,10 +713,12 @@ final class SettingsWindowTests: XCTestCase {
         let content = try XCTUnwrap(sheet.contentView)
         let guidance = "Set this display’s Hide to Mirror or Switch input in Settings → Displays first."
         XCTAssertEqual(model.displayActionRemovalSetupReason(for: Self.sideUUID), guidance)
-        content.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
-        let setupY = content.isFlipped ? content.bounds.minY + 390 : content.bounds.maxY - 390
-        let setupPoint = content.convert(NSPoint(x: 100, y: setupY), to: nil)
+        func setupButton() -> NSAccessibilityProtocol? {
+            accessibilityElements(in: sheet).first { $0.accessibilityLabel() == "Set Up step 1 in Displays" }
+        }
+        spin { content.layoutSubtreeIfNeeded(); return setupButton() != nil }
+        let setupFrame = sheet.convertFromScreen(try XCTUnwrap(setupButton()).accessibilityFrame())
+        let setupPoint = NSPoint(x: setupFrame.midX, y: setupFrame.midY)
         let down = try XCTUnwrap(NSEvent.mouseEvent(
             with: .leftMouseDown, location: setupPoint, modifierFlags: [],
             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: sheet.windowNumber,
@@ -1078,7 +1080,9 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("Turn on Experimental features"))
         }
         XCTAssertTrue(delegate.makeMenu().items.contains { $0.title == "Hide DELL S2721DGF" })
-        XCTAssertEqual(try sideDisplaySwitchCount(model), 1, "removal setup stays out of Settings")
+        let flagOff = try sideDisplayHideControls(model)
+        XCTAssertFalse(flagOff.style, "Hide styles stay out of Settings")
+        XCTAssertTrue(flagOff.keepWindowsOff)
 
         model.acceptExperimentalConsent()
         XCTAssertTrue(defaults.bool(forKey: "experimentalFeaturesEnabled"))
@@ -1087,7 +1091,9 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertNil(try sideTile(model).actionBlocker)
         XCTAssertNoThrow(try model.makeHideRequest(targetUUID: Self.sideUUID))
         XCTAssertTrue(delegate.makeMenu().items.contains { $0.title == "Hide DELL S2721DGF" })
-        XCTAssertEqual(try sideDisplaySwitchCount(model), 0, "Mirror replaces Keep windows off")
+        let flagOn = try sideDisplayHideControls(model)
+        XCTAssertTrue(flagOn.style)
+        XCTAssertFalse(flagOn.keepWindowsOff, "Mirror replaces Keep windows off")
         let reloaded = try makeModel(keepingDefaults: true).0
         XCTAssertTrue(reloaded.experimentalFeaturesEnabled)
 
@@ -1897,10 +1903,10 @@ final class SettingsWindowTests: XCTestCase {
         window.sendEvent(up)
     }
 
-    /// Opens the side display in Displays and returns how many switches it shows.
-    /// Hide's style is a menu picker, which exposes no native control; Remove
-    /// from desktop drops the Windows section and its Keep windows off switch.
-    private func sideDisplaySwitchCount(_ model: AppModel) throws -> Int {
+    /// Opens the side display in Displays and returns which Hide controls it
+    /// offers. Mirror and Switch input drop the Windows section and its Keep
+    /// windows off switch.
+    private func sideDisplayHideControls(_ model: AppModel) throws -> (style: Bool, keepWindowsOff: Bool) {
         let controller = SettingsWindowController(model: model)
         controller.present()
         controller.selectDisplay(uuid: Self.sideUUID)
@@ -1908,12 +1914,20 @@ final class SettingsWindowTests: XCTestCase {
         defer { window.close() }
         window.setContentSize(NSSize(width: 680, height: 1200))
         let content = try XCTUnwrap(window.contentView)
-        let expected = model.hideRemovesFromDesktop(displays[1]) ? 0 : 1
-        spin {
-            content.layoutSubtreeIfNeeded()
-            return nativeViews(in: content).compactMap { $0 as? NSSwitch }.count == expected
+        func controls() -> (style: Bool, keepWindowsOff: Bool) {
+            let labels = accessibilityElements(in: window).compactMap { $0.accessibilityLabel() }
+            return (labels.contains { $0.hasPrefix("Hide style for ") },
+                    labels.contains { $0.hasPrefix("Also keep windows off ") })
         }
-        return nativeViews(in: content).compactMap { $0 as? NSSwitch }.count
+        let expected = (model.experimentalFeaturesEnabled, !model.hideRemovesFromDesktop(displays[1]))
+        spin { content.layoutSubtreeIfNeeded(); return controls() == expected }
+        return controls()
+    }
+
+    /// SwiftUI Form controls aren't all AppKit views; walk them as VoiceOver does.
+    private func accessibilityElements(in root: Any) -> [NSAccessibilityProtocol] {
+        guard let element = root as? NSAccessibilityProtocol else { return [] }
+        return [element] + (element.accessibilityChildren() ?? []).flatMap(accessibilityElements)
     }
 
     private var hiddenDisplays: [DisplayRecord] {

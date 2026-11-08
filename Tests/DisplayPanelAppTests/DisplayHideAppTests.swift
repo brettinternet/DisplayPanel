@@ -3331,18 +3331,21 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertFalse(model.hideRemovesFromDesktop(displays[1]), "Hide blacks out until removal is on")
 
         // SwiftUI's menu Picker is not an NSPopUpButton; exercise its binding through the model.
-        model.setHideEnabled(true, for: displays[1])
+        model.setHideChoice(.mirror, for: displays[1])
         settle(window)
         let configuration = try XCTUnwrap(model.hideConfiguration(for: Self.targetUUID))
         XCTAssertTrue(configuration.enabled)
         XCTAssertEqual(configuration.source?.uuid, Self.mainUUID, "the main display is the default mirror source")
         XCTAssertEqual(model.sourceChoices(for: configuration).map(\.uuid), [Self.mainUUID, Self.sourceUUID])
-        XCTAssertNil(configuration.awayInput, "no input switch by default")
+        XCTAssertNil(configuration.awayInput, "Mirror switches no input")
         XCTAssertEqual(model.displayTiles.first { $0.id == Self.targetKey }?.action, .hide)
         XCTAssertNil(model.displayTiles.first { $0.id == Self.targetKey }?.actionBlocker)
         XCTAssertTrue(model.hideRemovesFromDesktop(displays[1]))
+        XCTAssertEqual(ddcChecks, 0, "Mirror never reads the input")
 
-        // The setup shows the Mac's input before an input is chosen, read once when shown.
+        // Switch input shows the Mac's input before an input is chosen, read once when shown.
+        model.setHideChoice(.switchInput, for: displays[1])
+        settle(window)
         spin { ddcChecks > 0 }
         XCTAssertEqual(ddcChecks, 1, "showing the setup reads the Mac input")
         XCTAssertEqual(model.macInputDetections[Self.targetKey], .detected(0x0F))
@@ -3365,13 +3368,13 @@ final class DisplayHideAppTests: XCTestCase {
                                   controlSummary(window))
         XCTAssertEqual(field.stringValue, "0x2A")
 
-        // Editing the code to something that isn't one turns switching off
-        // instead of leaving the last code armed.
+        // Editing the code to something that isn't one clears it instead of
+        // leaving the last code armed; Switch input then waits for an input.
         for invalid in ["", "zz", "0"] {
             try replaceText(of: field, in: window, with: invalid)
             settle(window)
             XCTAssertNil(model.hideConfiguration(for: Self.targetUUID)?.awayInput, "\"\(invalid)\" switches nothing")
-            XCTAssertNil(try model.makeHideRequest(targetUUID: Self.targetUUID).awayInput)
+            XCTAssertThrowsError(try model.makeHideRequest(targetUUID: Self.targetUUID))
         }
         try replaceText(of: field, in: window, with: "0x1B")
         settle(window)
