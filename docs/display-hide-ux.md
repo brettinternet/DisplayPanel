@@ -180,7 +180,8 @@ dp app run-action --action ACTION_UUID --json
 - A Show-only Action can wait out an in-progress monitor input return (up to 15
   seconds), then check again and run once.
 - Mirror, Switch input and Turn off steps need Experimental features. A Mirror
-  or Switch input step saves the display's setup; if that setup changes, review
+  or Switch input step saves the display's setup. Changing that setup in
+  Displays updates the step when the Action still checks out; otherwise review
   and save the Action again.
 - **Turn off** doesn't depend on the display's Hide style. An Action turns off
   one display at a time and not while it mirrors another, as in

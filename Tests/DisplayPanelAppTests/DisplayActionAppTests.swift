@@ -106,11 +106,15 @@ final class DisplayActionAppTests: XCTestCase {
         unreviewed.reviewedRemoval = nil
         XCTAssertEqual(model.displayActionStatus(for: unreviewed)?.hasPrefix("Step 1:"), true)
 
+        // Displays edits that leave the step unusable keep the saved Action asking for review.
+        XCTAssertNotNil(model.displayActionReviewChange(for: try XCTUnwrap(model.displayActions.actions.first)))
+
+        // Once the edited setup is usable again, the saved Action accepts it without a resave.
         model.setHideEnabled(true, for: try XCTUnwrap(displays.first { $0.uuid == targetUUID }))
-        var reviewedAgain = action
-        try model.saveDisplayAction(reviewedAgain, replacing: action.id)
-        reviewedAgain = try XCTUnwrap(model.displayActions.actions.first)
+        let reviewedAgain = try XCTUnwrap(model.displayActions.actions.first)
+        XCTAssertEqual(reviewedAgain.reviewedRemoval, ReviewedRemovalSetup(removeEnabled: true, sourceUUID: alternateUUID, awayInput: 0x12))
         XCTAssertNil(model.displayActionReviewChange(for: reviewedAgain))
+        XCTAssertNil(model.displayActionRunBlocker(for: reviewedAgain))
 
         model.detectMacInput(for: targetUUID)
         XCTAssertNil(model.displayActionReviewChange(for: reviewedAgain), "read-only return-input detection is not a reviewed setup field")

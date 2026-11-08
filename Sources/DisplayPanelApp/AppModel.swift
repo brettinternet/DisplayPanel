@@ -1577,6 +1577,16 @@ final class AppModel: ObservableObject {
         displayActions = updated
     }
 
+    /// A Displays edit is the user's own review, so Actions mirroring this display
+    /// accept it when they still validate. The rest keep asking for review.
+    private func acceptDisplaysSetupInActions(for targetUUID: String) {
+        for action in displayActions.actions where action.steps.contains(where: {
+            $0.effect == .removeFromDesktop && $0.target?.uuid.caseInsensitiveCompare(targetUUID) == .orderedSame
+        }) {
+            try? saveDisplayAction(action, replacing: action.id)
+        }
+    }
+
     func currentReviewedRemovalSetup(for targetUUID: String) -> ReviewedRemovalSetup {
         let configuration = hidePreferences[targetUUID]
         return ReviewedRemovalSetup(
@@ -3384,6 +3394,7 @@ final class AppModel: ObservableObject {
         updated[uuid] = configuration
         hidePreferences = updated
         clearFailedResult(uuid)
+        acceptDisplaysSetupInActions(for: uuid)
     }
 
     func setKeepWindowsOffEnabled(_ enabled: Bool, for targetUUID: String) {
@@ -3784,6 +3795,7 @@ final class AppModel: ObservableObject {
         updated[uuid] = configuration
         hidePreferences = updated
         clearFailedResult(uuid)
+        acceptDisplaysSetupInActions(for: uuid)
     }
 
     /// Sets the input the monitor switches to on Hide. Nil switches nothing,
@@ -3802,6 +3814,7 @@ final class AppModel: ObservableObject {
         updated[uuid] = configuration
         hidePreferences = updated
         clearFailedResult(uuid)
+        acceptDisplaysSetupInActions(for: uuid)
     }
 
     /// The input Show switches back to: the detected Mac input, else the saved
