@@ -1972,7 +1972,11 @@ final class AppModel: ObservableObject {
         }
         let display: DisplayRecord
         if let expectedTarget {
-            guard matches(target, expectedTarget), let current = matchingDisplay(expectedTarget) else {
+            // An earlier Show's relink can renumber every display. Show revalidates
+            // through the journal, which adopts that by UUID, so only the writes
+            // that target the frozen numeric ID need it unchanged.
+            let current = step.effect == .show ? matchingSavedDisplay(target) : matchingDisplay(expectedTarget)
+            guard matches(target, expectedTarget), let current else {
                 return blocked(Self.displayChangedBlocker, .topologyChanged)
             }
             display = current
