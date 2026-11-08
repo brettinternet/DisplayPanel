@@ -11,6 +11,7 @@ final class DisplayReconfigurationEvents: @unchecked Sendable {
     private var generation: UInt64 = 0
     private var writing = false
     private var quietUntil: TimeInterval = 0
+    private var lastReceived: TimeInterval = 0
     private var registered = false
     private var handler: (@MainActor (UInt32, CGDisplayChangeSummaryFlags, Bool) -> Void)?
 
@@ -41,6 +42,13 @@ final class DisplayReconfigurationEvents: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Seconds since CoreGraphics last reported any display change, ours included.
+    func secondsSinceLastChange() -> TimeInterval {
+        lock.lock()
+        defer { lock.unlock() }
+        return ProcessInfo.processInfo.systemUptime - lastReceived
+    }
+
     private func stamp() -> (UInt64, Bool) {
         lock.lock()
         defer { lock.unlock() }
@@ -48,6 +56,9 @@ final class DisplayReconfigurationEvents: @unchecked Sendable {
     }
 
     func receive(display: UInt32, flags: CGDisplayChangeSummaryFlags) {
+        lock.lock()
+        lastReceived = ProcessInfo.processInfo.systemUptime
+        lock.unlock()
         let received = stamp()
         reconfigurationLogger.info("display=\(display) flags=\(flags.rawValue) ownOperation=\(received.1)")
         Task { @MainActor [weak self] in

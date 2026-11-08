@@ -1462,7 +1462,9 @@ final class DisplayMirroringTests: XCTestCase {
     // the relink, so Show must not restore during the pre-relink quiet period.
     // A return that never relinks re-selects the input once (S2721DGF keeps a
     // dead link otherwise) and settles again before restoring. S2721DGF's
-    // return is often unconfirmed, which must re-select too.
+    // return is often unconfirmed, which must re-select too. After the relink,
+    // Show waits out the cascade: unmirroring 200 ms after a relink storm
+    // preceded a kernel panic (2026-11-08).
     func testShowAfterInputSwitchWaitsForRelinkOrQuietFloor() throws {
         for (relinks, returned) in [(true, DDCInputSelection.Outcome.verified), (false, .verified), (false, .unverified)] {
             let store = RecoveryStore(url: directory.appendingPathComponent("relink-\(relinks)-\(returned).json"))
@@ -1509,7 +1511,8 @@ final class DisplayMirroringTests: XCTestCase {
             let outcome = try sut.guardedBack(expectedJournalID: id, input: 15, store: store)
             XCTAssertEqual(outcome.state, .verified)
             let waited = try XCTUnwrap(capturesBeforeRestore)
-            XCTAssertLessThan(waited, 10, "relink evidence should end the wait early")
+            XCTAssertGreaterThanOrEqual(waited, 3 + 16, "restore only after three quiet seconds following the relink")
+            XCTAssertLessThan(waited, 26, "relink evidence should end the wait before the quiet floor")
             if relinks {
                 XCTAssertEqual(selected, [15])
             } else {

@@ -2144,6 +2144,41 @@ final class DisplayHideAppTests: XCTestCase {
         }
     }
 
+    /// Writing into a monitor relink storm preceded a kernel panic (2026-11-08).
+    func testShowWaitsUntilDisplaysStopChanging() async throws {
+        let defaults = try makeDefaults()
+        let box = StatusBox(handoffStatus(.hidden, target: displays[1], source: displays[0], journalID: "storm-journal", canShow: true))
+        var showStarted: TimeInterval = 0
+        let model = makeModel(
+            defaults: defaults,
+            displays: displays,
+            status: { box.value },
+            showDisplay: { _, _ in
+                showStarted = ProcessInfo.processInfo.systemUptime
+                box.value = self.handoffStatus(.none, target: nil, source: nil)
+                return .notRequested
+            },
+            displayWakeSettleDelay: 0.1
+        )
+        try await waitUntil { !model.protectionQuiescencePending }
+        let events = model.displayReconfigurationEvents
+        events.receive(display: 202, flags: .removeFlag)
+        let storm = Task.detached { () -> TimeInterval in
+            var last: TimeInterval = 0
+            for _ in 0..<25 {
+                try? await Task.sleep(nanoseconds: 20_000_000)
+                last = ProcessInfo.processInfo.systemUptime
+                events.receive(display: 202, flags: .addFlag)
+            }
+            return last
+        }
+
+        let result = try await showAndWait(model)
+        let lastChange = await storm.value
+        XCTAssertTrue(result.succeeded, result.message)
+        XCTAssertGreaterThanOrEqual(showStarted - lastChange, 0.2, "Show writes only after displays stop changing")
+    }
+
     func testShowActionWaitsForInputReturnBeforeShowingBothDisplaysOnce() async throws {
         let defaults = try makeDefaults()
         let targets = [displays[1], displays[2]]

@@ -700,6 +700,7 @@ final class AppModel: ObservableObject {
             actionTopologyWriteInProgress = false
             onStatusChange?()
         }
+        try await waitForQuietDisplays()
         return try await performDisplayWrite { [writeMode] in
             try writeMode(saved) { try DispatchQueue.main.sync(execute: revalidate) }
         }
@@ -6764,6 +6765,23 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Writing while displays still relink can wedge Apple's display controller:
+    /// on 2026-11-08 back-to-back Show writes into cascading monitor relinks
+    /// preceded a kernel panic. Each Hide, Show, Turn off and mode write starts
+    /// only after macOS reports no display change for two settle intervals, and
+    /// gives up after 15 seconds of continuous change. Callers run this after
+    /// claiming `hideOperation` and before validating their request.
+    private func waitForQuietDisplays() async throws {
+        let quietPeriod = 2 * displayWakeSettleDelay
+        let deadline = ProcessInfo.processInfo.systemUptime + 15
+        while case let wait = quietPeriod - displayReconfigurationEvents.secondsSinceLastChange(), wait > 0 {
+            guard ProcessInfo.processInfo.systemUptime + wait <= deadline else {
+                throw DisplayHideError.blocked("Displays are still changing. Try again once they settle.")
+            }
+            try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
+        }
+    }
+
     /// Holds `event` until the running Hide or Show write finishes. Returns false when none is running.
     func deferUntilDisplayWriteFinishes(_ event: @escaping () -> Void) -> Bool {
         guard deferredDisplayEvents != nil else { return false }
@@ -6801,6 +6819,7 @@ final class AppModel: ObservableObject {
         protectionQuiescenceFailure = nil
         var returnedInputOutcome: DisplayInputOutcome?
         do {
+            try await waitForQuietDisplays()
             displays = displayProvider()
             refreshHandoffStatus()
             if let manualAction, let reason = manualActionValidationFailure(
@@ -6872,6 +6891,7 @@ final class AppModel: ObservableObject {
         }
         protectionQuiescenceFailure = nil
         do {
+            try await waitForQuietDisplays()
             displays = displayProvider()
             refreshHandoffStatus()
             if let manualAction, let reason = manualActionValidationFailure(
@@ -6940,6 +6960,12 @@ final class AppModel: ObservableObject {
             return
         }
         protectionQuiescenceFailure = nil
+        do {
+            try await waitForQuietDisplays()
+        } catch {
+            notStarted(error.localizedDescription)
+            return
+        }
         guard !displayLifecycleTransitioning else {
             notStarted(DisplayHideError.sleeping.localizedDescription)
             return
@@ -7023,15 +7049,23 @@ final class AppModel: ObservableObject {
     /// Returns a display that an earlier Action step already restored to the Mac:
     /// one DDC write, only after a read finds the monitor on the input Hide switched to.
     private func returnRestoredDisplayInput(targetUUID: String, completion: @escaping (DisplayOperationResult) -> Void) {
-        guard let (away, input, display) = restoredDisplayInput(targetUUID) else {
-            refuse(.show, targetUUID: targetUUID, error: DisplayHideError.blocked("This display isn’t hidden by DisplayPanel."),
-                   completion: completion)
+        let notHidden = DisplayHideError.blocked("This display isn’t hidden by DisplayPanel.")
+        guard restoredDisplayInput(targetUUID) != nil else {
+            refuse(.show, targetUUID: targetUUID, error: notHidden, completion: completion)
             return
         }
-        let identity = coreIdentity(DisplayIdentitySnapshot(display))
         hideOperation = .showing(targetUUID)
         onStatusChange?()
         Task { @MainActor in
+            var refusal: Error?
+            do { try await waitForQuietDisplays() } catch { refusal = error }
+            // Resolve after the wait: an earlier step's relink can renumber the monitor.
+            guard refusal == nil, let (away, input, display) = restoredDisplayInput(targetUUID) else {
+                hideOperation = .idle
+                refuse(.show, targetUUID: targetUUID, error: refusal ?? notHidden, completion: completion)
+                return
+            }
+            let identity = coreIdentity(DisplayIdentitySnapshot(display))
             let outcome: DisplayInputOutcome
             do {
                 actionTopologyWriteInProgress = true

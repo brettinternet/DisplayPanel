@@ -1096,13 +1096,18 @@ struct MirrorController {
         // never restore from the pre-input topology or consider mirror return
         // a Show. An unchanged input settles on two matching ready samples
         // within five seconds. A switched input makes the monitor relink some
-        // seconds later (Auto Select off), so within 15 seconds it also needs
-        // relink evidence (target unready or topology changed) or five seconds
-        // of continuous ready stability.
+        // seconds later (Auto Select off), so within 20 seconds it needs relink
+        // evidence (target unready or topology changed) followed by three
+        // seconds of unchanged ready topology, or five seconds of continuous
+        // ready stability. A relink can cascade through every display in the
+        // same hardware mirror set for seconds; unmirroring during that storm
+        // preceded a kernel panic (2026-11-08), so one quiet sample isn't enough.
         func settle(from preIdentity: String?, switched: Bool) throws -> RecoverySnapshot {
-            let lastAttempt = switched ? 74 : 25
+            let lastAttempt = switched ? 99 : 25
             let quietMatches = 25
+            let relinkQuietMatches = 15
             relinked = !switched
+            var changed = false
             var previous: String?
             var matches = 0
             for attempt in 0...lastAttempt {
@@ -1113,11 +1118,11 @@ struct MirrorController {
                     let observed = try engine.capture()
                     try preflightModes(readyModes(observed))
                     let identity = observed.stableTopologyIdentity()
-                    if identity != preIdentity { relinked = true }
+                    if identity != preIdentity { relinked = true; changed = true }
                     note(attempt, "ready#\(identity?.prefix(8) ?? "none")")
                     matches = identity != nil && identity == previous ? matches + 1 : 0
                     previous = identity
-                    if matches > 0, relinked || matches >= quietMatches {
+                    if matches >= (changed ? relinkQuietMatches : relinked ? 1 : quietMatches) {
                         guard Self.sameStoredJournal(journal, try store.load()) else {
                             throw RecoveryError.unsafe("journal changed during input return; inspect recovery status")
                         }
@@ -1129,6 +1134,7 @@ struct MirrorController {
                 } catch {
                     note(attempt, RecoveryError.reason(of: error))
                     relinked = true
+                    changed = true
                     previous = nil
                     matches = 0
                     if attempt == lastAttempt { throw error }
