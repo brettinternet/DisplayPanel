@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.10
 
 - Add a **Turn off** Hide style (experimental) for monitors with no other input: the Mac stops sending a signal until Show turns the display back on and restores its layout. Works on the main display; one display at a time, and not while Hide mirrors another display.
 - Split Remove from desktop into the **Mirror** and **Switch input** Hide styles. Switch input waits until you choose the input.
