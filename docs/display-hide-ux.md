@@ -84,7 +84,7 @@ desktop, or to **Switch input** to also hand the monitor to another computer:
 
 ```text
 Hide: save layout → switch input (Switch input) → mirror
-Show: restore layout → verify → switch input back (Switch input)
+Show: switch input back (Switch input) → wait for displays to settle → restore layout → verify
 ```
 
 Both styles mirror: macOS needs the Mac's signal on the display, so Switch input

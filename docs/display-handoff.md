@@ -42,9 +42,9 @@ previous input), no automatic rollback. A verified or unconfirmed Show/back retu
 that never relinks is re-selected once through the observed previous input. The switch-back command is
 printed, not saved, so keep the output or use the monitor's input button.
 
-Input return can reconnect a display or reinstate mirroring. Show/back waits up
-to five seconds for two matching, identity-checked topology observations with
-all saved modes available before restoring. A returned mirror is not a shown
+Input return can reconnect a display or reinstate mirroring. Show/back waits for
+identity-checked topology with all saved modes available before restoring; see
+[input-return settle](display-recovery.md#sleep-wake-and-reboot). A returned mirror is not a shown
 desktop: the selected display is explicitly restored and verified afterward.
 The final Show/back verifies the exact journaled arrangement and main display.
 

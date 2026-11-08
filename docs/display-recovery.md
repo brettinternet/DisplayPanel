@@ -104,10 +104,14 @@ A monitor on another computer's input may reconnect with a reduced mode list
 `back --input` validates the captured identities, attempts the configured Mac
 input once, waits for modes/topology to settle, then restores and verifies the
 journaled desktop. When the input may have changed, the settle waits up to
-15 seconds for relink evidence (a topology change or unavailable sample)
-followed by a stable match, or 5 seconds of unchanged samples when the monitor
-never relinks; this covers monitors with Auto Select off, whose relink starts
-only after the write. A verified or unconfirmed return that never relinks is
+20 seconds for relink evidence (a topology change or unavailable sample)
+followed by 3 seconds of unchanged samples, or 5 seconds of unchanged samples
+when the monitor never relinks; this covers monitors with Auto Select off, whose
+relink starts only after the write. A relink can cascade through every display
+in the same mirror set, and writing during it preceded a kernel panic, so one
+quiet sample is not enough. The app also waits until displays have been
+unchanged for 2 seconds (up to 15) before Hide, Show, mode writes and each
+Action step. A verified or unconfirmed return that never relinks is
 re-selected once through the monitor's previous input (4 seconds there), then
 settles again: a monitor whose link the Mac retrained while it showed another
 input can otherwise stay without a picture and never hotplug. This input-return path accepts online mirror followers that
