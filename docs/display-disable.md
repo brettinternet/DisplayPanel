@@ -53,22 +53,13 @@ dp recovery panic
 
 ## App controls
 
-**Settings → Displays → Full disconnect · Experimental** appears for the
-selected display while Experimental features are on (or while a disconnect is
-unresolved).
-
-1. Show any hidden displays and resolve any recovery first.
-2. Choose **Disconnect…**. DisplayPanel pauses automation and restores dimmed
-   brightness.
-3. Confirm you're present, a named display stays usable, and you accept manual
-   recovery. Consent expires after 30 seconds and covers one 15-second
-   disconnect.
-4. The display reconnects at the deadline, or earlier with **Reconnect…**.
-   Automation resumes once reconnection is verified.
-
-Main and built-in displays are refused. **Reconnect…** stays available after
-relaunch, with the display absent, and with Experimental features off.
-Scripts, rules, startup and wake never disconnect a display.
+Settings doesn't start a Full disconnect; the [Turn off](#turn-off) Hide
+style replaces it. While a disconnect journal is unresolved, for example after
+an interrupted `dp recovery disable`, **Settings → Displays → Full disconnect**
+shows it and offers **Reconnect…**, also after relaunch, with the display
+absent, and with Experimental features off. Hide, Show and automation wait
+until the reconnect is verified. Rules, startup and wake never disconnect a
+display.
 
 ## Turn off
 
@@ -79,8 +70,12 @@ the public Hide journal.
 - Main displays are allowed; another usable physical display must stay on.
   Built-in, mirrored and hidden displays are refused, as are the driver,
   architecture, setter and awake checks below. One display at a time.
-- Turn off and Remove from desktop refuse each other: on 26B123, turning a
-  display off dropped another display's Hide mirror (trial below).
+- Turn off and the Mirror and Switch input styles refuse each other: on
+  26B123, turning a display off dropped another display's Hide mirror (trial
+  below).
+- Hide from Settings, the menu or `dp app hide` turns a display off when Turn
+  off is its style. An Action's Turn off step does so regardless of the style;
+  its Show step turns the display back on.
 - Show is always offered while the display is off; a changed layout never
   blocks reconnecting it.
 - The journal entry (`publicMirrorSession.disconnects`) is written before the
@@ -103,7 +98,7 @@ the public Hide journal.
   off again. A display macOS reconnects itself is accepted; Show restores its
   layout without a private write.
 - Logout or reboot ends it. Previous-session recovery offers only **Keep
-  displays shown** when nothing else was removed.
+  displays shown** when nothing else was mirrored.
 
 ### Trial: 26B123, 2026-11-07
 

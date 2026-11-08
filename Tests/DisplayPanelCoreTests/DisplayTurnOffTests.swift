@@ -267,7 +267,7 @@ final class DisplayTurnOffTests: XCTestCase {
     }
 
     /// macOS can drop Hide mirrors when a display turns off (26B123 trial),
-    /// so Turn off and Remove from desktop refuse each other.
+    /// so Turn off and Hide mirrors refuse each other.
     func testTurnOffAndRemoveFromDesktopRefuseEachOther() throws {
         let baseline = try world.snapshot()
         let sut = world.controller(directory: directory)

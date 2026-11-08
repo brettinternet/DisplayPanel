@@ -9,7 +9,7 @@
 A macOS CLI and menu-bar app for per-display Hide/Show, idle blackout,
 click-through dimming, display sleep and experimental monitor controls.
 
-![Displays tab with display tiles and experimental Remove from desktop setup](docs/displays.png)
+![Displays tab with display tiles and experimental Hide setup](docs/displays.png)
 
 ## Install
 

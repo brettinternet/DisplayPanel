@@ -47,10 +47,6 @@ final class ExperimentalDisconnectTests: XCTestCase {
             XCTAssertTrue(evidence.contains("Not connected now"))
             XCTAssertTrue(evidence.contains("/synthetic/recovery/current.json"))
         }
-        let consent = presentation(.consent).detail
-        for scope in ["15 seconds", "another screen stays on"] {
-            XCTAssertTrue(consent.contains(scope))
-        }
         XCTAssertTrue(presentation(.refused).detail.contains("won’t guess"))
         XCTAssertTrue(presentation(.helperFailed).detail.contains("journal is kept"))
         XCTAssertTrue(presentation(.watchdogRecovery).detail.contains("Not verified"))

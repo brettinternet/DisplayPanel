@@ -5,7 +5,7 @@ struct GeneralSettingsView: View {
     @ObservedObject var model: AppModel
 
     static let experimentalConsentTitle = "Turn on experimental features?"
-    static let experimentalConsentMessage = "Hide can remove a display from the desktop by mirroring it and switch the monitor’s input. Windows, resolution, refresh rate and HDR may change until Show."
+    static let experimentalConsentMessage = "Hide can mirror a display, switch the monitor’s input or turn the display off. Windows, resolution, refresh rate and HDR may change until Show."
 
     var body: some View {
         Form {
@@ -28,7 +28,7 @@ struct GeneralSettingsView: View {
                     set: model.setExperimentalFeaturesEnabled
                 )) {
                     Text("Experimental features")
-                    Text("Remove from desktop, input switching and Full disconnect.")
+                    Text("Hide styles Mirror, Switch input and Turn off.")
                 }
                 Link("Learn more", destination: AppModel.experimentalDocsURL)
             }

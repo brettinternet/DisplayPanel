@@ -34,7 +34,7 @@ enum DisplayTurnOff {
             if !session.unresolvedDisconnects.isEmpty { reasons.append("another display is turned off; Show it first") }
             // macOS can drop Hide mirrors when a display turns off (26B123).
             if !MirrorSessionTopology.activeRemovals(session.removals).isEmpty {
-                reasons.append("a display is removed from the desktop; Show it first")
+                reasons.append("a display is mirrored by Hide; Show it first")
             }
         }
         reasons += RecoveryEligibilityPolicy.unusableReasons(target, environment: environment)

@@ -3,15 +3,13 @@ import DisplayPanelCore
 
 struct ExperimentalDisconnectControls: View {
     @ObservedObject var model: AppModel
-    let targetUUID: String?
     @State private var reconnectConsent = false
     @State private var reconnectJournalID: String?
 
-    /// Shown for every selected display with Experimental on, and whenever a
-    /// disconnect journal exists so reconnect stays reachable.
-    static func isVisible(model: AppModel, targetUUID: String?) -> Bool {
-        model.disconnectStatus != nil || model.disconnectInspectionFailure != nil ||
-            (model.experimentalFeaturesEnabled && targetUUID != nil)
+    /// Shown whenever a disconnect journal exists or is unreadable, so reconnect
+    /// stays reachable until recovery is verified.
+    static func isVisible(model: AppModel) -> Bool {
+        model.disconnectInspectionFailure != nil || model.disconnectStatus?.resolved == false
     }
 
     var body: some View {
@@ -46,32 +44,14 @@ struct ExperimentalDisconnectControls: View {
             if let failure = model.disconnectFailure {
                 Text(failure).foregroundStyle(.orange).textSelection(.enabled)
             }
-            if model.disconnectPreparationPending {
-                HStack(alignment: .center, spacing: 12) {
-                    Text("Stopping automation…")
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 8)
-                    Button("Cancel") { model.cancelDisconnect() }
-                }
-            } else if model.disconnectRequest == nil,
-                      model.disconnectStatus?.resolved != false,
-                      model.disconnectInspectionFailure == nil,
-                      model.experimentalFeaturesEnabled {
-                disconnectRow
+            if model.protectionQuiescenceFailure != nil {
+                Button("Retry Automation Cleanup", action: model.retryAutomationCleanup)
+                    .disabled(model.protectionQuiescencePending)
             }
         } header: {
-            Text("Full disconnect · Experimental")
+            Text("Full disconnect")
         } footer: {
             SectionFooter(ExperimentalDisconnectPresentation.summary, learnMore: ExperimentalDisconnectPresentation.docsURL)
-        }
-        .alert("Disconnect for 15 seconds?", isPresented: $model.disconnectConsentPending) {
-            Button("Disconnect", role: .destructive) { model.confirmDisconnect() }
-            Button("Cancel", role: .cancel) { model.cancelDisconnect() }
-        } message: {
-            if let request = model.disconnectRequest {
-                Text(Self.consentMessage(request))
-            }
         }
         .alert("Reconnect the display?", isPresented: $reconnectConsent) {
             Button("Reconnect") {
@@ -81,53 +61,6 @@ struct ExperimentalDisconnectControls: View {
         } message: {
             Text("If the screen stays dark, select this Mac’s input on the monitor.")
         }
-    }
-
-    /// One row: what the action does (or what blocks it) beside the action itself.
-    private var disconnectRow: some View {
-        let blocker = model.disconnectBlocker ?? targetBlocker
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Unplug for 15 seconds")
-                    Group {
-                        if let blocker {
-                            Text("\(Image(systemName: "lock")) \(blocker)")
-                        } else {
-                            Text("macOS treats this display as unplugged, then DisplayPanel reconnects it.")
-                        }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 8)
-                Button("Disconnect…") {
-                    if let targetUUID { model.prepareDisconnect(targetUUID) }
-                }
-                .disabled(targetUUID == nil || blocker != nil)
-            }
-            if model.protectionQuiescenceFailure != nil {
-                Button("Retry Automation Cleanup", action: model.retryAutomationCleanup)
-                    .disabled(model.protectionQuiescencePending)
-            }
-        }
-    }
-
-    private var targetBlocker: String? {
-        guard let targetUUID,
-              let display = model.displays.first(where: { $0.uuid?.caseInsensitiveCompare(targetUUID) == .orderedSame }) else {
-            return "Select a connected display with a stable identity."
-        }
-        if display.builtin { return "Built-in displays can’t be disconnected." }
-        if display.main { return "The main display can’t be disconnected." }
-        if !display.active || !display.online { return "Select an active, connected display." }
-        return nil
-    }
-
-    /// Consent is one-use and per operation; it confirms what DisplayPanel can't read.
-    static func consentMessage(_ request: DisplayDisconnectRequest) -> String {
-        "\(request.target.name) disconnects for 15 seconds; \(request.survivor.name) stays on. Reconnect may fail and need manual recovery.\n\nContinue only if you’re at this Mac. Don’t unplug displays or change inputs meanwhile."
     }
 
     private func presentation(_ status: DisplayDisconnectStatus) -> ExperimentalDisconnectPresentation? {
@@ -144,6 +77,6 @@ struct ExperimentalDisconnectControls: View {
                           vendor: target.vendor, model: target.model, serial: target.serial),
             journalID: status.journalID, journalPath: status.journalPath,
             targetEnumerable: model.displays.contains { $0.uuid?.caseInsensitiveCompare(target.uuid) == .orderedSame },
-            leaseSeconds: Int(duration), elapsedSeconds: Int(elapsed), failure: status.failure), isSynthetic: false)
+            leaseSeconds: Int(duration), elapsedSeconds: Int(elapsed), failure: status.failure))
     }
 }

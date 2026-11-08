@@ -17,7 +17,7 @@ dp back --display TARGET_UUID --input dp1 --consent-back
 - `back` shows only the selected target. The last `back` restores the original
   layout exactly.
 
-The app's **Remove from desktop** Hide and Show use this same path.
+The app's **Mirror** and **Switch input** Hide styles and Show use this same path.
 
 ## Order
 

@@ -711,7 +711,7 @@ final class SettingsWindowTests: XCTestCase {
         defer { parent.close() }
 
         let content = try XCTUnwrap(sheet.contentView)
-        let guidance = "Set this display’s Hide to Remove from desktop in Settings → Displays first."
+        let guidance = "Set this display’s Hide to Mirror or Switch input in Settings → Displays first."
         XCTAssertEqual(model.displayActionRemovalSetupReason(for: Self.sideUUID), guidance)
         content.layoutSubtreeIfNeeded()
         RunLoop.main.run(until: Date().addingTimeInterval(0.2))
@@ -1087,7 +1087,7 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertNil(try sideTile(model).actionBlocker)
         XCTAssertNoThrow(try model.makeHideRequest(targetUUID: Self.sideUUID))
         XCTAssertTrue(delegate.makeMenu().items.contains { $0.title == "Hide DELL S2721DGF" })
-        XCTAssertEqual(try sideDisplaySwitchCount(model), 0, "Remove from desktop replaces Keep windows off")
+        XCTAssertEqual(try sideDisplaySwitchCount(model), 0, "Mirror replaces Keep windows off")
         let reloaded = try makeModel(keepingDefaults: true).0
         XCTAssertTrue(reloaded.experimentalFeaturesEnabled)
 
@@ -1700,7 +1700,7 @@ final class SettingsWindowTests: XCTestCase {
             spin { !model.protectionQuiescencePending }
             model.show(targetUUID: Self.sideUUID)
             spin { !model.hideOperation.isBusy }
-            XCTAssertTrue(model.canDismissInputWarning(for: Self.sideUUID))
+            XCTAssertTrue(model.canDismissResult(for: Self.sideUUID))
             let controller = SettingsWindowController(model: model)
             controller.present()
             controller.selectDisplay(uuid: Self.sideUUID)
@@ -1711,8 +1711,8 @@ final class SettingsWindowTests: XCTestCase {
             if let output = ProcessInfo.processInfo.environment["DISPLAYPANEL_SETTINGS_FIXTURE_OUTPUT"] {
                 try writeSnapshot(of: window, to: output, name: "input-warning-\(orientation)")
             }
-            model.dismissInputWarning(for: Self.sideUUID)
-            XCTAssertFalse(model.canDismissInputWarning(for: Self.sideUUID))
+            model.dismissResult(for: Self.sideUUID)
+            XCTAssertFalse(model.canDismissResult(for: Self.sideUUID))
             XCTAssertFalse(try XCTUnwrap(model.displayResults[Self.sideUUID.lowercased()]).needsAttention)
             XCTAssertEqual(model.controlDisplayOutcome, .partial)
             XCTAssertEqual(writes, 1, "dismissal does not run Show again")

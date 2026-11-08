@@ -26,7 +26,7 @@ Opt-in environment variables:
 | `DISPLAYPANEL_TEST_LIVE_BLACKOUT=1` | Run a geometry test that briefly covers external screens with black windows |
 | `DISPLAYPANEL_ICC_EVIDENCE_DIR=<dir>` | Replay saved ICC profiles (read-only) |
 | `DISPLAYPANEL_SETTINGS_FIXTURE_OUTPUT=<dir>` | Write Settings screenshots (below) |
-| `DISPLAYPANEL_DISCONNECT_FIXTURE_OUTPUT=<dir>` | Write Full disconnect screenshots |
+| `DISPLAYPANEL_DISCONNECT_FIXTURE_OUTPUT=<dir>` | Write Full disconnect recovery screenshots |
 | `DISPLAYPANEL_SETTINGS_FIXTURE_WIDTH=<pt>` / `_HEIGHT=<pt>` | Screenshot window size (width 440–680) |
 
 Recovery checks that don't change displays are in

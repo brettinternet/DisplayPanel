@@ -89,6 +89,11 @@ struct DisplayHideConfiguration: Codable, Equatable {
     var keepWindowsOff: MoveWindowsConfiguration?
     /// Hide turns the display off. Optional so older builds read it as Black out.
     var turnsOff: Bool?
+    /// Hide switches the monitor's input (Switch input), even before an input
+    /// is chosen. A saved input also means Switch input, as in older builds.
+    var switchesInput: Bool?
+
+    var choosesSwitchInput: Bool { enabled && (switchesInput == true || awayInput != nil) }
 
     init(target: DisplayIdentityReference, enabled: Bool = false, source: DisplayIdentityReference? = nil,
          awayInput: UInt8? = nil, returnInput: UInt8? = nil,
@@ -188,13 +193,14 @@ struct DisplayOperationResult: Equatable {
     var automationStopUnconfirmed = false
     /// A wake or re-link re-hide failed and the layout needs fixing in System Settings.
     var offersDisplaysSettings = false
-    /// Acknowledges presentation only; input evidence remains available to scripts.
-    var inputWarningDismissed = false
+    /// Acknowledges presentation only; the outcome and input evidence remain
+    /// available to scripts.
+    var dismissed = false
 
-    var needsAttention: Bool { !succeeded || (inputNeedsAttention && !inputWarningDismissed) }
+    var needsAttention: Bool { !dismissed && (!succeeded || inputNeedsAttention) }
 
-    /// A short line for the menu: the failure, or else the unacknowledged input outcome.
-    var menuLine: String? { succeeded ? (inputWarningDismissed ? nil : inputMessage) : message }
+    /// A short line for the menu: the failure, or else the input outcome, until dismissed.
+    var menuLine: String? { dismissed ? nil : succeeded ? inputMessage : message }
 
     /// The command that puts the monitor back on the input it had before Hide
     /// switched it, offered when the result needs attention. Undoing a Show's

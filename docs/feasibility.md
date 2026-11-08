@@ -5,7 +5,7 @@ others stay on. These are the options:
 
 | Approach | Desktop stays | Result | DisplayPanel |
 | --- | --- | --- | --- |
-| Black window | Yes | OLED pixels unlit; monitor stays on | Blackout, Hide (black out) |
+| Black window | Yes | OLED pixels unlit; monitor stays on | Blackout, Hide (Black out) |
 | Translucent overlay | Yes | Dimmer; pixels may stay lit | Working-mode blackout |
 | DDC brightness | Yes | Hardware brightness lowered | `--dim-to`, `ddc-luminance` |
 | Public mirroring | No | Separate desktop removed; signal stays | [Mirroring](display-mirroring.md) (experimental) |

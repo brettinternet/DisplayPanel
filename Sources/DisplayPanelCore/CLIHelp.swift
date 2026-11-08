@@ -252,7 +252,7 @@ public enum CLIHelp {
             --hz applies one like the Settings picker and keeps it as the saved mode.
             It requires the running app and never launches or retries it.
             run-action --action <UUID> invokes one saved Action with 1–8 ordered
-            Hide (black out), Hide (remove from desktop), Show, Move windows or Restore arrangement steps,
+            Black out, Mirror or Switch input, Turn off, Show, Move windows or Restore arrangement steps,
             only in the running app. Accessibility is checked without prompting; use
             the in-app Allow Accessibility button before Move windows. It never launches
             the app or retries a request. Explicit show and Show-only Actions for journaled
@@ -283,8 +283,8 @@ public enum CLIHelp {
             and never changes saved settings. Find UUIDs with `app status --json`
             in `rules[].id`. Missing or malformed UUIDs are usage errors; a running
             selected rule or competing display operation returns busy. An unknown
-            UUID or overlapping rule is refused; Full disconnect and unresolved
-            recovery need recovery before the run can proceed.
+            UUID or overlapping rule is refused; an unresolved disconnect or
+            recovery needs recovery before the run can proceed.
             It never launches the app, queues or retries. A lost response does
             not cancel the run; check `app status --json` before deciding what
             to do. This is different from `run-action`, which executes ordered

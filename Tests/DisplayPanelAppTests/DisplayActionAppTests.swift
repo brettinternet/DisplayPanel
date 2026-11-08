@@ -97,7 +97,7 @@ final class DisplayActionAppTests: XCTestCase {
         model.setHideSource(alternateUUID, for: targetUUID)
         model.setHideSwitchInput(0x12, for: targetUUID)
         let change = try XCTUnwrap(model.displayActionReviewChange(for: action))
-        XCTAssertTrue(change.message.contains("Remove from desktop On → Off"))
+        XCTAssertTrue(change.message.contains("Hide style changed"))
         XCTAssertTrue(change.message.contains("Mirror onto Main display → Alternate source"))
         XCTAssertTrue(change.message.contains("Switch monitor to HDMI 1 → HDMI 2"))
         XCTAssertTrue(model.displayActionRunBlocker(for: action)?.contains("Step 1:") == true)
@@ -875,8 +875,6 @@ final class DisplayActionAppTests: XCTestCase {
         XCTAssertTrue(rejectedOtherRun.error?.contains("Leased workflow") == true)
         XCTAssertNil(model.displayActionResults[active.id], "contending requests cannot overwrite the active result")
 
-        model.prepareDisconnect(targetUUID)
-        XCTAssertTrue(model.disconnectFailure?.contains("Leased workflow") == true)
         model.retryAutomationCleanup()
         XCTAssertThrowsError(try model.makeShowRequest(targetUUID: targetUUID)) {
             XCTAssertTrue($0.localizedDescription.contains("Leased workflow"))
@@ -1345,7 +1343,7 @@ final class DisplayActionAppTests: XCTestCase {
         let show = DisplayActionStep(target: source, effect: .show)
         let parts = DisplayActionPresentation.stepParts(for: remove, displays: displays)
         XCTAssertEqual(parts.title, "Hide \(targetName)")
-        XCTAssertEqual(parts.detail, "Remove from desktop · Mirror onto \(sourceName) · Switch to HDMI 1")
+        XCTAssertEqual(parts.detail, "Switch to HDMI 1 · Mirror onto \(sourceName)")
         XCTAssertNil(DisplayActionPresentation.stepParts(for: show, displays: displays).detail)
 
         let action = DisplayAction(name: "Hand off", steps: [remove, show])
@@ -1745,7 +1743,7 @@ final class DisplayActionAppTests: XCTestCase {
             XCTAssertEqual(result.outcome, .done)
             XCTAssertEqual(result.steps?.map(\.outcome), [.skipped, .done])
             XCTAssertEqual(result.steps?.first?.desktopSummary,
-                           removed ? "Already removed from desktop." : "Display is disconnected.")
+                           removed ? "Already mirrored." : "Display is disconnected.")
             XCTAssertEqual(covers.filter { !$0.isEmpty }, [[303]])
             XCTAssertEqual(hides, 0)
             XCTAssertEqual(shows, 0)

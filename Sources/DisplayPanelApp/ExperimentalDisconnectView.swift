@@ -6,7 +6,7 @@ import DisplayPanelCore
 /// Qualification, scope and limits live in docs/display-disable.md#app-controls.
 struct ExperimentalDisconnectPresentation: Equatable {
     enum Phase: CaseIterable {
-        case consent, leased, refused, helperFailed, watchdogRecovery, reconnectFailed
+        case leased, refused, helperFailed, watchdogRecovery, reconnectFailed
     }
 
     struct SyntheticSession: Equatable {
@@ -24,7 +24,6 @@ struct ExperimentalDisconnectPresentation: Equatable {
     static let docsURL = URL(string: "https://github.com/brettinternet/displaypanel/blob/main/docs/display-disable.md#app-controls")!
 
     let syntheticSession: SyntheticSession?
-    var isSynthetic = true
     static let production = Self(syntheticSession: nil)
     var canDisconnect: Bool { false }
     var canReconnect: Bool { false }
@@ -32,7 +31,6 @@ struct ExperimentalDisconnectPresentation: Equatable {
     var title: String {
         guard let session = syntheticSession else { return "Full disconnect" }
         switch session.phase {
-        case .consent: return "Review consent"
         case .leased: return remainingSeconds == 0 ? "Reconnecting" : "Disconnected"
         case .refused: return "Disconnect refused"
         case .helperFailed: return "Recovery helper failed"
@@ -55,8 +53,6 @@ struct ExperimentalDisconnectPresentation: Equatable {
         guard let session = syntheticSession else { return Self.summary }
         guard leaseIsValid else { return "Refused: the lease must be 1–60 seconds." }
         switch session.phase {
-        case .consent:
-            return "Disconnects this display for \(session.leaseSeconds) seconds while another screen stays on."
         case .leased:
             if remainingSeconds == 0 {
                 return "Waiting for the helper to verify the reconnect."
@@ -91,16 +87,12 @@ struct ExperimentalDisconnectView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(presentation.title).font(.headline)
-            if presentation.syntheticSession != nil && presentation.isSynthetic {
-                Text("Synthetic preview · no display writes")
-                    .font(.caption).foregroundStyle(.orange)
-            }
             Text(presentation.detail)
                 .foregroundStyle(.secondary)
             if let remaining = presentation.remainingSeconds,
                let session = presentation.syntheticSession, session.phase == .leased {
                 ProgressView(value: Double(session.leaseSeconds - remaining), total: Double(session.leaseSeconds))
-                    .accessibilityLabel(presentation.isSynthetic ? "Synthetic lease elapsed" : "Disconnect lease elapsed")
+                    .accessibilityLabel("Disconnect lease elapsed")
                     .accessibilityValue("\(remaining) seconds remaining")
             }
             if let failure = presentation.syntheticSession?.failure {
@@ -118,14 +110,6 @@ struct ExperimentalDisconnectView: View {
                     }
                 }
             }
-            if presentation.isSynthetic { HStack {
-                Button("Disconnect unavailable") {}.disabled(true)
-                    .accessibilityLabel("Experimental disconnect unavailable: qualification required")
-                if presentation.syntheticSession != nil {
-                    Button("Reconnect unavailable") {}.disabled(true)
-                        .accessibilityLabel("Experimental reconnect unavailable: offline preview")
-                }
-            } }
         }
         .disclosureGroupStyle(FullRowDisclosureGroupStyle())
         .fixedSize(horizontal: false, vertical: true)

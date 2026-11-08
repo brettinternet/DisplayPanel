@@ -4,7 +4,9 @@ import DisplayPanelCore
 /// The fixed, deliberately invoked effects available to a named display action.
 enum DisplayActionEffect: String, Codable, CaseIterable, Identifiable {
     case blackOut
+    /// Mirror or Switch input, as the display's Hide is set up when reviewed.
     case removeFromDesktop
+    case turnOff
     case show
     case moveWindows
     case restoreArrangement
@@ -13,16 +15,24 @@ enum DisplayActionEffect: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .blackOut: return "Hide (black out)"
-        case .removeFromDesktop: return "Hide (remove from desktop)"
+        case .blackOut: return "Black out"
+        case .removeFromDesktop: return "Mirror"
+        case .turnOff: return "Turn off"
         case .show: return "Show"
         case .moveWindows: return "Move windows"
         case .restoreArrangement: return "Restore arrangement"
         }
     }
+
+    /// Mirror and Turn off steps need Experimental features.
+    var isExperimental: Bool { self == .removeFromDesktop || self == .turnOff }
+
+    func title(switchesInput: Bool) -> String {
+        self == .removeFromDesktop && switchesInput ? "Switch input" : title
+    }
 }
 
-/// The Displays configuration reviewed when a Remove from desktop step is saved.
+/// The Displays configuration reviewed when a Mirror or Switch input step is saved.
 /// Return-input detection is intentionally excluded because it is read-only and dynamic.
 struct ReviewedRemovalSetup: Codable, Equatable {
     let removeEnabled: Bool
@@ -409,7 +419,7 @@ enum DisplayActionValidationError: Error, Equatable, LocalizedError {
         case .removalSetupUnavailable(let index, let reason):
             return "Step \(index): \(reason)"
         case .experimentalFeaturesRequired(let index):
-            return "Step \(index): Turn on Experimental features in General to review Remove from desktop."
+            return "Step \(index): Turn on Experimental features in General to use this step."
         case .staticConflict(let index, let reason):
             return "Step \(index): \(reason)"
         case .actionInProgress(let name):
@@ -440,6 +450,8 @@ enum DisplayActionPresentation {
             return ("Restore arrangement", "Remembered arrangement or preferred main display")
         case .blackOut:
             return ("Hide \(targetName)", "Black out")
+        case .turnOff:
+            return ("Hide \(targetName)", "Turn off")
         case .show:
             return ("Show \(targetName)", nil)
         case .removeFromDesktop:
@@ -451,8 +463,8 @@ enum DisplayActionPresentation {
             } else {
                 source = "No mirror source"
             }
-            let input = step.reviewedRemoval?.awayInput.map { "Switch to \(MonitorInput.name($0))" } ?? "Don’t switch input"
-            return ("Hide \(targetName)", "Remove from desktop · \(source) · \(input)")
+            guard let input = step.reviewedRemoval?.awayInput else { return ("Hide \(targetName)", source) }
+            return ("Hide \(targetName)", "Switch to \(MonitorInput.name(input)) · \(source)")
         case .moveWindows:
             let destination: String
             switch step.moveWindows?.destination {
@@ -493,7 +505,7 @@ enum DisplayActionPresentation {
     ) -> DisplayActionReviewChange? {
         var changes: [String] = []
         if reviewed.removeEnabled != current.removeEnabled {
-            changes.append("Remove from desktop \(reviewed.removeEnabled ? "On" : "Off") → \(current.removeEnabled ? "On" : "Off")")
+            changes.append("Hide style changed")
         }
         if reviewed.sourceUUID != current.sourceUUID {
             changes.append("Mirror onto \(sourceName(reviewed.sourceUUID, displays: displays)) → \(sourceName(current.sourceUUID, displays: displays))")
@@ -513,6 +525,25 @@ enum DisplayActionPresentation {
 
     private static func inputName(_ input: UInt8?) -> String {
         input.map(MonitorInput.name) ?? "Don’t switch"
+    }
+}
+
+/// The Hide styles Settings offers. Mirror and Switch input both mirror the
+/// display (``DisplayHideStyle/removeFromDesktop``); Switch input also
+/// switches the monitor's input.
+enum DisplayHideChoice: Hashable, CaseIterable {
+    case blackOut
+    case mirror
+    case switchInput
+    case turnOff
+
+    var title: String {
+        switch self {
+        case .blackOut: return "Black out"
+        case .mirror: return "Mirror"
+        case .switchInput: return "Switch input"
+        case .turnOff: return "Turn off"
+        }
     }
 }
 

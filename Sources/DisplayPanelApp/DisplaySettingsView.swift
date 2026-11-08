@@ -53,8 +53,8 @@ struct DisplaySettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                if ExperimentalDisconnectControls.isVisible(model: model, targetUUID: selected?.uuid) {
-                    ExperimentalDisconnectControls(model: model, targetUUID: selected?.uuid)
+                if ExperimentalDisconnectControls.isVisible(model: model) {
+                    ExperimentalDisconnectControls(model: model)
                 }
             }
             .formStyle(.grouped)
@@ -74,7 +74,7 @@ struct DisplaySettingsView: View {
         } message: { recovery in
             let names = recovery.displayNames.joined(separator: ", ")
             Text(recoveryHidesAgain
-                 ? "Removes \(names) from the desktop again. The current arrangement and modes become the new baseline. Inputs aren’t switched."
+                 ? "Hides \(names) again. The current arrangement and modes become the new baseline. Inputs aren’t switched."
                  : "Clears recovery for \(names) without changing display settings.")
         }
     }
@@ -96,22 +96,24 @@ struct DisplaySettingsView: View {
                 primaryAction(tile)
             }
             let result = model.displayResults[tile.id]
-            if let result {
-                if !result.succeeded {
-                    resultLabel(failureMessage(result, tile: tile), attention: true)
-                    if result.offersDisplaysSettings {
-                        Button("Open Displays Settings") { openDisplaysSettings() }
-                    }
-                }
-                if let input = result.inputMessage, !result.inputWarningDismissed {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        resultLabel(input, attention: result.inputNeedsAttention)
-                        if model.canDismissInputWarning(for: tile.id) {
-                            Spacer(minLength: 0)
-                            Button("Dismiss") { model.dismissInputWarning(for: tile.id) }
-                                .accessibilityLabel("Dismiss input warning for \(tile.name)")
+            if let result, !result.dismissed {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if !result.succeeded {
+                            resultLabel(failureMessage(result, tile: tile), attention: true)
+                        }
+                        if let input = result.inputMessage {
+                            resultLabel(input, attention: result.inputNeedsAttention)
                         }
                     }
+                    if model.canDismissResult(for: tile.id) {
+                        Spacer(minLength: 0)
+                        Button("Dismiss") { model.dismissResult(for: tile.id) }
+                            .accessibilityLabel("Dismiss message for \(tile.name)")
+                    }
+                }
+                if !result.succeeded, result.offersDisplaysSettings {
+                    Button("Open Displays Settings") { openDisplaysSettings() }
                 }
             }
             if let note = actionNote(tile) {
@@ -166,11 +168,13 @@ struct DisplaySettingsView: View {
             return "Turned off until you show it"
         case .hidden:
             let source = tile.uuid.flatMap { model.handoffStatus?.removal(for: $0)?.source.name }
-            return "Removed from desktop · mirrored onto \(source ?? "another display")"
-        case .hiding where tile.display.map(model.hideStyle(of:)) == .turnOff:
-            return "Turning off…"
+            return "Mirrored onto \(source ?? "another display") until you show it"
         case .hiding:
-            return "Removing from the desktop…"
+            switch tile.display.map(model.hideChoice(of:)) {
+            case .turnOff?: return "Turning off…"
+            case .switchInput?: return "Switching input…"
+            default: return "Mirroring…"
+            }
         case .showing:
             return "Showing…"
         case .blackedOut:
@@ -340,8 +344,8 @@ struct DisplaySettingsView: View {
                         LabeledContent {
                             Button("Open General") { navigation.tab = .general }
                         } label: {
-                            Text("Remove from desktop")
-                            Text("Experimental. Turn on in General.")
+                            Text("Mirror, switch input or turn off")
+                            Text("Experimental")
                         }
                     } header: {
                         Text("Hide")
@@ -350,30 +354,31 @@ struct DisplaySettingsView: View {
             } else {
                 let configuration = tile.uuid.flatMap(model.hideConfiguration)
                 let frozen = tile.uuid.map(model.hideConfigurationFrozen(for:)) ?? true
+                let choice = model.hideChoice(of: display)
                 Section {
                     Picker("Style", selection: Binding(
-                        get: { model.hideStyle(of: display) },
-                        set: { model.setHideStyle($0, for: display) }
+                        get: { choice },
+                        set: { model.setHideChoice($0, for: display) }
                     )) {
-                        Text("Black out").tag(DisplayHideStyle.blackOut)
-                        Text("Remove from desktop").tag(DisplayHideStyle.removeFromDesktop)
-                        Text("Turn off").tag(DisplayHideStyle.turnOff)
+                        ForEach(DisplayHideChoice.allCases, id: \.self) { Text($0.title).tag($0) }
                     }
                     .disabled(reason != nil || frozen)
                     .accessibilityLabel("Hide style for \(tile.name)")
-                    if reason == nil, let configuration, model.hideStyle(of: display) == .removeFromDesktop,
+                    if reason == nil, let configuration, choice == .mirror || choice == .switchInput,
                        let uuid = tile.uuid {
+                        if choice == .switchInput {
+                            // Before the input choice, so the other computer's input is easy to pick.
+                            macInputRow(tileID: tile.id, uuid: uuid, frozen: frozen)
+                            Group {
+                                inputPicker(configuration, tileID: tile.id, uuid: uuid)
+                                if inputChoice(configuration, tileID: tile.id) == .other {
+                                    customInputField(configuration, tileID: tile.id, uuid: uuid)
+                                }
+                            }
+                            .disabled(frozen)
+                        }
                         sourcePicker(configuration, uuid: uuid, tiles: tiles)
                             .disabled(frozen)
-                        // Before the input choice, so the other computer's input is easy to pick.
-                        macInputRow(tileID: tile.id, uuid: uuid, frozen: frozen)
-                        Group {
-                            inputPicker(configuration, tileID: tile.id, uuid: uuid)
-                            if inputChoice(configuration, tileID: tile.id) == .other {
-                                customInputField(configuration, tileID: tile.id, uuid: uuid)
-                            }
-                        }
-                        .disabled(frozen)
                     }
                 } header: {
                     Text("Hide")
@@ -445,7 +450,9 @@ struct DisplaySettingsView: View {
                 }
             }
         )) {
-            Text("Don’t switch").tag(InputChoice.none)
+            if inputChoice(configuration, tileID: tileID) == .none {
+                Text("Choose an input").tag(InputChoice.none)
+            }
             ForEach(MonitorInput.common, id: \.value) { input in
                 Text(input.name).tag(InputChoice.input(input.value))
             }
@@ -460,12 +467,12 @@ struct DisplaySettingsView: View {
                 get: { text },
                 set: { newValue in
                     customInputs[tileID] = newValue
-                    // Text that isn't a code turns switching off instead of keeping the last code.
+                    // Text that isn't a code clears the input instead of keeping the last code.
                     model.setHideSwitchInput(DDCInput.parseValue(newValue.trimmingCharacters(in: .whitespaces)), for: uuid)
                 }
             ), prompt: Text("0x1B"))
             if DDCInput.parseValue(text.trimmingCharacters(in: .whitespaces)) == nil {
-                Text("Enter 1–255, like 27 or 0x1B. Until then, Hide doesn’t switch inputs.")
+                Text("Enter 1–255, like 27 or 0x1B.")
                     .font(.caption)
                     .foregroundStyle(text.isEmpty ? Color.secondary : Color.orange)
             }
@@ -506,7 +513,7 @@ struct DisplaySettingsView: View {
         if let reason { return reason }
         if model.hideConfigurationFrozen(for: configuration?.target.uuid ?? ""),
            model.isJournalTarget(configuration?.target.uuid) {
-            return "Show this display to change its removal settings."
+            return "Show this display to change its Hide settings."
         }
         let mainDisplayNote = "When the main display is mirrored, macOS decides where the menu bar, Dock and windows go."
         guard let configuration, configuration.enabled else { return nil }

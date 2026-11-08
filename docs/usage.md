@@ -55,19 +55,21 @@ Settings has three tabs:
 | **General** | Launch at login, menu icon, Experimental features |
 
 Hide defaults to **Black out**: the display stays black until Show. With
-Experimental features on, **Remove from desktop** moves windows off the display
-instead. See [Hide and Show](display-hide-ux.md).
+Experimental features on, **Mirror** moves windows off the display, **Switch
+input** also hands the monitor to another computer, and **Turn off** cuts the
+Mac's signal. See [Hide and Show](display-hide-ux.md).
 
 Each rule picks displays, an idle delay, blackout or dimming, and what happens
 afterward (**Restore** or **Sleep**). Two enabled rules can't share a display.
 The master switch and Pause apply to all rules.
 
-An Action is 1–8 ordered steps: Hide, Show or Move windows for a display. It
+An Action is 1–8 ordered steps: Black out, Mirror, Turn off, Show or Move
+windows for a display, or Restore arrangement. It
 runs only from **Run** or `dp app run-action`. Steps run in order and stop
 at the first problem; earlier changes are not undone. A failed Show doesn't
-stop the steps after it when they are all Shows. Hide only covers or
-removes a display; Move only relocates windows and never changes Hide state.
-A Hide (black out) step can also keep windows off the display for as long as
+stop the steps after it when they are all Shows. Hide steps only cover, mirror
+or turn off a display; Move only relocates windows and never changes Hide state.
+A Black out step can also keep windows off the display for as long as
 that Hide lasts; see [keep windows off](display-hide-ux.md#keep-windows-off-while-hidden).
 
 Move windows is a one-shot operation for ordinary movable windows on the
@@ -194,10 +196,10 @@ This is different from `run-action` (ordered Hide/Show steps) and app `hide`
 configured Hide style unless `--style black-out` forces a black cover for that
 Hide without changing saved preferences. Styled requests require app-control request
 protocol 2, so older running apps refuse rather than silently use the configured
-removal style; update/restart the app before using this option. Unstyled requests
+style; update/restart the app before using this option. Unstyled requests
 and responses retain protocol 1 compatibility. An active selected rule or competing
-display operation returns `busy`; overlapping rules are refused, and Full disconnect
-or unresolved recovery returns `recovery-needed`. Run-rule never launches the app, queues,
+display operation returns `busy`; overlapping rules are refused, and an unresolved
+disconnect or recovery returns `recovery-needed`. Run-rule never launches the app, queues,
 retries, broadcasts to another rule or automatically replays a lost response. After
 `response-lost`, check `dp app status --json`; a lost response does not cancel
 the run or make retry safe. The status response includes `runningRule` with the

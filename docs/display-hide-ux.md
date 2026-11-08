@@ -9,7 +9,8 @@ same thing.
 | Style | What happens | How to choose it |
 | --- | --- | --- |
 | **Black out** (default) | A black window covers the display; its desktop stays put | Default, or `dp app hide --display UUID --style black-out` |
-| **Remove from desktop** | The display [mirrors](display-mirroring.md) another, so windows move off it; optionally switches the monitor's input | Experimental features, then **Displays → Hide → Style** |
+| **Mirror** | The display [mirrors](display-mirroring.md) another, so windows move off it | Experimental features, then **Displays → Hide → Style** |
+| **Switch input** | Mirror, and switch the monitor to another computer's input | Experimental features, then **Displays → Hide → Style** |
 | **Turn off** | The Mac stops sending a signal, so the monitor goes to standby until Show | Experimental features, then **Displays → Hide → Style** |
 
 Only Turn off cuts the Mac's signal.
@@ -18,7 +19,7 @@ Only Turn off cuts the Mac's signal.
 
 The cover stays until Show, or Escape with the pointer on that display. Input
 doesn't remove it. `--style black-out` forces this cover for one request, even
-on a display set to **Remove from desktop**, without changing its settings. You
+on a display set to another style, without changing its settings. You
 can black out several displays, but never the last visible one. Covers survive
 sleep, wake and reconnects, and end on quit. Automation skips blacked-out
 displays, and **Restore** doesn't show them.
@@ -30,23 +31,23 @@ displays, and **Restore** doesn't show them.
 | Black out and leave windows alone | **Hide** (default) |
 | Bring windows over once | An Action's **Move windows** step |
 | Keep a blacked-out display clear | **Hide** with keep windows off |
-| Stop using the display as desktop space | **Remove from desktop** (experimental) |
+| Stop using the display as desktop space | **Mirror** (experimental) |
 
 Keep windows off belongs to one blackout Hide, not to the display.
 
 - **Settings → Displays → Windows → Also keep windows off** (default off) is
   remembered per display and applies to its next Hide from Settings, the menu
   or `app hide`.
-- An Action's **Hide (black out)** step has its own option and ignores the
+- An Action's **Black out** step has its own option and ignores the
   remembered choice.
 - While hidden, the **Keep windows off** switch pauses or resumes this Hide
   only. Show, a failed Hide and quit end it; relaunch never restores it.
 - Automation rule blackouts never move windows, so a display they cover stays
-  **Armed**. Remove from desktop doesn't need the option.
+  **Armed**. Mirror and Switch input don't need the option.
 
 Choose **Automatic** (current main display, then stable UUID order) or one exact
 destination. If that destination is asleep, disconnected, covered, mirrored,
-removed or ambiguous, movement pauses instead of picking another.
+hidden or ambiguous, movement pauses instead of picking another.
 
 While the Hide lasts, DisplayPanel rescans every second and moves new or returning
 windows off the display, using the same rules as [Move windows](#named-manual-actions).
@@ -64,29 +65,34 @@ occupancy details.
 ## Experimental features
 
 Turn on **General → Experimental features** and accept the prompt once. This
-adds **Remove from desktop** and **Turn off** to each display's **Hide → Style**.
+adds **Mirror**, **Switch input** and **Turn off** to each display's
+**Hide → Style**.
 
-Turning it off makes new Hides black out instead. Displays already removed or
+Turning it off makes new Hides black out instead. Displays already mirrored or
 turned off stay that way, and Show and recovery keep working.
 
-### Remove from desktop
+### Mirror and Switch input
 
-Set an external display's **Hide → Style** to **Remove from desktop**, then set:
+Set an external display's **Hide → Style** to **Mirror** to take it off the
+desktop, or to **Switch input** to also hand the monitor to another computer:
 
 | Control | Meaning |
 | --- | --- |
+| **This Mac's input** | Switch input only. Detected over DDC (read-only) |
+| **Switch monitor to** | Switch input only. A named input or a custom input code; Hide waits until one is chosen |
 | **Mirror onto** | The display to mirror onto. Defaults to the main display; hiding the main display needs an explicit choice |
-| **This Mac's input** | Detected over DDC (read-only) |
-| **Switch monitor to** | Don't switch, a named input, or a custom input code |
 
 ```text
-Hide: save layout → switch input (optional) → mirror
-Show: restore layout → verify → switch input back (optional)
+Hide: save layout → switch input (Switch input) → mirror
+Show: restore layout → verify → switch input back (Switch input)
 ```
 
-- Only awake external displays with a stable ID can be removed.
-- You can remove several displays, in any order, onto shared or separate
-  sources. A removed display can't be a source, and a source can't be removed
+Both styles mirror: macOS needs the Mac's signal on the display, so Switch input
+also keeps the display off the desktop. Choosing **Mirror** forgets the input.
+
+- Only awake external displays with a stable ID can be mirrored.
+- You can hide several displays this way, in any order, onto shared or separate
+  sources. A hidden display can't be a source, and a source can't be hidden
   until its targets are shown.
 - Show returns one display and leaves the others removed. macOS may place it
   slightly off; the last Show restores the exact layout and main display.
@@ -99,8 +105,7 @@ Show: restore layout → verify → switch input back (optional)
   Changed identities or failed checks leave the display in recovery. See
   [wake recovery](display-recovery.md#sleep-wake-and-reboot) and
   [input-return recovery](display-recovery.md#monitor-input-return-while-hidden).
-- With **Don't switch**, Hide and Show send no DDC commands. Use the monitor's
-  input button if needed.
+- **Mirror** sends no DDC commands. Use the monitor's input button if needed.
 
 ### Turn off
 
@@ -116,8 +121,8 @@ Show: turn on by saved ID (one write) → verify identity → restore mode, posi
 - Works on the main display; macOS moves the menu bar, Dock and windows.
   Built-in and mirrored displays are refused, and another usable physical
   display must stay on.
-- One display at a time, and not while a display is removed from the desktop
-  (or the reverse): macOS can drop Hide mirrors when a display turns off.
+- One display at a time, and not while Hide mirrors a display (or the
+  reverse): macOS can drop Hide mirrors when a display turns off.
 - No input switching or DDC.
 - Wake, relaunch and rules never turn a display off again. If macOS turns it
   back on (for example after sleep), it stays **Hidden** and Show puts its
@@ -126,14 +131,15 @@ Show: turn on by saved ID (one write) → verify identity → restore mode, posi
   relaunch DisplayPanel and Show it, or log out.
 - If Show can't bring it back, the display needs recovery: select the Mac's
   input with the monitor's buttons or replug its cable. Show never retries.
-- Not an Action step. `dp app hide` uses it when it's the display's style;
+- An Action's **Turn off** step turns a display off and its **Show** step turns
+  it back on. `dp app hide` uses it when it's the display's style;
   `--style black-out` still forces a blackout.
 
 ### Full disconnect
 
-**Full disconnect · Experimental** is a separate, manual action that drops the
-Mac's signal using the same private API. It is not a Hide style. It needs fresh
-consent each time and reconnects automatically after 15 seconds. See
+Full disconnect is CLI-only: `dp recovery disable` drops a display's signal for
+up to 60 seconds, then reconnects it. While one is unresolved,
+**Displays → Full disconnect** offers **Reconnect…**. See
 [private display disable](display-disable.md#app-controls).
 
 ## Arrangement protection
@@ -149,8 +155,8 @@ details.
 ## Named manual actions
 
 **Automations → Actions** stores named workflows of 1–8 steps. Each step targets
-a display with **Hide (black out)**, **Hide (remove from desktop)**, **Show** or
-**Move windows**. **Restore arrangement** has no display target; put it before
+a display with **Black out**, **Mirror** (shown as **Switch input** when the
+display's Hide switches inputs), **Turn off**, **Show** or **Move windows**. **Restore arrangement** has no display target; put it before
 steps that change the visible set. A display can appear once among Hide/Show
 steps and once as a Move step, in either order. Hide never moves windows; Move
 never changes Hide state.
@@ -171,9 +177,13 @@ dp app run-action --action ACTION_UUID --json
   block.
 - A Show-only Action can wait out an in-progress monitor input return (up to 15
   seconds), then check again and run once.
-- A Remove step saves the display's setup. If that setup changes, review and
-  save the Action again.
-- A **Hide (black out)** step can **Keep windows off while hidden** with its own
+- Mirror, Switch input and Turn off steps need Experimental features. A Mirror
+  or Switch input step saves the display's setup; if that setup changes, review
+  and save the Action again.
+- **Turn off** doesn't depend on the display's Hide style. An Action turns off
+  one display at a time and not while it mirrors another, as in
+  [Turn off](#turn-off). **Show** turns a turned-off display back on.
+- A **Black out** step can **Keep windows off while hidden** with its own
   destination.
 - **Move windows** moves ordinary windows on the display's current desktop once.
   It doesn't activate apps, switch Spaces or move windows back on Show.
@@ -200,23 +210,24 @@ fresh baseline; it never replays the old operation.
 
 ## Rules and hidden displays
 
-Automation rules never hide, show, mirror or switch inputs. Rules skip hidden
-displays and keep running on the others. While a display is removed, rules use
-a black window only: no DDC dimming, and **Sleep** becomes Restore.
+Automation rules never hide, show, mirror, switch inputs or turn displays off;
+they react to idle time only. Use an Action for those. Rules skip hidden
+displays and keep running on the others. While Hide mirrors a display, rules
+use a black window only: no DDC dimming, and **Sleep** becomes Restore.
 
 ## States
 
 | Tile state | Meaning |
 | --- | --- |
 | On | Normal; Hide available |
-| Hidden | Blacked out, removed or turned off; Show available |
+| Hidden | Blacked out, mirrored or turned off; Show available |
 | Hiding… / Showing… / Busy | In progress; no cancel or queue |
 | Blacked out | An automation cover; **Restore** ends it |
 | Asleep / Unavailable | Wake or reconnect the display |
 | Mirrored | Mirrored outside DisplayPanel; fix in System Settings → Displays |
 | Needs recovery | Read the reason; Show when allowed, or recover hidden displays after reboot or renumbering |
 
-Removed displays stay listed even when disconnected. Reconnect the same
+Mirrored displays stay listed even when disconnected. Reconnect the same
 monitor, then **Check Again**. Recovery problems also appear as a banner and in
 the menu as **Review Display Recovery…**.
 
@@ -236,6 +247,10 @@ Desktop and input results are reported separately on the selected display.
 Messages name the problem only; journal paths and CLI fallbacks stay in the log
 and **Recovery details**. A failure that repeats the display's recovery reason
 reads just **Couldn't show.**
+
+**Dismiss** clears a failure or input warning from the display, its tile and the
+menu without changing anything; use it when the message no longer applies.
+Recovery problems can't be dismissed.
 
 | Case | Desktop | Input |
 | --- | --- | --- |
@@ -264,7 +279,7 @@ otherwise use the monitor's buttons, then retry Show.
 ```
 
 Use `hide` or `show` for a specific state. Add `--style black-out` to `hide` or
-`toggle-hide` to black out instead of removing, for that request only. The app
+`toggle-hide` to black out instead of the display's style, for that request only. The app
 must be running. See [exit codes and status](usage.md#scripted-hide-and-show).
 
 `app blackout-now` and the menu's Blackout Now item are retired. Use `app hide`

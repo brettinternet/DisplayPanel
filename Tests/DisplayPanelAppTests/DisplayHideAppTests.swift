@@ -634,7 +634,7 @@ final class DisplayHideAppTests: XCTestCase {
                 )
             }
         )
-        model.setHideStyle(.turnOff, for: target)
+        model.setHideChoice(.turnOff, for: target)
         XCTAssertEqual(model.hideStyle(of: target), .turnOff)
 
         let hidden = try await hideAndWait(model)
@@ -650,6 +650,65 @@ final class DisplayHideAppTests: XCTestCase {
 
         let shown = try await showAndWait(model)
         XCTAssertTrue(shown.succeeded, shown.message)
+        XCTAssertEqual(showKeys, ["turn-off-journal|\(Self.targetUUID)"])
+        XCTAssertEqual(turnedOff.count, 1)
+    }
+
+    /// A turned-off display leaves `displays`, so an Action's Show must find it
+    /// in the journal, and an Action may never turn off two displays.
+    func testActionTurnOffAndShowStepsUseTheTurnOffJournal() async throws {
+        let defaults = try makeDefaults()
+        let target = displays[1]
+        var current = displays
+        let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
+        var turnedOff: [String] = []
+        var showKeys: [String] = []
+        let model = makeModel(
+            defaults: defaults, displays: displays, displayProvider: { current }, status: { box.value },
+            hideDisplay: { _, _, _ in XCTFail("Turn off never mirrors"); return .notRequested },
+            showDisplay: { key, _ in
+                showKeys.append(key)
+                current = self.displays
+                box.value = self.handoffStatus(.none, target: nil, source: nil)
+                return .notRequested
+            },
+            turnOffDisplay: { identity in
+                turnedOff.append(identity.uuid)
+                current = self.displays.filter { $0.uuid != Self.targetUUID }
+                let off = self.handoffIdentity(target)
+                box.value = DisplayHandoffStatus(
+                    state: .hidden, target: off, journalPath: "/tmp/displaypanel-display-hide-fixture/current.json",
+                    journalID: "turn-off-journal", canShow: true,
+                    observations: [self.observation(target, state: .hiddenByDisplayPanel, journalTarget: true)],
+                    mirrorTopologyVerified: true,
+                    turnedOff: [DisplayHandoffTurnOff(id: "off-1", target: off, state: "off",
+                                                      isUnresolved: true, canShow: true, reason: nil)]
+                )
+            }
+        )
+        XCTAssertEqual(model.hideStyle(of: target), .blackOut, "the step doesn't need the Turn off style")
+        let off = DisplayAction(name: "Off", steps: [DisplayActionStep(target: DisplayIdentitySnapshot(target), effect: .turnOff)])
+        let on = DisplayAction(name: "On", steps: [DisplayActionStep(target: DisplayIdentitySnapshot(target), effect: .show)])
+        let both = DisplayAction(name: "Both", steps: [
+            DisplayActionStep(target: DisplayIdentitySnapshot(target), effect: .turnOff),
+            DisplayActionStep(target: DisplayIdentitySnapshot(displays[2]), effect: .turnOff)
+        ])
+        XCTAssertThrowsError(try model.saveDisplayAction(both))
+        try model.saveDisplayAction(off)
+        try model.saveDisplayAction(on)
+        try await waitUntil { !model.protectionQuiescencePending }
+
+        var result: AppControlResponse?
+        model.runDisplayAction(id: off.id) { result = $0 }
+        try await waitUntil { result != nil }
+        XCTAssertEqual(result?.outcome, .done, result?.summary ?? "missing result")
+        XCTAssertEqual(turnedOff, [Self.targetUUID])
+        XCTAssertEqual(model.displayTiles.first { $0.id == Self.targetKey }?.status, .hidden)
+
+        result = nil
+        model.runDisplayAction(id: on.id) { result = $0 }
+        try await waitUntil { result != nil }
+        XCTAssertEqual(result?.outcome, .done, result?.summary ?? "missing result")
         XCTAssertEqual(showKeys, ["turn-off-journal|\(Self.targetUUID)"])
         XCTAssertEqual(turnedOff.count, 1)
     }
@@ -976,6 +1035,30 @@ final class DisplayHideAppTests: XCTestCase {
                        "enabling a main target leaves the other target's saved source unchanged")
     }
 
+    /// Mirror must never switch a monitor's input, and Switch input must not
+    /// silently hide without switching.
+    func testMirrorForgetsTheInputAndSwitchInputWaitsForOne() throws {
+        let defaults = try makeDefaults()
+        let model = makeModel(defaults: defaults, displays: displays)
+
+        model.setHideChoice(.switchInput, for: displays[1])
+        XCTAssertEqual(model.hideChoice(of: displays[1]), .switchInput)
+        XCTAssertThrowsError(try model.makeHideRequest(targetUUID: Self.targetUUID)) {
+            XCTAssertTrue($0.localizedDescription.contains("Choose the input to switch to"))
+        }
+        model.setHideSwitchInput(0x11, for: Self.targetUUID)
+        XCTAssertEqual(try model.makeHideRequest(targetUUID: Self.targetUUID).awayInput, 0x11)
+
+        model.setHideChoice(.turnOff, for: displays[1])
+        model.setHideEnabled(true, for: displays[1])
+        XCTAssertEqual(model.hideChoice(of: displays[1]), .switchInput, "Turn off keeps the input for a later Switch input")
+
+        model.setHideChoice(.mirror, for: displays[1])
+        XCTAssertNil(try model.makeHideRequest(targetUUID: Self.targetUUID).awayInput)
+        model.setHideChoice(.switchInput, for: displays[1])
+        XCTAssertThrowsError(try model.makeHideRequest(targetUUID: Self.targetUUID), "Mirror forgot the input")
+    }
+
     func testNativeMainTargetSetupRequiresSourceAndUsesTheSharedHideControls() throws {
         try requireInteractiveUI()
         let defaults = try makeDefaults()
@@ -1250,17 +1333,17 @@ final class DisplayHideAppTests: XCTestCase {
         box.value = handoffStatus(.recovery, target: displays[1], source: displays[0],
                                   reason: "Reconnect the captured display.")
         model.refreshDisplays()
-        XCTAssertFalse(model.canDismissInputWarning(for: Self.targetUUID))
-        model.dismissInputWarning(for: Self.targetUUID)
+        XCTAssertFalse(model.canDismissResult(for: Self.targetUUID))
+        model.dismissResult(for: Self.targetUUID)
         XCTAssertEqual(model.displayResults[Self.targetKey], shownResult)
         XCTAssertNotNil(model.displayRecoveryProblem)
 
         box.value = handoffStatus(.none, target: nil, source: nil)
         model.refreshDisplays()
-        XCTAssertTrue(model.canDismissInputWarning(for: Self.targetUUID))
-        model.dismissInputWarning(for: Self.targetUUID.uppercased())
+        XCTAssertTrue(model.canDismissResult(for: Self.targetUUID))
+        model.dismissResult(for: Self.targetUUID.uppercased())
         let dismissed = try XCTUnwrap(model.displayResults[Self.targetKey])
-        XCTAssertTrue(dismissed.inputWarningDismissed)
+        XCTAssertTrue(dismissed.dismissed)
         XCTAssertFalse(dismissed.needsAttention)
         XCTAssertNil(dismissed.menuLine)
         XCTAssertNil(dismissed.undoInputCommand)
@@ -1268,10 +1351,10 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(model.controlDisplayOutcome, .partial, "acknowledgement is not successful DDC")
         XCTAssertEqual(model.controlDisplayStatuses.first { $0.targetUUID.lowercased() == Self.targetKey }?.lastInputOutcome,
                        shownResult.inputOutcome)
-        model.dismissInputWarning(for: Self.targetUUID)
+        model.dismissResult(for: Self.targetUUID)
         model.refreshDisplays()
         XCTAssertEqual(model.displayResults[Self.targetKey], dismissed)
-        XCTAssertFalse(model.canDismissInputWarning(for: Self.targetUUID))
+        XCTAssertFalse(model.canDismissResult(for: Self.targetUUID))
         XCTAssertEqual(awayInputs, [0x11])
         XCTAssertEqual(returnInputs, [0x0F], "dismissal never invokes a display operation")
         try await waitUntil { suppressedEvents >= 2 }
@@ -1430,8 +1513,8 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(model.displayTiles.first { $0.id == Self.targetKey }?.status, .needsRecovery)
         XCTAssertEqual(model.displayRecoveryProblem, "journal retained after DDC failure")
         let retainedResult = model.displayResults[Self.targetKey]
-        XCTAssertFalse(model.canDismissInputWarning(for: Self.targetUUID))
-        model.dismissInputWarning(for: Self.targetUUID)
+        XCTAssertFalse(model.canDismissResult(for: Self.targetUUID))
+        model.dismissResult(for: Self.targetUUID)
         XCTAssertEqual(model.displayResults[Self.targetKey], retainedResult)
         XCTAssertEqual(model.displayRecoveryProblem, "journal retained after DDC failure")
     }
@@ -1926,7 +2009,7 @@ final class DisplayHideAppTests: XCTestCase {
         model.refreshHandoffStatus()
         spin { !model.protectionQuiescencePending }
         XCTAssertEqual(model.blackoutReadiness(for: displays[1])?.localizedDescription,
-                       "DisplayPanel removed this display from the desktop. Show it first.")
+                       "DisplayPanel mirrored this display. Show it first.")
         model.hide(targetUUID: Self.sourceUUID)
         XCTAssertTrue(model.isBlackoutHidden(Self.sourceUUID), "another display can still be blacked out")
         XCTAssertEqual(model.blackoutReadiness(for: displays[0])?.localizedDescription,
@@ -3942,7 +4025,7 @@ final class DisplayHideAppTests: XCTestCase {
         XCTAssertEqual(forcedHide.outcome, .done)
         XCTAssertTrue(model.isBlackoutHidden(Self.targetUUID))
         XCTAssertEqual(coveredDisplays, [202])
-        XCTAssertEqual(hideCalls, 0, "forced black-out bypasses the saved Remove from desktop operation")
+        XCTAssertEqual(hideCalls, 0, "forced black-out bypasses the saved Mirror operation")
         XCTAssertEqual(model.hidePreferences, savedHidePreferences)
         XCTAssertEqual(defaults.data(forKey: "displayHidePreferences"), savedHideData)
 
@@ -4097,7 +4180,7 @@ final class DisplayHideAppTests: XCTestCase {
         let defaults = try makeDefaults()
         defaults.set(false, forKey: "experimentalFeaturesEnabled")
         let model = makeModel(defaults: defaults, displays: displays, hideDisplay: { _, _, _ in
-            XCTFail("Remove from desktop needs Experimental features")
+            XCTFail("Mirror needs Experimental features")
             return .notRequested
         })
         model.setHideEnabled(true, for: displays[1])

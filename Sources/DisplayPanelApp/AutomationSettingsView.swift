@@ -235,6 +235,7 @@ struct AutomationSettingsView: View {
         switch effect {
         case .show: return "eye"
         case .blackOut, .removeFromDesktop: return "eye.slash"
+        case .turnOff: return "power"
         case .moveWindows: return "arrow.left.arrow.right"
         case .restoreArrangement: return "rectangle.3.group"
         }
@@ -635,7 +636,12 @@ struct DisplayActionEditor: View {
                 }
             }
         )) {
-            ForEach(DisplayActionEffect.allCases) { effect in Text(effect.title).tag(effect) }
+            let switchesInput = step.target.flatMap { model.hidePreferences[$0.uuid]?.choosesSwitchInput } ?? false
+            ForEach(DisplayActionEffect.allCases.filter {
+                !$0.isExperimental || model.experimentalFeaturesEnabled || $0 == step.effect
+            }) { effect in
+                Text(effect.title(switchesInput: switchesInput)).tag(effect)
+            }
         }
         .accessibilityLabel("Step \(number) effect")
 
@@ -672,8 +678,10 @@ struct DisplayActionEditor: View {
     @ViewBuilder
     private func removalDetails(_ step: DisplayActionStep, index: Int) -> some View {
         let configuration = step.target.flatMap { model.hidePreferences[$0.uuid] }
+        if let input = configuration?.awayInput {
+            LabeledContent("Switch monitor to", value: MonitorInput.name(input))
+        }
         LabeledContent("Mirror onto", value: sourceName(configuration?.source?.uuid))
-        LabeledContent("Switch monitor to", value: configuration?.awayInput.map(MonitorInput.name) ?? "Don’t switch")
         if let change = model.displayActionReviewChange(for: draft, stepIndex: index) {
             Label("Step \(index + 1): \(change.message)", systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)

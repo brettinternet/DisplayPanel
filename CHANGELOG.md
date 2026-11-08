@@ -2,7 +2,11 @@
 
 ## Unreleased
 
-- Add a **Turn off** Hide style (experimental) for monitors with no other input: the Mac stops sending a signal until Show turns the display back on and restores its layout. Works on the main display and alongside removed displays; one display at a time.
+- Add a **Turn off** Hide style (experimental) for monitors with no other input: the Mac stops sending a signal until Show turns the display back on and restores its layout. Works on the main display; one display at a time, and not while Hide mirrors another display.
+- Split Remove from desktop into the **Mirror** and **Switch input** Hide styles. Switch input waits until you choose the input.
+- Actions get a **Turn off** step, and their Show steps turn a turned-off display back on. Steps read Black out, Mirror (or Switch input), Turn off and Show.
+- **Dismiss** a Hide or Show failure or input warning to clear the display's badge and menu line.
+- Settings no longer starts a Full disconnect; use Turn off, or `dp recovery disable`. Settings still offers Reconnect for an unresolved one.
 - Clear a hidden display's failed Hide or Show error once it's back on the desktop, including when another display's Show restored it.
 - Choose each display's Hide style from a Style menu in Settings → Displays → Hide.
 - Full disconnect recognizes the macOS 27.2 (26B123) setter; it reported the setter unavailable after the update.
