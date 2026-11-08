@@ -266,23 +266,21 @@ final class DisplayTurnOffTests: XCTestCase {
         XCTAssertEqual(world.writes, ["cancel", "off 8"])
     }
 
-    func testSiblingHideAndShowWhileTheMainDisplayIsTurnedOff() throws {
+    /// macOS can drop Hide mirrors when a display turns off (26B123 trial),
+    /// so Turn off and Remove from desktop refuse each other.
+    func testTurnOffAndRemoveFromDesktopRefuseEachOther() throws {
         let baseline = try world.snapshot()
         let sut = world.controller(directory: directory)
         _ = try sut.turnOff(world.identity(1), store: store)
         XCTAssertThrowsError(try sut.turnOff(world.identity(3), store: store), "one Turn off at a time")
+        XCTAssertThrowsError(try sut.mirror(selector: world.uuid(3), source: world.uuid(2), store: store))
+        _ = try sut.unmirror(store: store, selector: world.uuid(1))
+        XCTAssertEqual(try world.snapshot(), baseline)
 
         _ = try sut.mirror(selector: world.uuid(3), source: world.uuid(2), store: store)
-        XCTAssertEqual(world.mirrors, [3: 2])
-        _ = try sut.unmirror(store: store, selector: world.uuid(3))
-        XCTAssertEqual(world.mirrors, [:])
-        XCTAssertEqual(try store.load().state, .mirrored, "display 1 is still off")
-        XCTAssertEqual(world.writes, ["off 7"])
-
-        _ = try sut.unmirror(store: store, selector: world.uuid(1))
+        XCTAssertThrowsError(try sut.turnOff(world.identity(1), store: store))
         XCTAssertEqual(world.writes, ["off 7", "on 7"])
-        XCTAssertEqual(try world.snapshot(), baseline)
-        XCTAssertEqual(try store.load().state, .restored)
+        XCTAssertEqual(world.mirrors, [3: 2])
     }
 
     func testReconnectIsNeverRetriedAndAReturnedDisplayIsShownPublicly() throws {
@@ -329,12 +327,11 @@ final class DisplayTurnOffTests: XCTestCase {
         XCTAssertEqual(try store.load().state, .restored)
     }
 
-    /// Regression (26B123 trial): macOS dropped a Hide mirror when another
-    /// display turned off, and the app refused the Show that reconnects it.
-    func testShowReconnectsAfterMacOSDropsAHideMirror() throws {
+    /// Regression (26B123 trial): macOS applied a saved layout that changed
+    /// the other displays, and the app refused the Show that reconnects.
+    func testShowReconnectsAfterMacOSChangesTheOtherDisplays() throws {
         let sut = world.controller(directory: directory)
-        _ = try sut.mirror(selector: world.uuid(3), source: world.uuid(2), store: store)
-        world.onTurnOff = { $0.mirrors = [:] }
+        world.onTurnOff = { $0.mirrors = [3: 2] }
         XCTAssertThrowsError(try sut.turnOff(world.identity(1), store: store))
         XCTAssertEqual(try disconnect(1).state, .off)
 

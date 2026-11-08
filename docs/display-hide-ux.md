@@ -114,10 +114,10 @@ Show: turn on by saved ID (one write) → verify identity → restore mode, posi
 ```
 
 - Works on the main display; macOS moves the menu bar, Dock and windows.
-  Built-in, mirrored, removed and mirror-source displays are refused, and
-  another usable physical display must stay on.
-- One display at a time. It can share a Hide session with removed displays,
-  and their Shows keep working while it's off.
+  Built-in and mirrored displays are refused, and another usable physical
+  display must stay on.
+- One display at a time, and not while a display is removed from the desktop
+  (or the reverse): macOS can drop Hide mirrors when a display turns off.
 - No input switching or DDC.
 - Wake, relaunch and rules never turn a display off again. If macOS turns it
   back on (for example after sleep), it stays **Hidden** and Show puts its

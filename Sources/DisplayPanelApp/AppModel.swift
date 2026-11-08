@@ -2469,15 +2469,16 @@ final class AppModel: ObservableObject {
         if isBlackoutHidden(uuid) || isJournalTarget(uuid) {
             return .unavailable("This display is hidden. Show it first.")
         }
-        if isDisplayMirrored(display.id) {
-            return isMirrorSource(uuid)
-                ? .unavailable("A removed display mirrors onto this one. Show it first.")
-                : .unavailable("macOS is mirroring this display. Turn off mirroring in System Settings → Displays first.")
+        // macOS can drop Hide mirrors when a display turns off.
+        if !unresolvedHandoffRemovals.isEmpty {
+            return .unavailable("Show the displays removed from the desktop first.")
         }
-        let removed = Set(unresolvedHandoffRemovals.map { $0.target.uuid.lowercased() })
+        if isDisplayMirrored(display.id) {
+            return .unavailable("macOS is mirroring this display. Turn off mirroring in System Settings → Displays first.")
+        }
         guard activeDisplays.contains(where: { other in
             guard let otherUUID = other.uuid?.lowercased() else { return false }
-            return other.id != display.id && !other.asleep && !removed.contains(otherUUID) && !isBlackoutHidden(otherUUID)
+            return other.id != display.id && !other.asleep && !isBlackoutHidden(otherUUID)
         }) else {
             return .unavailable("DisplayPanel won’t turn off the last visible display.")
         }
@@ -2499,6 +2500,10 @@ final class AppModel: ObservableObject {
         }
         guard configuration.enabled else {
             return .unavailable("Set this display’s Hide to Remove from desktop first.")
+        }
+        // macOS can drop Hide mirrors when a display turns off.
+        if handoffStatus?.turnedOff.contains(where: \.isUnresolved) == true {
+            return .unavailable("Show the turned-off display first.")
         }
         guard let target = matchingSavedDisplay(configuration.target) else {
             return .identityChanged(savedIdentityProblem(configuration.target) ?? "The saved target identity is unavailable.")
@@ -6667,8 +6672,10 @@ final class AppModel: ObservableObject {
             refreshHandoffStatus()
             hideOperation = .idle
             rearmProtectionAfterDisplayRecovery()
+            // Core explains a display that did turn off; don't contradict it.
+            let off = handoffStatus?.turnedOff(for: target.uuid)?.state == "off"
             finish(.hide, targetUUID: target.uuid, succeeded: false,
-                   message: "Couldn’t turn off. \(error.localizedDescription)",
+                   message: off ? error.localizedDescription : "Couldn’t turn off. \(error.localizedDescription)",
                    input: noInput, inputWarning: nil, completion: completion)
         }
     }

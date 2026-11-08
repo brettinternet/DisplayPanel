@@ -415,8 +415,11 @@ struct MirrorController {
         let baseline: RecoverySnapshot
         if let existing, !existing.state.resolved {
             if let previous = existing.publicMirrorSession {
+                // macOS can drop Hide mirrors when a display turns off (26B123).
+                guard previous.unresolvedDisconnects.isEmpty else {
+                    throw RecoveryError.unsafe("a display is turned off; Show it before removing another from the desktop")
+                }
                 guard previous.removals.allSatisfy({ $0.state != .needsAttention && $0.state != .captured && $0.state != .restoring }),
-                      previous.unresolvedDisconnects.allSatisfy({ $0.state == .off }),
                       MirrorSessionTopology.matches(previous, current: current) else {
                     throw RecoveryError.unsafe("display recovery needs attention; resolve it before starting another removal")
                 }

@@ -74,11 +74,15 @@ Scripts, rules, startup and wake never disconnect a display.
 
 The **Turn off** [Hide style](display-hide-ux.md#turn-off) uses the same
 setter, but the display stays off until Show instead of a deadline. It shares
-the public Hide journal, so it can coexist with displays removed by mirroring.
+the public Hide journal.
 
 - Main displays are allowed; another usable physical display must stay on.
-  Built-in, mirrored, hidden and mirror-source displays are refused, as are the
-  driver, architecture, setter and awake checks below. One display at a time.
+  Built-in, mirrored and hidden displays are refused, as are the driver,
+  architecture, setter and awake checks below. One display at a time.
+- Turn off and Remove from desktop refuse each other: on 26B123, turning a
+  display off dropped another display's Hide mirror (trial below).
+- Show is always offered while the display is off; a changed layout never
+  blocks reconnecting it.
 - The journal entry (`publicMirrorSession.disconnects`) is written before the
   setter runs:
 
@@ -110,10 +114,10 @@ and one Show per display. Each made one private write each way.
 | --- | --- | --- |
 | Dell AW3423DW (main, no DDC) | Turned off; macOS picked another main | Back without the monitor's buttons; mode, origin and main role matched the capture taken before |
 | DELL S2721DGF | Turned off, but macOS made another display main, so DisplayPanel reported "The display didn't turn off." (fixed above) | Back without the monitor's buttons |
+| Dell AW3423DW, with K272HUL hidden by mirroring | Turned off; macOS dropped the K272HUL mirror and picked another main, so DisplayPanel reported that macOS changed the other displays | The app refused Show (fixed: a turned-off display can always be shown). `dp unmirror` reconnected it with one private write; macOS reapplied its saved four-display layout, mirror included. Showing the K272HUL then restored the capture taken before exactly |
 
-Not tried live: Turn off alongside displays hidden by mirroring, app quit and
-relaunch, display sleep and wake, and macOS reconnecting the display itself.
-Fake-writer tests cover each.
+Not tried live: app quit and relaunch, display sleep and wake, and macOS
+reconnecting the display itself. Fake-writer tests cover each.
 
 ## Safety checks
 
