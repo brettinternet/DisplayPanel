@@ -271,6 +271,7 @@ final class AppModel: ObservableObject {
     private let hideDisplay: (DisplayHideIdentity, DisplayHideIdentity, UInt8?) throws -> DisplayInputOutcome
     private let sleepResumeHideDisplay: (DisplayHideIdentity, DisplayHideIdentity, DisplayHideWakeExpectation) throws -> DisplayInputOutcome
     private let showDisplay: (String, UInt8?) throws -> DisplayInputOutcome
+    private let turnOffDisplay: (DisplayHideIdentity) throws -> Void
     private let recoverDisplaySession: (DisplaySessionRecovery, Bool) throws -> Void
     private var sessionRecoveryInProgress = false
     private var sessionRecoveryInterrupted = false
@@ -342,6 +343,9 @@ final class AppModel: ObservableObject {
                 return try DisplayHideController().show(expectedJournalID: pieces[0], targetUUID: pieces[1], returnInput: input)
             }
             return try DisplayHideController().show(expectedJournalID: key, returnInput: input)
+        },
+        turnOffDisplay: @escaping (DisplayHideIdentity) throws -> Void = {
+            try DisplayHideController().turnOff(target: $0)
         },
         recoverDisplaySession: @escaping (DisplaySessionRecovery, Bool) throws -> Void = {
             try DisplayHideController().recoverSession($0, hideAgain: $1)
@@ -433,6 +437,7 @@ final class AppModel: ObservableObject {
         self.hideDisplay = hideDisplay
         self.sleepResumeHideDisplay = sleepResumeHideDisplay
         self.showDisplay = showDisplay
+        self.turnOffDisplay = turnOffDisplay
         self.recoverDisplaySession = recoverDisplaySession
         self.checkDDCInput = checkDDCInput
         self.selectDDCInput = selectDDCInput
@@ -1358,7 +1363,7 @@ final class AppModel: ObservableObject {
 
     func isJournalTarget(_ uuid: String?) -> Bool {
         guard let uuid, let status = handoffStatus, status.hasUnresolvedJournal else { return false }
-        return status.removal(for: uuid) != nil ||
+        return status.removal(for: uuid) != nil || status.turnedOff(for: uuid) != nil ||
             status.target?.uuid.caseInsensitiveCompare(uuid) == .orderedSame
     }
 
@@ -2420,16 +2425,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Why Hide can't start for this configuration right now, or nil when it can.
-    func hideReadiness(
-        for configuration: DisplayHideConfiguration,
-        allowingCurrentOperation: Bool = false,
-        projectedBlackouts: Set<String>? = nil,
-        projectedRemovals: Set<String>? = nil,
-        projectedSources: [String: String]? = nil,
-        actionLeaseID: UUID? = nil,
-        allowVerifiedRemovalNoOp: Bool = false
-    ) -> DisplayHideError? {
+    /// Why a Hide that changes display topology must wait, whatever its style.
+    private func topologyHideBlocker(allowingCurrentOperation: Bool, actionLeaseID: UUID?) -> DisplayHideError? {
         if runningDisplayAction != nil, runningDisplayAction?.id != actionLeaseID {
             return .blocked(displayActionBusyMessage)
         }
@@ -2457,6 +2454,48 @@ final class AppModel: ObservableObject {
         if let failure = protectionQuiescenceFailure {
             _ = failure // Shown with its retry; repeating it here would duplicate it.
             return .protectionCleanup(Self.automationCleanupRetryMessage)
+        }
+        return nil
+    }
+
+    /// Why Turn off can't run on this display right now, or nil when it can.
+    func turnOffReadiness(for display: DisplayRecord, allowingCurrentOperation: Bool = false,
+                          actionLeaseID: UUID? = nil) -> DisplayHideError? {
+        if let blocker = topologyHideBlocker(allowingCurrentOperation: allowingCurrentOperation, actionLeaseID: actionLeaseID) {
+            return blocker
+        }
+        if let reason = removalIneligibleReason(for: display) { return .unavailable(reason) }
+        guard let uuid = display.uuid?.lowercased() else { return .unavailable("This display has no stable ID.") }
+        if isBlackoutHidden(uuid) || isJournalTarget(uuid) {
+            return .unavailable("This display is hidden. Show it first.")
+        }
+        if isDisplayMirrored(display.id) {
+            return isMirrorSource(uuid)
+                ? .unavailable("A removed display mirrors onto this one. Show it first.")
+                : .unavailable("macOS is mirroring this display. Turn off mirroring in System Settings → Displays first.")
+        }
+        let removed = Set(unresolvedHandoffRemovals.map { $0.target.uuid.lowercased() })
+        guard activeDisplays.contains(where: { other in
+            guard let otherUUID = other.uuid?.lowercased() else { return false }
+            return other.id != display.id && !other.asleep && !removed.contains(otherUUID) && !isBlackoutHidden(otherUUID)
+        }) else {
+            return .unavailable("DisplayPanel won’t turn off the last visible display.")
+        }
+        return nil
+    }
+
+    /// Why Hide can't start for this configuration right now, or nil when it can.
+    func hideReadiness(
+        for configuration: DisplayHideConfiguration,
+        allowingCurrentOperation: Bool = false,
+        projectedBlackouts: Set<String>? = nil,
+        projectedRemovals: Set<String>? = nil,
+        projectedSources: [String: String]? = nil,
+        actionLeaseID: UUID? = nil,
+        allowVerifiedRemovalNoOp: Bool = false
+    ) -> DisplayHideError? {
+        if let blocker = topologyHideBlocker(allowingCurrentOperation: allowingCurrentOperation, actionLeaseID: actionLeaseID) {
+            return blocker
         }
         guard configuration.enabled else {
             return .unavailable("Set this display’s Hide to Remove from desktop first.")
@@ -2550,9 +2589,16 @@ final class AppModel: ObservableObject {
     /// Hide removes a display from the desktop when Experimental features are on
     /// and its Hide style is Remove from desktop; otherwise Hide blacks it out.
     func hideRemovesFromDesktop(_ display: DisplayRecord) -> Bool {
-        guard experimentalFeaturesEnabled, let uuid = display.uuid,
-              hidePreferences[uuid]?.enabled == true else { return false }
-        return removalIneligibleReason(for: display) == nil
+        hideStyle(of: display) == .removeFromDesktop
+    }
+
+    /// The style Hide uses for this display: Black out unless Experimental
+    /// features are on and the display can leave the desktop.
+    func hideStyle(of display: DisplayRecord) -> DisplayHideStyle {
+        guard experimentalFeaturesEnabled, let uuid = display.uuid, let configuration = hidePreferences[uuid],
+              removalIneligibleReason(for: display) == nil else { return .blackOut }
+        if configuration.turnsOff == true { return .turnOff }
+        return configuration.enabled ? .removeFromDesktop : .blackOut
     }
 
     func isBlackoutHidden(_ uuid: String?) -> Bool {
@@ -2895,8 +2941,9 @@ final class AppModel: ObservableObject {
     /// Displays in arrangement order, plus every journaled display that is no longer connected.
     var displayTiles: [DisplayTile] {
         let removals = handoffStatus?.removals.filter(\.isUnresolved) ?? []
-        let journalTargets = removals.map(\.target) +
-            (removals.isEmpty && handoffStatus?.hasUnresolvedJournal == true
+        let turnedOff = handoffStatus?.turnedOff.filter(\.isUnresolved) ?? []
+        let journalTargets = removals.map(\.target) + turnedOff.map(\.target) +
+            (removals.isEmpty && turnedOff.isEmpty && handoffStatus?.hasUnresolvedJournal == true
                 ? [handoffStatus?.target].compactMap { $0 } : [])
         func isJournalTarget(_ display: DisplayRecord) -> Bool {
             guard let uuid = display.uuid else { return false }
@@ -2974,9 +3021,10 @@ final class AppModel: ObservableObject {
     var canShowHiddenDisplay: Bool {
         guard handoffInspectionFailure == nil, let status = handoffStatus,
               status.state == .hidden || status.state == .recovery else { return false }
-        let unresolved = status.removals.filter(\.isUnresolved)
+        let unresolved = status.removals.filter(\.isUnresolved).map(\.canShow) +
+            status.turnedOff.filter(\.isUnresolved).map(\.canShow)
         if unresolved.isEmpty { return status.canShow }
-        return unresolved.allSatisfy(\.canShow)
+        return unresolved.allSatisfy { $0 }
     }
 
     // Messages shared by several refusal paths; keep each wording in one place.
@@ -3029,6 +3077,12 @@ final class AppModel: ObservableObject {
                 tile.action = .show
                 return
             }
+            if let uuid = tile.uuid, let off = handoffStatus?.turnedOff(for: uuid) {
+                tile.action = .show
+                tile.actionBlocker = off.canShow ? showWait()?.localizedDescription
+                    : off.reason ?? "DisplayPanel can’t turn this display back on right now."
+                return
+            }
             guard let uuid = tile.uuid, let removal = handoffStatus?.removal(for: uuid) else { return }
             let canWait = canWaitForInputReturnShow([uuid])
             if tile.status == .hidden, !canWait, !removal.canShow {
@@ -3042,7 +3096,9 @@ final class AppModel: ObservableObject {
         case .on, .blackedOut, .asleep, .mirrored, .unavailable:
             guard let display = tile.display else { return }
             tile.action = .hide
-            if hideRemovesFromDesktop(display), let uuid = tile.uuid,
+            if hideStyle(of: display) == .turnOff {
+                tile.actionBlocker = turnOffReadiness(for: display)?.localizedDescription
+            } else if hideRemovesFromDesktop(display), let uuid = tile.uuid,
                let configuration = hideConfiguration(for: uuid) {
                 tile.actionBlocker = hideReadinessMessage(for: configuration)
             } else {
@@ -3063,6 +3119,9 @@ final class AppModel: ObservableObject {
             break
         }
         if isBlackoutHidden(uuid) { return .hidden }
+        if isJournalTarget, let uuid, let off = handoffStatus?.turnedOff(for: uuid) {
+            return off.state == "off" && off.canShow ? .hidden : .needsRecovery
+        }
         if isJournalTarget, let uuid, let removal = handoffStatus?.removal(for: uuid) {
             // Still hidden as Hide left it; another display's recovery only blocks its Show.
             let otherNeedsRecovery = handoffStatus?.removals.contains {
@@ -3134,6 +3193,10 @@ final class AppModel: ObservableObject {
 
     /// Sets a display's Hide style to Remove from desktop or Black out.
     func setHideEnabled(_ enabled: Bool, for display: DisplayRecord) {
+        setHideStyle(enabled ? .removeFromDesktop : .blackOut, for: display)
+    }
+
+    func setHideStyle(_ style: DisplayHideStyle, for display: DisplayRecord) {
         guard let targetUUID = display.uuid,
               !hideConfigurationFrozen(for: targetUUID),
               isEligibleHideTarget(display),
@@ -3141,7 +3204,9 @@ final class AppModel: ObservableObject {
         var updated = hidePreferences
         var configuration = updated[uuid] ?? DisplayHideConfiguration(target: DisplayIdentitySnapshot(display))
         guard matches(configuration.target, display) else { return }
+        let enabled = style == .removeFromDesktop
         configuration.enabled = enabled
+        configuration.turnsOff = style == .turnOff ? true : nil
         // Preserve the existing main-source default for non-main targets; a main target requires an explicit source.
         if enabled, !display.main, configuration.source == nil,
            let main = sourceChoices(for: configuration).first(where: \.main) {
@@ -4783,16 +4848,20 @@ final class AppModel: ObservableObject {
         guard let status = handoffStatus,
               status.sessionRecovery == confirmation,
               confirmation.canRecover, sessionRecoveryBlocker == nil,
-              let first = status.removals.first(where: \.isUnresolved) else {
+              !hideAgain || confirmation.canHideAgain,
+              let first = status.removals.first(where: \.isUnresolved)?.target ??
+                status.turnedOff.first(where: \.isUnresolved)?.target else {
             sessionRecoveryResult = sessionRecoveryBlocker ?? "Recovery changed. Check Again and confirm the current displays."
             return
         }
-        let targets = status.removals.filter(\.isUnresolved).map { $0.target.uuid }
+        // Turned-off displays stay shown either way.
+        let removalTargets = status.removals.filter(\.isUnresolved).map { $0.target.uuid }
+        let targets = removalTargets + status.turnedOff.filter(\.isUnresolved).map { $0.target.uuid }
         cancelPendingSleepHideResume()
         sessionRecoveryInProgress = true
         sessionRecoveryInterrupted = false
         sessionRecoveryResult = nil
-        hideOperation = hideAgain ? .hiding(first.target.uuid) : .showing(first.target.uuid)
+        hideOperation = hideAgain ? .hiding(first.uuid) : .showing(first.uuid)
         manualActivityDate = now()
         onStatusChange?()
         stopManagedProtection { [weak self] succeeded, message in
@@ -4819,7 +4888,7 @@ final class AppModel: ObservableObject {
                     self.displays = self.displayProvider()
                     self.refreshHandoffStatus()
                     if hideAgain {
-                        guard targets.allSatisfy({ uuid in
+                        guard removalTargets.allSatisfy({ uuid in
                             let removal = self.handoffStatus?.removal(for: uuid)
                             return removal?.state == "mirrored" && removal?.topologyVerified == true
                         }) else {
@@ -4861,14 +4930,14 @@ final class AppModel: ObservableObject {
             return
         }
         cancelPendingSleepHideResume()
-        if isBlackoutHidden(targetUUID) {
+        if isBlackoutHidden(targetUUID) || handoffStatus?.turnedOff(for: targetUUID) != nil {
             refuse(.hide, targetUUID: targetUUID, error: DisplayHideError.unavailable(
                 "This display is already hidden."
             ), completion: completion)
             return
         }
         guard let display = displays.first(where: { $0.uuid?.caseInsensitiveCompare(targetUUID) == .orderedSame }) else {
-            if style == .removeFromDesktop {
+            if style == .removeFromDesktop || style == .turnOff {
                 refuse(.hide, targetUUID: targetUUID, error: DisplayHideError.identityChanged(
                     "This display is disconnected or changed. Reconnect that exact display."
                 ), completion: completion)
@@ -4879,16 +4948,18 @@ final class AppModel: ObservableObject {
             }
             return
         }
-        let removesFromDesktop: Bool
-        switch style {
-        case .configured:
-            removesFromDesktop = hideRemovesFromDesktop(display)
-        case .blackOut:
-            removesFromDesktop = false
-        case .removeFromDesktop:
-            removesFromDesktop = true
+        let resolvedStyle = style == .configured ? hideStyle(of: display) : style
+        if resolvedStyle == .turnOff {
+            guard hideStyle(of: display) == .turnOff else {
+                refuse(.hide, targetUUID: targetUUID, error: DisplayHideError.unavailable(
+                    "Set this display’s Hide to Turn off in Settings → Displays first."
+                ), completion: completion)
+                return
+            }
+            turnOff(display, actionLeaseID: actionLeaseID, completion: completion)
+            return
         }
-        guard removesFromDesktop else {
+        guard resolvedStyle == .removeFromDesktop else {
             blackOut(targetUUID: targetUUID, manualAction: manualAction,
                      manualActionStepIndex: manualActionStepIndex, actionLeaseID: actionLeaseID,
                      expectedTarget: expectedTarget, completion: completion)
@@ -4931,6 +5002,31 @@ final class AppModel: ObservableObject {
         else { stopManagedProtection(completion: finish) }
     }
 
+    /// Turn off: the Mac stops driving the display until Show. Only the
+    /// display's saved identity is turned off, after automation stops.
+    private func turnOff(_ display: DisplayRecord, actionLeaseID: UUID?,
+                         completion: ((DisplayOperationResult) -> Void)?) {
+        let target = DisplayIdentitySnapshot(display)
+        if let blocker = turnOffReadiness(for: display, actionLeaseID: actionLeaseID) {
+            refuse(.hide, targetUUID: target.uuid, error: blocker, completion: completion)
+            return
+        }
+        displayResults[target.listID] = nil
+        hideOperation = .hiding(target.uuid)
+        manualActivityDate = now()
+        onStatusChange?()
+        let finish: (Bool, String?) -> Void = { [weak self] succeeded, message in
+            Task { @MainActor in
+                await self?.finishTurnOffAfterProtectionQuiescence(
+                    target, actionLeaseID: actionLeaseID, cleanupSucceeded: succeeded,
+                    cleanupFailure: message, completion: completion
+                )
+            }
+        }
+        if actionLeaseID != nil { finish(true, nil) }
+        else { stopManagedProtection(completion: finish) }
+    }
+
     func makeShowRequest(
         targetUUID: String? = nil,
         actionLeaseID: UUID? = nil,
@@ -4946,8 +5042,18 @@ final class AppModel: ObservableObject {
             throw state == DisplayHandoffStatus.State.none || state == .busy
                 ? DisplayHideError.blocked(reason) : DisplayHideError.recoveryRequired(reason)
         }
-        guard let target = targetUUID ?? handoffStatus.target?.uuid,
-              let removal = handoffStatus.removal(for: target) else {
+        guard let target = targetUUID ?? handoffStatus.target?.uuid else {
+            throw DisplayHideError.blocked("This display isn’t hidden by DisplayPanel.")
+        }
+        if let off = handoffStatus.turnedOff(for: target) {
+            // Show turns it back on; Turn off never switched its input.
+            guard off.canShow else {
+                throw DisplayHideError.recoveryRequired(off.reason ?? "DisplayPanel can’t turn this display back on right now.")
+            }
+            return DisplayShowRequest(status: handoffStatus, targetUUID: off.target.uuid,
+                                      returnInput: nil, returnInputWarning: nil)
+        }
+        guard let removal = handoffStatus.removal(for: target) else {
             throw DisplayHideError.blocked("This display isn’t hidden by DisplayPanel.")
         }
         guard removal.canShow || canAttemptGuardedRecoveryShow(removal) else {
@@ -6510,6 +6616,63 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func finishTurnOffAfterProtectionQuiescence(
+        _ target: DisplayIdentitySnapshot,
+        actionLeaseID: UUID?,
+        cleanupSucceeded: Bool,
+        cleanupFailure: String?,
+        completion: ((DisplayOperationResult) -> Void)?
+    ) async {
+        guard hideOperation == .hiding(target.uuid) else { return }
+        let noInput = DisplayInputOutcome(state: .notRequested, requestedInput: nil)
+        if !cleanupSucceeded {
+            let failure = cleanupFailure ?? Self.automationCleanupUnverified
+            protectionQuiescenceFailure = failure
+            hideOperation = .idle
+            refreshHandoffStatus()
+            reconcileProtection()
+            finish(.hide, targetUUID: target.uuid, succeeded: false,
+                   message: "Couldn’t turn off: automation didn’t confirm it stopped. \(failure)",
+                   input: noInput, inputWarning: nil, automationStopUnconfirmed: true, completion: completion)
+            return
+        }
+        protectionQuiescenceFailure = nil
+        do {
+            displays = displayProvider()
+            refreshHandoffStatus()
+            guard let display = matchingDisplay(target), hideStyle(of: display) == .turnOff else {
+                throw DisplayHideError.identityChanged("The display or its Hide setting changed before Turn off began. Try again.")
+            }
+            if let blocker = turnOffReadiness(for: display, allowingCurrentOperation: true, actionLeaseID: actionLeaseID) {
+                throw blocker
+            }
+            let identity = coreIdentity(target)
+            do {
+                actionTopologyWriteInProgress = actionLeaseID != nil
+                defer { actionTopologyWriteInProgress = false }
+                try await performDisplayWrite { [turnOffDisplay] in try turnOffDisplay(identity) }
+            }
+            displays = displayProvider()
+            refreshHandoffStatus()
+            guard handoffStatus?.turnedOff(for: target.uuid)?.state == "off" else {
+                throw DisplayHideError.recoveryRequired(
+                    "DisplayPanel couldn’t confirm the display turned off. Check its recovery details."
+                )
+            }
+            hideOperation = .idle
+            reconcileProtection()
+            finish(.hide, targetUUID: target.uuid, succeeded: true, message: "Turned off.",
+                   input: noInput, inputWarning: nil, completion: completion)
+        } catch {
+            refreshHandoffStatus()
+            hideOperation = .idle
+            rearmProtectionAfterDisplayRecovery()
+            finish(.hide, targetUUID: target.uuid, succeeded: false,
+                   message: "Couldn’t turn off. \(error.localizedDescription)",
+                   input: noInput, inputWarning: nil, completion: completion)
+        }
+    }
+
     private func finishShowAfterProtectionQuiescence(
         _ request: DisplayShowRequest,
         actionLeaseID: UUID? = nil,
@@ -6543,10 +6706,12 @@ final class AppModel: ObservableObject {
         refreshHandoffStatus()
         let capturedRemoval = request.status.removal(for: request.targetUUID)
         let currentRemoval = handoffStatus?.removal(for: request.targetUUID)
+        let capturedOff = request.status.turnedOff(for: request.targetUUID)
+        let currentOff = handoffStatus?.turnedOff(for: request.targetUUID)
         let canAttemptGuardedRecovery = currentRemoval.map(canAttemptGuardedRecoveryShow) == true
         guard handoffStatus?.hasUnresolvedJournal == true,
-              currentRemoval?.canShow == true || canAttemptGuardedRecovery,
-              capturedRemoval?.id == currentRemoval?.id,
+              currentRemoval?.canShow == true || canAttemptGuardedRecovery || currentOff?.canShow == true,
+              capturedRemoval?.id == currentRemoval?.id, capturedOff?.id == currentOff?.id,
               handoffStatus?.journalID == request.status.journalID,
               let expectedJournalID = request.status.journalID else {
             notStarted("The displays changed before Show began. Try again.")
@@ -6554,7 +6719,8 @@ final class AppModel: ObservableObject {
         }
         var returnedInputOutcome: DisplayInputOutcome?
         do {
-            let showKey = request.status.removals.count > 1
+            // Core needs the UUID whenever the session hides more than one display.
+            let showKey = request.status.removals.count > 1 || request.status.turnedOff.contains(where: \.isUnresolved)
                 ? "\(expectedJournalID)|\(request.targetUUID)" : expectedJournalID
             let returnInput = request.returnInput
             let inputOutcome: DisplayInputOutcome
@@ -6573,11 +6739,12 @@ final class AppModel: ObservableObject {
                     handoffInspectionFailure ?? "DisplayPanel couldn’t confirm this display is back. Check its recovery details."
                 )
             }
-            let selectedStillRemoved = currentStatus.removal(for: request.targetUUID) != nil
+            let selectedStillRemoved = currentStatus.removal(for: request.targetUUID) != nil ||
+                currentStatus.turnedOff(for: request.targetUUID) != nil
             let selectedRestored = currentStatus.removals.contains(where: {
                 $0.target.uuid.caseInsensitiveCompare(request.targetUUID) == .orderedSame &&
                     !$0.isUnresolved && $0.state == "restored"
-            })
+            }) || currentStatus.turnedOff.contains(where: { $0.id == capturedOff?.id && $0.state == "restored" })
             let sameSession = currentStatus.journalID == request.status.journalID || !currentStatus.hasUnresolvedJournal
             guard !selectedStillRemoved, sameSession,
                   (!currentStatus.hasUnresolvedJournal || selectedRestored) else {

@@ -93,6 +93,26 @@ public struct DisplayHandoffRemoval: Equatable, Identifiable {
     }
 }
 
+/// A display Turn off disconnected. It has no mirror source.
+public struct DisplayHandoffTurnOff: Equatable, Identifiable {
+    public let id: String
+    public let target: DisplayHandoffIdentity
+    public let state: String
+    public let isUnresolved: Bool
+    public let canShow: Bool
+    public let reason: String?
+
+    public init(id: String, target: DisplayHandoffIdentity, state: String,
+                isUnresolved: Bool, canShow: Bool, reason: String?) {
+        self.id = id
+        self.target = target
+        self.state = state
+        self.isUnresolved = isUnresolved
+        self.canShow = canShow
+        self.reason = reason
+    }
+}
+
 public struct DisplayHandoffStatus: Equatable {
     public enum State: Equatable {
         case none
@@ -121,9 +141,16 @@ public struct DisplayHandoffStatus: Equatable {
     /// Stable normalized digest of the latest observation; exact checks still use RecoverySnapshot.verify.
     public let observedTopologyIdentity: String?
     public let removals: [DisplayHandoffRemoval]
+    /// Kept apart from removals: a turned-off display has no source and is never hidden again.
+    public let turnedOff: [DisplayHandoffTurnOff]
     public let sessionRecovery: DisplaySessionRecovery?
 
-    public var hasUnresolvedJournal: Bool { removals.contains(where: \.isUnresolved) || state != .none }
+    public var hasUnresolvedJournal: Bool {
+        removals.contains(where: \.isUnresolved) || turnedOff.contains(where: \.isUnresolved) || state != .none
+    }
+    public func turnedOff(for uuid: String) -> DisplayHandoffTurnOff? {
+        turnedOff.first { $0.target.uuid.caseInsensitiveCompare(uuid) == .orderedSame && $0.isUnresolved }
+    }
     public func removal(for uuid: String) -> DisplayHandoffRemoval? {
         if let removal = removals.first(where: { $0.target.uuid.caseInsensitiveCompare(uuid) == .orderedSame && $0.isUnresolved }) {
             return removal
@@ -153,6 +180,7 @@ public struct DisplayHandoffStatus: Equatable {
         observedTopologyIdentity: String? = nil,
         journalIdentity: String? = nil,
         removals: [DisplayHandoffRemoval] = [],
+        turnedOff: [DisplayHandoffTurnOff] = [],
         sessionRecovery: DisplaySessionRecovery? = nil
     ) {
         self.state = state
@@ -171,6 +199,7 @@ public struct DisplayHandoffStatus: Equatable {
         self.observedTopologyIdentity = observedTopologyIdentity
         self.journalIdentity = journalIdentity
         self.removals = removals
+        self.turnedOff = turnedOff
         self.sessionRecovery = sessionRecovery
     }
 
@@ -265,7 +294,8 @@ enum HiddenMirrorSourceOverlayAuthorization {
               sourceObservation.identity.serial == selectedSource.serial else {
             return "the current selected source identity or topology does not match the journal"
         }
-        let targetUUIDs = Set(removals.map { $0.target.uuid.lowercased() })
+        let targetUUIDs = Set((removals.map(\.target) + status.turnedOff.filter(\.isUnresolved).map(\.target))
+            .map { $0.uuid.lowercased() })
         guard status.observations.allSatisfy({ observation in
             observation.state == .separate ||
                 (observation.isJournalTarget && targetUUIDs.contains(observation.identity.uuid.lowercased()) &&
@@ -302,7 +332,7 @@ public enum DisplayHandoff {
 
     public static func run(selector: String, source: String?, input: UInt8?, journalPath: String?) throws {
         let store = RecoveryStore(url: journalPath.map { URL(fileURLWithPath: $0) } ?? RecoveryStore.defaultURL)
-        let controller = HandoffController()
+        let controller = HandoffController(mirror: .production)
         if let source {
             try controller.away(selector: selector, source: source, input: input, store: store)
         } else {
@@ -370,32 +400,45 @@ public enum DisplayHandoff {
                 reason: journal.showRefusal, topologyVerified: journal.mirrorTopologyVerified
             )]
         }
+        let turnedOff = status.turnedOff.map { off in
+            DisplayHandoffTurnOff(
+                id: off.id, target: DisplayHandoffIdentity(off.target), state: off.state,
+                isUnresolved: off.isUnresolved, canShow: off.canShow, reason: off.showRefusal ?? off.failure
+            )
+        }
         let unresolved = removals.filter(\.isUnresolved)
+        let unresolvedOff = turnedOff.filter(\.isUnresolved)
         let attention = unresolved.first(where: { !$0.topologyVerified || !$0.canShow })
+        let offAttention = unresolvedOff.first(where: { !$0.canShow })
         let primary = attention ?? unresolved.first
+        // A turned-off target never pairs with a source, so removal(for:) can't invent a mirror for it.
+        let primaryOff = attention == nil && (offAttention != nil || unresolved.isEmpty)
+            ? offAttention ?? unresolvedOff.first : nil
         let state: DisplayHandoffStatus.State = !journal.isUnresolved ? .none
-            : attention == nil ? .hidden : .recovery
-        let reason = attention?.reason ?? journal.failure ?? journal.showRefusal ?? status.inspectionFailure ??
-            status.observations.first(where: \.isJournalTarget)?.detail
+            : attention == nil && offAttention == nil ? .hidden : .recovery
+        let reason = attention?.reason ?? offAttention?.reason ?? journal.failure ?? journal.showRefusal ??
+            status.inspectionFailure ?? status.observations.first(where: \.isJournalTarget)?.detail
+        let targets = unresolved.map(\.target) + unresolvedOff.map(\.target)
         let recoveryCommand: String?
-        if unresolved.count == 1, let target = unresolved.first?.target {
+        if targets.count == 1, let target = targets.first {
             recoveryCommand = "dp recovery restore --display \(DisplayHandoffStatus.shellQuote(target.uuid)) --journal \(DisplayHandoffStatus.shellQuote(status.journalPath))"
-        } else if unresolved.count > 1 {
+        } else if targets.count > 1 {
             recoveryCommand = "dp recovery status --journal \(DisplayHandoffStatus.shellQuote(status.journalPath))"
         } else {
             recoveryCommand = nil
         }
         return DisplayHandoffStatus(
             state: state,
-            target: primary?.target ?? journal.target.map(DisplayHandoffIdentity.init),
-            source: primary?.source ?? journal.source.map(DisplayHandoffIdentity.init),
+            target: primaryOff?.target ?? primary?.target ?? journal.target.map(DisplayHandoffIdentity.init),
+            source: primaryOff != nil ? nil : primary?.source ?? journal.source.map(DisplayHandoffIdentity.init),
             journalPath: status.journalPath, journalID: journal.id, reason: reason,
-            canShow: unresolved.contains(where: \.canShow), recoveryCommand: recoveryCommand,
+            canShow: unresolved.contains(where: \.canShow) || unresolvedOff.contains(where: \.canShow),
+            recoveryCommand: recoveryCommand,
             observations: status.observations, inspectionFailure: status.inspectionFailure,
             mirrorTopologyVerified: journal.mirrorTopologyVerified,
             baselineIdentity: journal.baselineIdentity,
             observedTopologyIdentity: journal.observedTopologyIdentity,
-            journalIdentity: journal.journalIdentity, removals: removals,
+            journalIdentity: journal.journalIdentity, removals: removals, turnedOff: turnedOff,
             sessionRecovery: status.sessionRecovery
         )
     }

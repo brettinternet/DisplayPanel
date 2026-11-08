@@ -87,6 +87,8 @@ struct DisplayHideConfiguration: Codable, Equatable {
     var awayInput: UInt8?
     var returnInput: UInt8?
     var keepWindowsOff: MoveWindowsConfiguration?
+    /// Hide turns the display off. Optional so older builds read it as Black out.
+    var turnsOff: Bool?
 
     init(target: DisplayIdentityReference, enabled: Bool = false, source: DisplayIdentityReference? = nil,
          awayInput: UInt8? = nil, returnInput: UInt8? = nil,

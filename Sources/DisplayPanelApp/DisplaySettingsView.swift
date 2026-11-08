@@ -162,9 +162,13 @@ struct DisplaySettingsView: View {
                 return "Hidden but not covered · retries when displays change"
             }
             return "Blacked out until you show it"
+        case .hidden where tile.uuid.flatMap({ model.handoffStatus?.turnedOff(for: $0) }) != nil:
+            return "Turned off until you show it"
         case .hidden:
             let source = tile.uuid.flatMap { model.handoffStatus?.removal(for: $0)?.source.name }
             return "Removed from desktop · mirrored onto \(source ?? "another display")"
+        case .hiding where tile.display.map(model.hideStyle(of:)) == .turnOff:
+            return "Turning off…"
         case .hiding:
             return "Removing from the desktop…"
         case .showing:
@@ -218,7 +222,7 @@ struct DisplaySettingsView: View {
         case .show?:
             return model.showReturnInputNote(for: tile.uuid)
         case .hide?:
-            guard let display = tile.display, !model.hideRemovesFromDesktop(display) else { return nil }
+            guard let display = tile.display, model.hideStyle(of: display) == .blackOut else { return nil }
             return "Hide blacks out this display until you show it."
         case nil:
             return nil
@@ -243,7 +247,7 @@ struct DisplaySettingsView: View {
         if let uuid = tile.uuid, UUID(uuidString: uuid) != nil {
             let display = tile.display
             let hidden = model.isBlackoutHidden(uuid)
-            let removes = display.map { model.hideRemovesFromDesktop($0) } ?? false
+            let removes = display.map { model.hideStyle(of: $0) != .blackOut } ?? false
             if hidden || (!removes && !isJournalTarget(tile)) {
                 let configuration = model.hideConfiguration(for: uuid)
                 let cover = model.keepWindowsOffCovers[uuid.lowercased()]
@@ -348,15 +352,17 @@ struct DisplaySettingsView: View {
                 let frozen = tile.uuid.map(model.hideConfigurationFrozen(for:)) ?? true
                 Section {
                     Picker("Style", selection: Binding(
-                        get: { reason == nil && configuration?.enabled == true },
-                        set: { model.setHideEnabled($0, for: display) }
+                        get: { model.hideStyle(of: display) },
+                        set: { model.setHideStyle($0, for: display) }
                     )) {
-                        Text("Black out").tag(false)
-                        Text("Remove from desktop").tag(true)
+                        Text("Black out").tag(DisplayHideStyle.blackOut)
+                        Text("Remove from desktop").tag(DisplayHideStyle.removeFromDesktop)
+                        Text("Turn off").tag(DisplayHideStyle.turnOff)
                     }
                     .disabled(reason != nil || frozen)
                     .accessibilityLabel("Hide style for \(tile.name)")
-                    if reason == nil, let configuration, configuration.enabled, let uuid = tile.uuid {
+                    if reason == nil, let configuration, model.hideStyle(of: display) == .removeFromDesktop,
+                       let uuid = tile.uuid {
                         sourcePicker(configuration, uuid: uuid, tiles: tiles)
                             .disabled(frozen)
                         // Before the input choice, so the other computer's input is easy to pick.
@@ -499,7 +505,7 @@ struct DisplaySettingsView: View {
                             isMain: Bool) -> String? {
         if let reason { return reason }
         if model.hideConfigurationFrozen(for: configuration?.target.uuid ?? ""),
-           model.handoffStatus?.removal(for: configuration?.target.uuid ?? "") != nil {
+           model.isJournalTarget(configuration?.target.uuid) {
             return "Show this display to change its removal settings."
         }
         let mainDisplayNote = "When the main display is mirrored, macOS decides where the menu bar, Dock and windows go."
@@ -560,9 +566,11 @@ struct DisplaySettingsView: View {
                 recoveryCheckNote
             } else {
                 HStack {
-                    Button("Hide again") {
-                        recoveryHidesAgain = true
-                        pendingSessionRecovery = recovery
+                    if recovery.canHideAgain {
+                        Button("Hide again") {
+                            recoveryHidesAgain = true
+                            pendingSessionRecovery = recovery
+                        }
                     }
                     Button("Keep displays shown") {
                         recoveryHidesAgain = false

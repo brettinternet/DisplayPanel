@@ -69,6 +69,12 @@ unmirroring. This safeguard has offline regression coverage; live two-monitor
 return validation remains outstanding.
 A display that needs attention blocks new removals until it's fixed.
 
+A [turned-off](display-disable.md#turn-off) display has its own entry in the
+same session. `recovery restore --display UUID` (or app **Show**) turns it back
+on once by its saved ID, then restores its layout. It never re-turns off on
+wake or relaunch; a display macOS turned back on is restored without a private
+write.
+
 ## Sleep, wake and reboot
 
 Sleeping displays report no mirroring, so inspection while a removed display

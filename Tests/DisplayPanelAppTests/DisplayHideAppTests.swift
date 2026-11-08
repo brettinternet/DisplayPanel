@@ -603,6 +603,101 @@ final class DisplayHideAppTests: XCTestCase {
         await fulfillment(of: [stopped], timeout: 3)
     }
 
+    func testTurnOffStyleTurnsOffOnlyThatDisplayAndShowTurnsItBackOn() async throws {
+        let defaults = try makeDefaults()
+        let target = displays[1]
+        var current = displays
+        let box = StatusBox(handoffStatus(.none, target: nil, source: nil))
+        var turnedOff: [String] = []
+        var showKeys: [String] = []
+        let model = makeModel(
+            defaults: defaults, displays: displays, displayProvider: { current }, status: { box.value },
+            hideDisplay: { _, _, _ in XCTFail("Turn off never mirrors"); return .notRequested },
+            showDisplay: { key, input in
+                XCTAssertNil(input, "Turn off never switched the input")
+                showKeys.append(key)
+                current = self.displays
+                box.value = self.handoffStatus(.none, target: nil, source: nil)
+                return .notRequested
+            },
+            turnOffDisplay: { identity in
+                turnedOff.append(identity.uuid)
+                current = self.displays.filter { $0.uuid != Self.targetUUID }
+                let off = self.handoffIdentity(target)
+                box.value = DisplayHandoffStatus(
+                    state: .hidden, target: off, journalPath: "/tmp/displaypanel-display-hide-fixture/current.json",
+                    journalID: "turn-off-journal", canShow: true,
+                    observations: [self.observation(target, state: .hiddenByDisplayPanel, journalTarget: true)],
+                    mirrorTopologyVerified: true,
+                    turnedOff: [DisplayHandoffTurnOff(id: "off-1", target: off, state: "off",
+                                                      isUnresolved: true, canShow: true, reason: nil)]
+                )
+            }
+        )
+        model.setHideStyle(.turnOff, for: target)
+        XCTAssertEqual(model.hideStyle(of: target), .turnOff)
+
+        let hidden = try await hideAndWait(model)
+        XCTAssertTrue(hidden.succeeded, hidden.message)
+        XCTAssertEqual(turnedOff, [Self.targetUUID])
+        XCTAssertNil(model.handoffStatus?.removal(for: Self.targetUUID), "a turned-off display has no mirror source")
+        let tile = try XCTUnwrap(model.displayTiles.first { $0.id == Self.targetKey })
+        XCTAssertEqual(tile.status, .hidden)
+        XCTAssertEqual(tile.action, .show)
+        XCTAssertNil(tile.actionBlocker)
+        let again = try await hideAndWait(model)
+        XCTAssertFalse(again.succeeded, "a turned-off display is never turned off or blacked out again")
+
+        let shown = try await showAndWait(model)
+        XCTAssertTrue(shown.succeeded, shown.message)
+        XCTAssertEqual(showKeys, ["turn-off-journal|\(Self.targetUUID)"])
+        XCTAssertEqual(turnedOff.count, 1)
+    }
+
+    func testShowingTheOnlyRemovalWhileAnotherDisplayIsTurnedOffNamesIt() async throws {
+        let defaults = try makeDefaults()
+        let main = displays[0]
+        let off = displays[1]
+        let removed = Self.display(index: 3, id: 303, uuid: Self.sourceUUID, name: "Removed", main: false, active: false)
+        let removal = DisplayHandoffRemoval(
+            id: "entry-one", target: handoffIdentity(removed), source: handoffIdentity(main),
+            state: "mirrored", isUnresolved: true, canShow: true, reason: nil, topologyVerified: true
+        )
+        let turnedOff = DisplayHandoffTurnOff(id: "off-1", target: handoffIdentity(off), state: "off",
+                                              isUnresolved: true, canShow: true, reason: nil)
+        let box = StatusBox(multiHandoffStatus(
+            [removal], observations: [
+                observation(removed, state: .hiddenByDisplayPanel, source: main, journalTarget: true),
+                observation(main, state: .separate)
+            ], journalID: "shared-session", turnedOff: [turnedOff]
+        ))
+        var connected = [main, removed]
+        var showKeys: [String] = []
+        let model = makeModel(
+            defaults: defaults, displays: [], displayProvider: { connected }, status: { box.value },
+            isDisplayMirrored: { $0 == removed.id && connected.contains(removed) },
+            showDisplay: { key, _ in
+                showKeys.append(key)
+                let back = Self.display(index: 3, id: 303, uuid: Self.sourceUUID, name: "Removed", main: false)
+                connected = [main, back]
+                let restored = DisplayHandoffRemoval(
+                    id: "entry-one", target: self.handoffIdentity(removed), source: self.handoffIdentity(main),
+                    state: "restored", isUnresolved: false, canShow: false, reason: nil, topologyVerified: true
+                )
+                box.value = self.multiHandoffStatus(
+                    [restored], observations: [self.observation(back, state: .separate), self.observation(main, state: .separate)],
+                    journalID: "shared-session", turnedOff: [turnedOff]
+                )
+                return .notRequested
+            }
+        )
+        try await waitUntil { !model.protectionQuiescencePending }
+
+        let shown = try await showAndWait(model, Self.sourceUUID)
+        XCTAssertTrue(shown.succeeded, shown.message)
+        XCTAssertEqual(showKeys, ["shared-session|\(Self.sourceUUID)"], "a bare journal ID is ambiguous to core")
+    }
+
     func testLegacyProtectionPreferencesRemainIndependentFromHideMigration() throws {
         let defaults = try makeDefaults()
         let legacy = Data(#"{"isEnabled":false,"idleSeconds":120,"allDisplays":false,"selectedDisplayUUIDs":["CCCC-UUID"],"didChooseDisplays":true}"#.utf8)
@@ -4250,6 +4345,9 @@ final class DisplayHideAppTests: XCTestCase {
         hideDisplay: @escaping (DisplayHideIdentity, DisplayHideIdentity, UInt8?) throws -> DisplayInputOutcome = { _, _, _ in .notRequested },
         sleepResumeHideDisplay: ((DisplayHideIdentity, DisplayHideIdentity, DisplayHideWakeExpectation) throws -> DisplayInputOutcome)? = nil,
         showDisplay: @escaping (String, UInt8?) throws -> DisplayInputOutcome = { _, _ in .notRequested },
+        turnOffDisplay: @escaping (DisplayHideIdentity) throws -> Void = { _ in
+            XCTFail("unexpected Turn off"); throw RecoveryError.unsafe("no private writes in tests")
+        },
         recoverDisplaySession: @escaping (DisplaySessionRecovery, Bool) throws -> Void = { _, _ in
             XCTFail("unexpected previous-session recovery")
         },
@@ -4274,6 +4372,7 @@ final class DisplayHideAppTests: XCTestCase {
                 try hideDisplay(target, source, nil)
             },
             showDisplay: showDisplay,
+            turnOffDisplay: turnOffDisplay,
             recoverDisplaySession: recoverDisplaySession,
             checkDDCInput: checkDDCInput,
             selectDDCInput: selectDDCInput,
@@ -4333,12 +4432,15 @@ final class DisplayHideAppTests: XCTestCase {
                                    state: DisplayHandoffStatus.State? = nil,
                                    baselineIdentity: String? = nil,
                                    observedTopologyIdentity: String? = nil,
-                                   sessionRecovery: DisplaySessionRecovery? = nil) -> DisplayHandoffStatus {
+                                   sessionRecovery: DisplaySessionRecovery? = nil,
+                                   turnedOff: [DisplayHandoffTurnOff] = []) -> DisplayHandoffStatus {
         let unresolved = removals.filter(\.isUnresolved)
-        let primary = unresolved.first ?? removals.first
+        // Like core: with no removal left, a turned-off display is the target and has no source.
+        let off = unresolved.isEmpty ? turnedOff.first(where: \.isUnresolved) : nil
+        let primary = off == nil ? unresolved.first ?? removals.first : nil
         return DisplayHandoffStatus(
-            state: state ?? (unresolved.isEmpty ? .none : .hidden),
-            target: primary?.target, source: primary?.source,
+            state: state ?? (unresolved.isEmpty && off == nil ? .none : .hidden),
+            target: off?.target ?? primary?.target, source: primary?.source,
             journalPath: "/tmp/displaypanel-multi-display-fixture/current.json",
             journalID: journalID, reason: nil,
             canShow: unresolved.allSatisfy(\.canShow),
@@ -4348,7 +4450,7 @@ final class DisplayHideAppTests: XCTestCase {
             baselineIdentity: baselineIdentity,
             observedTopologyIdentity: observedTopologyIdentity ?? baselineIdentity,
             journalIdentity: "fixture-\(journalID)-\(removals.map(\.state).joined(separator: ","))",
-            removals: removals, sessionRecovery: sessionRecovery
+            removals: removals, turnedOff: turnedOff, sessionRecovery: sessionRecovery
         )
     }
 

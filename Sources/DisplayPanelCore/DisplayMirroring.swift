@@ -9,14 +9,14 @@ private let showSettleLogger = Logger(subsystem: "com.brettinternet.displaypanel
 public enum DisplayMirroring {
     public static func mirror(selector: String, source: String, journalPath: String?) throws {
         let store = store(journalPath)
-        let journal = try MirrorController().mirror(selector: selector, source: source, store: store)
+        let journal = try MirrorController.production.mirror(selector: selector, source: source, store: store)
         print("Hidden by mirroring. Journal: \(store.url.path) (\(journal.id))")
         print("Resolution, HDR, refresh rate, windows and Spaces may change; brightness and monitor input don't.")
     }
 
     public static func unmirror(selector: String? = nil, journalPath: String?) throws {
         let store = store(journalPath)
-        let journal = try MirrorController().unmirror(store: store, selector: selector)
+        let journal = try MirrorController.production.unmirror(store: store, selector: selector)
         let remaining = journal.publicMirrorSession?.removals.filter { !$0.state.resolved }.count ?? 0
         if remaining > 0 {
             print("Shown and verified; \(remaining) more still hidden. Positions may shift slightly until the last one is shown. Journal: \(store.url.path)")
@@ -27,7 +27,7 @@ public enum DisplayMirroring {
 
     static func verifyRemoval(selector: String?, journalPath: String?) throws {
         let store = store(journalPath)
-        let journal = try MirrorController().verifyRemoval(store: store, selector: selector)
+        let journal = try MirrorController.production.verifyRemoval(store: store, selector: selector)
         print("Hidden state verified. Journal: \(store.url.path) (\(journal.id))")
     }
 
@@ -140,11 +140,22 @@ enum MirrorSessionTopology {
         }
     }
 
+    /// `turnedOff` displays are Turn off targets. Absent ones are left out of
+    /// `baseline` (see PublicMirrorSession.visible); like removals, they free
+    /// positions and the main role from the exact baseline.
+    static func matches(_ session: PublicMirrorSession, current: RecoverySnapshot,
+                        repairingTarget: String? = nil) -> Bool {
+        let view = session.visible(in: current)
+        return matches(baseline: view.baseline, removals: view.removals, current: current,
+                       repairingTarget: repairingTarget, turnedOff: session.turnedOff)
+    }
+
     static func matches(baseline: RecoverySnapshot, removals: [PublicMirrorRemoval],
-                        current: RecoverySnapshot, repairingTarget: String? = nil) -> Bool {
+                        current: RecoverySnapshot, repairingTarget: String? = nil,
+                        turnedOff: Set<String> = []) -> Bool {
         guard (try? baseline.validateRestoration(to: current)) != nil,
               current.displays.filter(\.main).count == 1 else { return false }
-        if activeRemovals(removals).isEmpty {
+        if activeRemovals(removals).isEmpty && turnedOff.isEmpty {
             return (try? baseline.verify(current)) != nil
         }
         var activeByTarget: [String: PublicMirrorRemoval] = [:]
@@ -173,7 +184,8 @@ enum MirrorSessionTopology {
         // original main display is removed, or its repair returns it to (0,0),
         // may macOS report another as main.
         if let originalMain = baseline.displays.first(where: \.main), activeByTarget[originalMain.uuid] == nil,
-           originalMain.uuid != repairingTarget, current.displays.first(where: \.main)?.uuid != originalMain.uuid {
+           originalMain.uuid != repairingTarget, !turnedOff.contains(originalMain.uuid),
+           current.displays.first(where: \.main)?.uuid != originalMain.uuid {
             return false
         }
         return true
@@ -182,17 +194,22 @@ enum MirrorSessionTopology {
     /// Postcondition of a wake resume: matches() plus the exact visible main,
     /// origins relative to it, and modes. Mirror-only matches() is weaker and
     /// must not clear a failed wake transaction.
+    /// With the saved main turned off, macOS picks the visible main, so only
+    /// modes compare. Other turned-off displays keep wherever they are.
     static func matchesWakeLayout(baseline: RecoverySnapshot, removals: [PublicMirrorRemoval],
-                                  current: RecoverySnapshot) -> Bool {
+                                  current: RecoverySnapshot, turnedOff: Set<String> = []) -> Bool {
         let active = activeRemovals(removals)
         let targets = Set(active.map(\.targetUUID))
-        guard matches(baseline: baseline, removals: removals, current: current),
-              let savedMain = baseline.displays.first(where: \.main),
-              let mainUUID = targets.contains(savedMain.uuid)
+        let visible = baseline.displays.filter { !targets.contains($0.uuid) && !turnedOff.contains($0.uuid) && $0.active }
+        guard matches(baseline: baseline, removals: removals, current: current, turnedOff: turnedOff) else { return false }
+        guard let savedMain = baseline.displays.first(where: \.main), !turnedOff.contains(savedMain.uuid) else {
+            return visible.allSatisfy { saved in current.displays.contains { $0.id == saved.id && $0.mode == saved.mode } }
+        }
+        guard let mainUUID = targets.contains(savedMain.uuid)
                 ? active.first(where: { $0.targetUUID == savedMain.uuid })?.sourceUUID : savedMain.uuid,
               let main = baseline.displays.first(where: { $0.uuid == mainUUID }),
               current.displays.first(where: \.main)?.uuid == mainUUID else { return false }
-        return baseline.displays.filter { !targets.contains($0.uuid) && $0.active }.allSatisfy { saved in
+        return visible.allSatisfy { saved in
             current.displays.contains {
                 $0.id == saved.id && $0.mode == saved.mode &&
                     Int64($0.x) == Int64(saved.x) - Int64(main.x) && Int64($0.y) == Int64(saved.y) - Int64(main.y)
@@ -208,7 +225,8 @@ enum MirrorSessionTopology {
     /// displays (see showSurvivorsUnchanged) and every remaining removal.
     /// When no removal remains, matches() requires the whole baseline.
     static func verifyPartialShow(baseline: RecoverySnapshot, removals: [PublicMirrorRemoval], removalID: UUID,
-                                  before: RecoverySnapshot, current: RecoverySnapshot) throws {
+                                  before: RecoverySnapshot, current: RecoverySnapshot,
+                                  turnedOff: Set<String> = []) throws {
         try baseline.validateRestoration(to: current)
         guard let index = removals.firstIndex(where: { $0.id == removalID }) else {
             throw RecoveryError.unsafe("selected removal entry disappeared")
@@ -225,7 +243,7 @@ enum MirrorSessionTopology {
         }
         var proposed = removals
         proposed[index].state = .restored
-        guard matches(baseline: baseline, removals: proposed, current: current) else {
+        guard matches(baseline: baseline, removals: proposed, current: current, turnedOff: turnedOff) else {
             throw RecoveryError.unsafe("Show changed another removal or did not restore the original layout; keep recovery")
         }
     }
@@ -268,9 +286,7 @@ enum MirrorSessionTopology {
                     $0.mirrorUUID?.caseInsensitiveCompare(removal.sourceUUID) == .orderedSame
             }
         }.map(\.targetUUID))
-        return RecoverySnapshot(bootSession: baseline.bootSession, osBuild: baseline.osBuild, userID: baseline.userID,
-                                displays: baseline.displays.filter { !followers.contains($0.uuid) },
-                                hostModel: baseline.hostModel)
+        return baseline.excluding(followers)
     }
 
     /// The final *physical* Show restores the full baseline even if a previous
@@ -294,8 +310,9 @@ enum MirrorSessionTopology {
     /// example its mode or main role). Only that recorded failed target may be repaired;
     /// survivors and sibling topology must still verify before another write.
     static func canRepairTargetLayout(baseline: RecoverySnapshot, removals: [PublicMirrorRemoval],
-                                      targetUUID: String, current: RecoverySnapshot) -> Bool {
-        guard activeRemovals(removals).count > 1,
+                                      targetUUID: String, current: RecoverySnapshot,
+                                      turnedOff: Set<String> = []) -> Bool {
+        guard activeRemovals(removals).count + turnedOff.count > 1,
               let index = removals.firstIndex(where: { $0.targetUUID == targetUUID && !$0.state.resolved }),
               removals[index].state == .needsAttention || removals[index].state == .restoring,
               pendingShowSurvivorsMatch(removals[index], baseline: baseline, current: current),
@@ -303,7 +320,8 @@ enum MirrorSessionTopology {
               target.mirrorUUID == nil, target.active else { return false }
         var siblings = removals
         siblings[index].state = .cancelled
-        return matches(baseline: baseline, removals: siblings, current: current, repairingTarget: targetUUID)
+        return matches(baseline: baseline, removals: siblings, current: current, repairingTarget: targetUUID,
+                       turnedOff: turnedOff)
     }
 
     static func targetMatchesBaseline(_ targetUUID: String, baseline: RecoverySnapshot,
@@ -336,6 +354,8 @@ struct MirrorController {
     var restoreTarget: (RecoverySnapshot, String, () throws -> Void, () throws -> RecoverySnapshot) throws -> Void = {
         try RecoveryConfiguration.restoreTarget($0, targetUUID: $1, revalidate: $2, capture: $3)
     }
+    /// Nil keeps Turn off unavailable, so tests never reach the private setter.
+    var turnOffBackend: DisplayTurnOffBackend?
 
     func mirror(selector: String, source: String, store: RecoveryStore,
                 expectedTarget: DisplayHideIdentity? = nil,
@@ -396,12 +416,13 @@ struct MirrorController {
         if let existing, !existing.state.resolved {
             if let previous = existing.publicMirrorSession {
                 guard previous.removals.allSatisfy({ $0.state != .needsAttention && $0.state != .captured && $0.state != .restoring }),
-                      MirrorSessionTopology.matches(baseline: previous.baseline, removals: previous.removals, current: current) else {
+                      previous.unresolvedDisconnects.allSatisfy({ $0.state == .off }),
+                      MirrorSessionTopology.matches(previous, current: current) else {
                     throw RecoveryError.unsafe("display recovery needs attention; resolve it before starting another removal")
                 }
                 journal = existing
                 session = previous
-                baseline = previous.baseline
+                baseline = previous.visible(in: current).baseline
             } else if existing.mirrorTargetID != nil, existing.mirrorSourceID != nil,
                       existing.state == .mirrored, existing.disabledByUsID == nil,
                       let targetSaved = existing.snapshot.displays.first(where: { $0.id == existing.mirrorTargetID }),
@@ -443,8 +464,12 @@ struct MirrorController {
             throw RecoveryError.unsafe("selection changed during capture; select again")
         }
         let activeRemovals = session.removals.filter { !$0.state.resolved }
-        guard !activeRemovals.contains(where: { $0.targetUUID == targetSaved.uuid }) else {
+        guard !activeRemovals.contains(where: { $0.targetUUID == targetSaved.uuid }),
+              !session.turnedOff.contains(targetSaved.uuid) else {
             throw RecoveryError.unsafe("this display is already removed from the desktop")
+        }
+        guard !session.turnedOff.contains(sourceSaved.uuid) else {
+            throw RecoveryError.unsafe("cannot mirror onto a turned-off display; Show it first")
         }
         guard !activeRemovals.contains(where: { $0.targetUUID == sourceSaved.uuid }) else {
             throw RecoveryError.unsafe("cannot remove a display that another removal mirrors onto")
@@ -462,7 +487,7 @@ struct MirrorController {
         guard !visibleAfterHide.isEmpty else {
             throw RecoveryError.unsafe("refusing to hide the last visible display")
         }
-        guard MirrorSessionTopology.matches(baseline: baseline, removals: session.removals, current: current) else {
+        guard MirrorSessionTopology.matches(session, current: current) else {
             throw RecoveryError.unsafe("current topology does not match the existing removal session")
         }
         try baseline.validateRestoration(to: current)
@@ -507,10 +532,11 @@ struct MirrorController {
             let mainBefore = current.displays.first(where: \.main)?.uuid
             try engine.converge {
                 let observedTopology = try engine.capture()
-                guard let observed = journal.publicMirrorSession,
-                      MirrorSessionTopology.matches(baseline: baseline,
-                                                    removals: MirrorSessionTopology.moving(observed.removals, onto: removal),
-                                                    current: observedTopology),
+                guard var observed = journal.publicMirrorSession else {
+                    throw RecoveryError.unsafe("mirror session verification mismatch")
+                }
+                observed.removals = MirrorSessionTopology.moving(observed.removals, onto: removal)
+                guard MirrorSessionTopology.matches(observed, current: observedTopology),
                       currentTarget.main || observedTopology.displays.first(where: \.main)?.uuid == mainBefore else {
                     throw RecoveryError.unsafe("mirror session verification mismatch")
                 }
@@ -551,9 +577,13 @@ struct MirrorController {
               before.stableTopologyIdentity() == expectation.observedTopologyIdentity,
               var session = journal.publicMirrorSession,
               journal.wakeBaselineIdentity() == expectation.baselineIdentity,
-              journal.disabledByUsID == nil, !journal.state.resolved else {
+              journal.disabledByUsID == nil, !journal.state.resolved,
+              session.unresolvedDisconnects.allSatisfy({ $0.state == .off }) else {
             throw RecoveryError.unsafe("wake resume journal, baseline or topology changed")
         }
+        // A turned-off display keeps whatever macOS did with it; never turn it off again.
+        let turnedOff = session.turnedOff
+        let baseline = session.visible(in: before).baseline
         let ids = Set(expectation.resumeRemovalIDs.map { $0.lowercased() })
         let removals = session.removals.filter { ids.contains($0.id.uuidString.lowercased()) }
         guard ids.count == expectation.resumeRemovalIDs.count, removals.count == ids.count,
@@ -565,21 +595,26 @@ struct MirrorController {
               }) else {
             throw RecoveryError.unsafe("wake resume removal intent changed or a Show was interrupted")
         }
-        try session.baseline.validateRestoration(to: before)
+        try baseline.validateRestoration(to: before)
         let targets = Set(removals.map(\.targetUUID))
+        let savedMain = session.baseline.displays.first(where: \.main)
+        // With the saved main turned off, macOS chose the visible main: stage mirrors only.
+        let mainTurnedOff = savedMain.map { turnedOff.contains($0.uuid) } ?? false
+        let mainUUID = savedMain.flatMap { savedMain in
+            targets.contains(savedMain.uuid)
+                ? removals.first(where: { $0.targetUUID == savedMain.uuid })?.sourceUUID : savedMain.uuid
+        }
+        let main = baseline.displays.first(where: { $0.uuid == mainUUID })
         guard targets.count == removals.count,
               removals.allSatisfy({ !targets.contains($0.sourceUUID) }),
-              let savedMain = session.baseline.displays.first(where: \.main),
-              let mainUUID = targets.contains(savedMain.uuid)
-                ? removals.first(where: { $0.targetUUID == savedMain.uuid })?.sourceUUID : savedMain.uuid,
-              let main = session.baseline.displays.first(where: { $0.uuid == mainUUID }),
+              mainTurnedOff || main != nil,
               before.displays.filter(\.main).count == 1 else {
             throw RecoveryError.unsafe("wake resume has no unambiguous visible main display")
         }
         // Accept lost/intact owned mirrors, not external mirrors or a mode
         // change on an unrelated visible desktop.
-        for display in before.displays {
-            let saved = session.baseline.displays.first { $0.uuid == display.uuid }!
+        for display in before.displays where !turnedOff.contains(display.uuid) {
+            let saved = baseline.displays.first { $0.uuid == display.uuid }!
             if let removal = removals.first(where: { $0.targetUUID == display.uuid }) {
                 guard !display.builtin,
                       (display.active && display.mirrorUUID == nil) ||
@@ -593,10 +628,11 @@ struct MirrorController {
                 }
             }
         }
-        let origins = try session.baseline.displays.filter { !targets.contains($0.uuid) && $0.active }
+        let origins = try (mainTurnedOff ? [] : baseline.displays)
+            .filter { !targets.contains($0.uuid) && !turnedOff.contains($0.uuid) && $0.active }
             .sorted { $0.uuid != mainUUID && $1.uuid == mainUUID }
             .map { display -> (UInt32, Int32, Int32) in
-                guard let x = Int32(exactly: Int64(display.x) - Int64(main.x)),
+                guard let main, let x = Int32(exactly: Int64(display.x) - Int64(main.x)),
                       let y = Int32(exactly: Int64(display.y) - Int64(main.y)) else {
                     throw RecoveryError.unsafe("wake resume origin is unrepresentable")
                 }
@@ -622,8 +658,12 @@ struct MirrorController {
         try validateAwake()
         // A repeated/own-write notification is not another write. Mirror-only
         // verification is insufficient here: visible origins/main must match too.
-        if journal.state == .mirrored,
-           MirrorSessionTopology.matchesWakeLayout(baseline: session.baseline, removals: session.removals, current: before) {
+        func matchesWakeLayout(_ current: RecoverySnapshot) -> Bool {
+            let view = session.visible(in: current)
+            return MirrorSessionTopology.matchesWakeLayout(baseline: view.baseline, removals: view.removals,
+                                                           current: current, turnedOff: turnedOff)
+        }
+        if journal.state == .mirrored, matchesWakeLayout(before) {
             return journal
         }
         // Keep the original journal/baseline/removal IDs. Intent is durable
@@ -647,8 +687,7 @@ struct MirrorController {
                 }
             }
             try engine.converge {
-                guard MirrorSessionTopology.matchesWakeLayout(baseline: session.baseline, removals: session.removals,
-                                                              current: try engine.capture()) else {
+                guard matchesWakeLayout(try engine.capture()) else {
                     throw RecoveryError.unsafe("wake resume mirrors or visible layout did not verify")
                 }
             }
@@ -694,7 +733,7 @@ struct MirrorController {
               matches(expectation.target, record: target), matches(expectation.source, record: source) else {
             throw RecoveryError.unsafe("wake resume journal, session, baseline, topology, or target/source identity changed; no mirror was staged")
         }
-        var baseline = journal.publicMirrorSession?.baseline ?? journal.snapshot
+        var baseline = journal.publicMirrorSession?.visible(in: current).baseline ?? journal.snapshot
         if journal.state.resolved {
             // Unresolved journals were adopted by the caller; a restored one is
             // only compared, so translate a same-boot renumbering here.
@@ -704,7 +743,7 @@ struct MirrorController {
         if journal.state.resolved {
             try baseline.verify(current)
         } else if let session = journal.publicMirrorSession {
-            guard MirrorSessionTopology.matches(baseline: session.baseline, removals: session.removals, current: current) else {
+            guard MirrorSessionTopology.matches(session, current: current) else {
                 throw RecoveryError.unsafe("wake resume session topology changed; no mirror was staged")
             }
         } else {
@@ -756,7 +795,7 @@ struct MirrorController {
         }
     }
 
-    private static func sameStoredJournal(_ lhs: RecoveryJournal, _ rhs: RecoveryJournal) -> Bool {
+    static func sameStoredJournal(_ lhs: RecoveryJournal, _ rhs: RecoveryJournal) -> Bool {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         guard let left = try? encoder.encode(lhs), let right = try? encoder.encode(rhs) else { return false }
@@ -853,24 +892,29 @@ struct MirrorController {
         }
         session = reconciled
         var active = MirrorSessionTopology.activeRemovals(session.removals)
-        guard !active.isEmpty else {
+        let turnedOff = session.unresolvedDisconnects
+        guard !active.isEmpty || !turnedOff.isEmpty else {
             if journal.state.resolved { return journal }
             throw RecoveryError.unsafe("no unresolved display removal; inspect recovery status")
         }
+        let selectedUUID = try selector.map { selector -> String in
+            if let requested = UUID(uuidString: selector) { return requested.uuidString.lowercased() }
+            if let record = DisplaySelector.resolve(selector, in: try records()), let uuid = record.uuid {
+                return uuid.lowercased()
+            }
+            throw RecoveryError.unsafe("missing or ambiguous removal selector; use its captured UUID from recovery status")
+        }
+        if let disconnect = turnedOff.first(where: { $0.targetUUID == selectedUUID }) ??
+            (selectedUUID == nil && active.isEmpty && turnedOff.count == 1 ? turnedOff.first : nil) {
+            return try showTurnedOff(&journal, disconnectID: disconnect.id, store: store)
+        }
 
         let selected: PublicMirrorRemoval
-        if let selector {
-            let selectedUUID: String
-            if let requested = UUID(uuidString: selector) {
-                selectedUUID = requested.uuidString.lowercased()
-            } else if let record = DisplaySelector.resolve(selector, in: try records()), let uuid = record.uuid {
-                selectedUUID = uuid.lowercased()
-            } else {
-                throw RecoveryError.unsafe("missing or ambiguous removal selector; use its captured UUID from recovery status")
-            }
-            let matches = active.filter { $0.targetUUID.caseInsensitiveCompare(selectedUUID) == .orderedSame }
+        if let selectedUUID {
+            let matches = active.filter { $0.targetUUID == selectedUUID }
             if matches.isEmpty,
-               session.removals.contains(where: { $0.targetUUID.caseInsensitiveCompare(selectedUUID) == .orderedSame && $0.state.resolved }) {
+               session.removals.contains(where: { $0.targetUUID == selectedUUID && $0.state.resolved }) ||
+                (session.disconnects ?? []).contains(where: { $0.targetUUID == selectedUUID && $0.state.resolved }) {
                 return journal
             }
             guard matches.count == 1, let match = matches.first else {
@@ -878,7 +922,7 @@ struct MirrorController {
             }
             selected = match
         } else {
-            guard active.count == 1, let only = active.first else {
+            guard active.count == 1, turnedOff.isEmpty, let only = active.first else {
                 throw RecoveryError.unsafe("several displays are removed; specify --display with the target UUID")
             }
             selected = only
@@ -903,7 +947,8 @@ struct MirrorController {
               let source = session.baseline.displays.first(where: { $0.uuid == selected.sourceUUID }) else {
             throw RecoveryError.unsafe("captured target or source identity is missing")
         }
-        let current = try prepareShow(journal, baseline: session.baseline, target: target, source: source,
+        let current = try prepareShow(journal, baseline: session.visible(in: initialCurrent).baseline,
+                                      target: target, source: source,
                                       store: store, returnInputBeforeRestore: returnInputBeforeRestore,
                                       relinkInput: relinkInput)
         try adoptRenumbering(&journal, current: current, store: store)
@@ -911,20 +956,23 @@ struct MirrorController {
             throw RecoveryError.unsafe("public-mirror session disappeared; keep the journal")
         }
         session = renumbered
-        guard MirrorSessionTopology.matches(baseline: session.baseline, removals: session.removals, current: current) ||
-                MirrorSessionTopology.canRestoreFinalLayout(baseline: session.baseline, removals: session.removals,
+        // A turned-off display keeps the final whole-baseline restore for its own Show.
+        let view = session.visible(in: current)
+        guard MirrorSessionTopology.matches(session, current: current) ||
+                MirrorSessionTopology.canRestoreFinalLayout(baseline: view.baseline, removals: view.removals,
                                                            targetUUID: selected.targetUUID, current: current) ||
-                MirrorSessionTopology.canRepairTargetLayout(baseline: session.baseline, removals: session.removals,
-                                                           targetUUID: selected.targetUUID, current: current) else {
+                MirrorSessionTopology.canRepairTargetLayout(baseline: view.baseline, removals: view.removals,
+                                                           targetUUID: selected.targetUUID, current: current,
+                                                           turnedOff: session.turnedOff) else {
             let reason = "current topology does not match the recorded removal session; no other removal was changed"
             markRemovalNeedsAttention(&journal, removalID: selected.id, reason: reason)
             try? store.save(journal)
             throw RecoveryError.unsafe(reason)
         }
         active = MirrorSessionTopology.activeRemovals(session.removals)
-        let finalShow = active.count == 1 || MirrorSessionTopology.canRestoreFinalLayout(
+        let finalShow = session.turnedOff.isEmpty && (active.count == 1 || MirrorSessionTopology.canRestoreFinalLayout(
             baseline: session.baseline, removals: session.removals, targetUUID: selected.targetUUID, current: current
-        )
+        ))
         guard var savedSession = journal.publicMirrorSession,
               let index = savedSession.removals.firstIndex(where: { $0.id == selected.id }) else {
             throw RecoveryError.unsafe("selected removal entry disappeared; keep the journal")
@@ -956,15 +1004,17 @@ struct MirrorController {
                 journal.failure = nil
             } else {
                 let restoringCurrent = current
-                try restoreTarget(session.baseline, selected.targetUUID, {
+                try restoreTarget(view.baseline, selected.targetUUID, {
                     try restoringCurrent.verify(engine.capture())
                 }, {
                     try engine.capture()
                 })
                 try engine.converge {
+                    let observed = try engine.capture()
+                    let saved = (journal.publicMirrorSession ?? session).visible(in: observed)
                     try MirrorSessionTopology.verifyPartialShow(
-                        baseline: session.baseline, removals: journal.publicMirrorSession?.removals ?? [],
-                        removalID: selected.id, before: restoringCurrent, current: engine.capture()
+                        baseline: saved.baseline, removals: saved.removals, removalID: selected.id,
+                        before: restoringCurrent, current: observed, turnedOff: session.turnedOff
                     )
                 }
                 guard var completed = journal.publicMirrorSession,
@@ -975,9 +1025,10 @@ struct MirrorController {
                 completed.removals[index].failure = nil
                 completed.removals[index].restoreFrom = nil
                 journal.publicMirrorSession = completed
-                journal.state = completed.removals.contains(where: { $0.state == .needsAttention })
-                    ? .needsAttention : .mirrored
-                journal.failure = completed.removals.first(where: { $0.state == .needsAttention })?.failure
+                let attention = completed.removals.first(where: { $0.state == .needsAttention }).map(\.failure) ??
+                    completed.unresolvedDisconnects.first(where: { $0.state == .needsAttention }).map(\.failure)
+                journal.state = attention == nil ? .mirrored : .needsAttention
+                journal.failure = attention ?? nil
             }
             try store.save(journal)
             return journal
@@ -1143,6 +1194,13 @@ struct MirrorController {
             } else {
                 throw RecoveryError.unsafe("missing or ambiguous removal selector; use its captured UUID from recovery status")
             }
+            if let disconnect = session.disconnects?.last(where: { $0.targetUUID == uuid }) {
+                guard disconnect.state.resolved ||
+                        (disconnect.state == .off && MirrorSessionTopology.matches(session, current: current)) else {
+                    throw RecoveryError.unsafe(disconnect.failure ?? "the turned-off display needs attention; inspect recovery status")
+                }
+                return journal
+            }
             guard let removal = session.removals.last(where: { $0.targetUUID == uuid }) else {
                 throw RecoveryError.unsafe("selected display is not in this removal session")
             }
@@ -1157,15 +1215,12 @@ struct MirrorController {
             selected = only
         }
         if selected.state.resolved {
-            guard (try? session.baseline.validateRestoration(to: current)) != nil,
-                  (try? session.baseline.verify(current)) != nil ||
-                    MirrorSessionTopology.matches(baseline: session.baseline, removals: session.removals, current: current) else {
+            guard (try? session.baseline.verify(current)) != nil || MirrorSessionTopology.matches(session, current: current) else {
                 throw RecoveryError.unsafe("selected removal does not match its strictly verified restored state")
             }
             return journal
         }
-        guard selected.state == .mirrored,
-              MirrorSessionTopology.matches(baseline: session.baseline, removals: session.removals, current: current) else {
+        guard selected.state == .mirrored, MirrorSessionTopology.matches(session, current: current) else {
             throw RecoveryError.unsafe(selected.failure ?? "selected removal needs attention; inspect recovery status")
         }
         return journal
@@ -1192,23 +1247,62 @@ struct MirrorController {
     }
 
     func reconcileSession(_ journal: inout RecoveryJournal, current: RecoverySnapshot, store: RecoveryStore) {
-        guard var session = journal.publicMirrorSession else { return }
-        if (try? session.baseline.verify(current)) != nil {
-            for index in session.removals.indices {
-                session.removals[index].state = .restored
-                session.removals[index].failure = nil
-                session.removals[index].restoreFrom = nil
+        guard var full = journal.publicMirrorSession else { return }
+        if (try? full.baseline.verify(current)) != nil {
+            for index in full.removals.indices {
+                full.removals[index].state = .restored
+                full.removals[index].failure = nil
+                full.removals[index].restoreFrom = nil
             }
-            journal.publicMirrorSession = session
+            full.disconnects = full.disconnects?.map { disconnect in
+                guard !disconnect.state.resolved else { return disconnect }
+                var settled = disconnect
+                settled.state = disconnect.state == .turningOff ? .cancelled : .restored
+                settled.failure = nil
+                return settled
+            }
+            journal.publicMirrorSession = full
             journal.state = .verified
             journal.failure = nil
             journal.trigger = "system-restoration-verified"
-            if session.removals.count != 1 {
+            if full.removals.count != 1 {
                 journal.mirrorTargetID = nil
                 journal.mirrorSourceID = nil
             }
             try? store.save(journal)
             return
+        }
+        var changed = false
+        // Settle only an interrupted private write. A display macOS turned
+        // back on stays recorded until Show puts it back without a private write.
+        full.disconnects = full.disconnects?.map { disconnect in
+            var settled = disconnect
+            switch (disconnect.state, current.displays.contains { $0.uuid == disconnect.targetUUID }) {
+            case (.turningOff, true):
+                settled.state = .cancelled
+                settled.failure = nil
+            case (.turningOff, false):
+                settled.state = .needsAttention
+                settled.failure = "The display disappeared before Turn off completed."
+            case (.reconnecting, false):
+                settled.state = .needsAttention
+                settled.failure = DisplayTurnOff.didNotReturn
+            default:
+                return disconnect
+            }
+            changed = true
+            return settled
+        }
+        let turnedOff = full.turnedOff
+        var session = full.visible(in: current)
+        func save() {
+            full.adoptRemovals(from: session)
+            journal.publicMirrorSession = full
+            if full.removals.count != 1 {
+                journal.mirrorTargetID = nil
+                journal.mirrorSourceID = nil
+            }
+            try? store.save(journal)
         }
         // A wake transaction also promises exact visible modes/origins. The
         // ordinary mirror predicate is weaker and must not erase its failed
@@ -1219,19 +1313,23 @@ struct MirrorController {
            !(journal.state == .needsAttention &&
              MirrorSessionTopology.activeRemovals(session.removals).allSatisfy({ $0.restoreFrom == nil }) &&
              MirrorSessionTopology.matchesWakeLayout(baseline: session.baseline, removals: session.removals,
-                                                     current: current)) { return }
-        var changed = false
+                                                     current: current, turnedOff: turnedOff)) {
+            if changed { save() }
+            return
+        }
         // An interrupted Hide that moved other removals completes only when
         // the moved topology is observed; otherwise they keep their source.
         for mover in MirrorSessionTopology.activeRemovals(session.removals) {
             let moved = MirrorSessionTopology.moving(session.removals, onto: mover)
             if moved != session.removals,
-               MirrorSessionTopology.matches(baseline: session.baseline, removals: moved, current: current) {
+               MirrorSessionTopology.matches(baseline: session.baseline, removals: moved, current: current,
+                                             turnedOff: turnedOff) {
                 session.removals = moved
                 changed = true
             }
         }
-        if MirrorSessionTopology.matches(baseline: session.baseline, removals: session.removals, current: current) {
+        if MirrorSessionTopology.matches(baseline: session.baseline, removals: session.removals, current: current,
+                                         turnedOff: turnedOff) {
             for index in session.removals.indices where !session.removals[index].state.resolved {
                 if session.removals[index].state != .mirrored || session.removals[index].failure != nil ||
                     session.removals[index].restoreFrom != nil {
@@ -1249,7 +1347,7 @@ struct MirrorController {
                 if let before = removal.restoreFrom,
                    (try? MirrorSessionTopology.verifyPartialShow(baseline: session.baseline, removals: session.removals,
                                                                  removalID: removal.id, before: before,
-                                                                 current: current)) != nil {
+                                                                 current: current, turnedOff: turnedOff)) != nil {
                     session.removals[index].state = .restored
                     session.removals[index].failure = nil
                     session.removals[index].restoreFrom = nil
@@ -1273,7 +1371,8 @@ struct MirrorController {
                 var proposed = session.removals
                 proposed[index].state = .restored
                 if MirrorSessionTopology.targetMatchesBaseline(removal.targetUUID, baseline: session.baseline, current: current),
-                   MirrorSessionTopology.matches(baseline: session.baseline, removals: proposed, current: current) {
+                   MirrorSessionTopology.matches(baseline: session.baseline, removals: proposed, current: current,
+                                                 turnedOff: turnedOff) {
                     session.removals[index].state = .restored
                     session.removals[index].failure = nil
                     session.removals[index].restoreFrom = nil
@@ -1301,32 +1400,24 @@ struct MirrorController {
         }
         let unresolved = MirrorSessionTopology.activeRemovals(session.removals)
         let previousJournalState = journal.state
-        if unresolved.isEmpty, (try? session.baseline.verify(current)) != nil {
-            journal.state = .verified
-            journal.failure = nil
-            for index in session.removals.indices {
-                session.removals[index].state = .restored
-                session.removals[index].failure = nil
-                session.removals[index].restoreFrom = nil
-            }
-            changed = true
-        } else if unresolved.contains(where: { $0.state == .needsAttention }) {
+        let attention = unresolved.first(where: { $0.state == .needsAttention }).map(\.failure) ??
+            full.unresolvedDisconnects.first(where: { $0.state == .needsAttention }).map(\.failure)
+        if let attention {
             journal.state = .needsAttention
-            journal.failure = unresolved.first(where: { $0.state == .needsAttention })?.failure
+            journal.failure = attention
             changed = true
-        } else if !unresolved.isEmpty {
+        } else if !unresolved.isEmpty || !turnedOff.isEmpty {
             journal.state = .mirrored
             journal.failure = nil
             changed = changed || previousJournalState != .mirrored
+        } else if full.removals.isEmpty, !journal.state.resolved {
+            // Only a cancelled Turn off remains: nothing is hidden, so even a
+            // changed layout has nothing left to Show.
+            journal.state = .restored
+            journal.failure = nil
+            changed = true
         }
-        if changed {
-            journal.publicMirrorSession = session
-            if session.removals.count != 1 {
-                journal.mirrorTargetID = nil
-                journal.mirrorSourceID = nil
-            }
-            try? store.save(journal)
-        }
+        if changed { save() }
     }
 
     private func markRemovalNeedsAttention(_ journal: inout RecoveryJournal, removalID: UUID, reason: String) {
@@ -1339,7 +1430,7 @@ struct MirrorController {
         journal.failure = reason
     }
 
-    private func matches(_ expected: DisplayHideIdentity, record: DisplayRecord) -> Bool {
+    func matches(_ expected: DisplayHideIdentity, record: DisplayRecord) -> Bool {
         expected.uuid.caseInsensitiveCompare(record.uuid ?? "") == .orderedSame &&
             expected.displayID == record.id && expected.vendor == record.vendor &&
             expected.model == record.model && expected.serial == record.serial

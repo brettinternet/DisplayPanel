@@ -9,6 +9,8 @@ public struct DisplaySessionRecovery: Equatable {
     public let displayNames: [String]
     public let blocker: String?
     public let canAutomaticallyKeepShown: Bool
+    /// False when only turned-off displays remain; they're never turned off again.
+    public var canHideAgain = true
 
     public var canRecover: Bool { blocker == nil }
 }
@@ -35,11 +37,18 @@ extension RecoveryJournal {
     /// A Hide session translated to macOS's current numbering, so Show can
     /// finish after a same-boot renumbering; nil when nothing changed. A
     /// valid journal shares one UUID-to-ID mapping across all its snapshots.
+    /// A display turned off and absent keeps its saved ID.
     func renumbered(to current: RecoverySnapshot) throws -> RecoveryJournal? {
-        guard isPublicMirrorOnly, publicMirrorSession != nil else { return nil }
-        let baseline = try snapshot.renumbered(to: current)
+        guard isPublicMirrorOnly, let session = publicMirrorSession else { return nil }
+        let visible = try snapshot.excluding(session.offline(in: current)).renumbered(to: current)
+        let ids = Dictionary(uniqueKeysWithValues: visible.displays.map { ($0.uuid, $0.id) })
+        let baseline = RecoverySnapshot(bootSession: snapshot.bootSession, osBuild: snapshot.osBuild,
+                                        userID: snapshot.userID, displays: snapshot.displays.map { display in
+                                            var display = display
+                                            display.id = ids[display.uuid] ?? display.id
+                                            return display
+                                        }, hostModel: snapshot.hostModel)
         guard baseline != snapshot else { return nil }
-        let ids = Dictionary(uniqueKeysWithValues: baseline.displays.map { ($0.uuid, $0.id) })
         return try adopting(baseline) { display in
             var display = display
             display.id = ids[display.uuid] ?? display.id
@@ -51,11 +60,13 @@ extension RecoveryJournal {
     /// RecoverySnapshot.remoded); nil when nothing changed. Only current IDs
     /// can look up a display's modes, so stale IDs adopt nothing.
     func remoded(to current: RecoverySnapshot, available: (UInt32) -> [RecoveryMode]) throws -> RecoveryJournal? {
-        guard isPublicMirrorOnly, publicMirrorSession != nil, !hasStaleDisplayIDs(current),
-              snapshot.displays.allSatisfy({ saved in current.displays.contains { $0.uuid == saved.uuid } }) else {
-            return nil
-        }
-        let baseline = snapshot.remoded(available: available)
+        guard isPublicMirrorOnly, let session = publicMirrorSession, !hasStaleDisplayIDs(current) else { return nil }
+        let offline = session.offline(in: current)
+        guard snapshot.displays.allSatisfy({ saved in
+            offline.contains(saved.uuid) || current.displays.contains { $0.uuid == saved.uuid }
+        }) else { return nil }
+        let offlineIDs = Set(snapshot.displays.filter { offline.contains($0.uuid) }.map(\.id))
+        let baseline = snapshot.remoded(available: { offlineIDs.contains($0) ? [] : available($0) })
         guard baseline != snapshot else { return nil }
         let changes = Dictionary(uniqueKeysWithValues: zip(snapshot.displays, baseline.displays)
             .filter { $0.mode != $1.mode }.map { ($0.uuid, (old: $0.mode, new: $1.mode)) })
@@ -82,6 +93,11 @@ extension RecoveryJournal {
             session.removals[index].sourceID = ids[session.removals[index].sourceUUID] ?? 0
             session.removals[index].beforeOperation = translate(session.removals[index].beforeOperation)
             session.removals[index].restoreFrom = session.removals[index].restoreFrom.map(translate)
+        }
+        session.disconnects = session.disconnects?.map { disconnect in
+            var disconnect = disconnect
+            disconnect.target = translateDisplay(disconnect.target)
+            return disconnect
         }
         var journal = self
         journal.snapshot = baseline
@@ -116,13 +132,14 @@ extension MirrorController {
             try validateCurrentDesktop(journal: journal, current: current, available: available)
             blocker = nil
         } catch { blocker = error.localizedDescription }
-        let names = journal.recoveryPairs.map { pair in
-            journal.snapshot.displays.first { $0.uuid == pair.target }?.name ?? pair.target
-        }
+        let pairs = journal.recoveryPairs
+        let names = pairs.map { pair in journal.snapshot.displays.first { $0.uuid == pair.target }?.name ?? pair.target } +
+            (journal.publicMirrorSession?.unresolvedDisconnects.map { $0.target.name ?? $0.targetUUID } ?? [])
         return DisplaySessionRecovery(
             journalID: journal.id.uuidString, journalIdentity: journalIdentity,
             topologyIdentity: topologyIdentity, displayNames: names, blocker: blocker,
-            canAutomaticallyKeepShown: blocker == nil && sameDesktopAcrossBoot(journal.snapshot, current)
+            canAutomaticallyKeepShown: blocker == nil && sameDesktopAcrossBoot(journal.snapshot, current),
+            canHideAgain: !pairs.isEmpty
         )
     }
 
@@ -164,7 +181,8 @@ extension MirrorController {
         }
         let pairs = journal.recoveryPairs
         let targets = Set(pairs.map(\.target))
-        guard !pairs.isEmpty, targets.count == pairs.count,
+        let turnedOff = journal.publicMirrorSession?.unresolvedDisconnects ?? []
+        guard !pairs.isEmpty || !turnedOff.isEmpty, targets.count == pairs.count,
               pairs.allSatisfy({ pair in
                   !targets.contains(pair.source) &&
                       current.displays.contains { $0.uuid == pair.target && !$0.builtin } &&
@@ -206,6 +224,8 @@ extension MirrorController {
     func recoverCurrentDesktopLocked(_ confirmation: DisplaySessionRecovery, hideAgain: Bool,
                                      automatic: Bool = false, store: RecoveryStore) throws {
         let old = try store.load()
+        // Turned-off displays are never turned off again; with nothing else, Hide again keeps them shown.
+        let hideAgain = hideAgain && !old.recoveryPairs.isEmpty
         let current = try engine.capture()
         guard old.id.uuidString == confirmation.journalID,
               stableRecoveryDigest(old) == confirmation.journalIdentity,

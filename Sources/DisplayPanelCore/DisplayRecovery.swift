@@ -341,6 +341,11 @@ struct RecoverySnapshot: Codable, Equatable {
         }, hostModel: hostModel)
     }
 
+    func excluding(_ uuids: Set<String>) -> Self {
+        Self(bootSession: bootSession, osBuild: osBuild, userID: userID,
+             displays: displays.filter { !uuids.contains($0.uuid) }, hostModel: hostModel)
+    }
+
     func verify(_ current: Self) throws {
         try validateRestoration(to: current)
         // Identity, rotation, color space and profile content are checked above.

@@ -91,6 +91,17 @@ public struct DisplayHideRemovalSummary: Equatable, Identifiable {
     }
 }
 
+/// A Turn off in the Hide session.
+public struct DisplayHideTurnOffSummary: Equatable, Identifiable {
+    public let id: String
+    public let target: DisplayHideIdentity
+    public let state: String
+    public let isUnresolved: Bool
+    public let canShow: Bool
+    public let showRefusal: String?
+    public let failure: String?
+}
+
 public struct DisplayHideJournalSummary: Equatable {
     public let id: String
     public let state: String
@@ -136,6 +147,7 @@ public struct DisplayHideStatus: Equatable {
     public let journal: DisplayHideJournalSummary?
     public let inspectionFailure: String?
     public let removals: [DisplayHideRemovalSummary]
+    public var turnedOff: [DisplayHideTurnOffSummary] = []
 
     public var hasUnresolvedRecovery: Bool { journal?.isUnresolved ?? (inspectionFailure != nil) }
     public var hasUnresolvedMirror: Bool {
@@ -167,7 +179,7 @@ public struct DisplayHideController {
 
     public init() {
         let store = RecoveryStore()
-        let mirror = MirrorController()
+        let mirror = MirrorController.production
         self.store = store
         self.mirror = mirror
         handoff = HandoffController(mirror: mirror, report: { _ in })
@@ -257,6 +269,14 @@ public struct DisplayHideController {
         }
         return try handoff.guardedAway(target: target, source: source, input: awayInput,
                                        wakeExpectation: wakeExpectation, store: store)
+    }
+
+    /// Turn off: the Mac stops driving the display until Show. No DDC.
+    public func turnOff(target: DisplayHideIdentity) throws {
+        guard UUID(uuidString: target.uuid) != nil else {
+            throw RecoveryError.unsafe("Turn off requires an explicit display UUID")
+        }
+        _ = try mirror.turnOff(target, store: store)
     }
 
     @discardableResult
@@ -458,16 +478,16 @@ public struct DisplayHideController {
         let recordsByUUID = Dictionary(uniqueKeysWithValues: records.compactMap { record in
             record.uuid.map { ($0.lowercased(), record) }
         })
-        let sessionVerified = MirrorSessionTopology.matches(
-            baseline: session.baseline, removals: session.removals, current: current
-        )
+        // Absent turned-off displays are left out, as in Show.
+        let view = session.visible(in: current)
+        let sessionVerified = MirrorSessionTopology.matches(session, current: current)
         let restorationFailure: String?
-        do { try session.baseline.validateRestoration(to: current); restorationFailure = nil }
+        do { try view.baseline.validateRestoration(to: current); restorationFailure = nil }
         catch { restorationFailure = error.localizedDescription }
         let modeFailure: String?
         do {
             try mirror.preflightModes(MirrorSessionTopology.showModeBaseline(
-                session.baseline, removals: session.removals, showing: nil, current: current
+                view.baseline, removals: view.removals, showing: nil, current: current
             ))
             modeFailure = nil
         }
@@ -494,11 +514,11 @@ public struct DisplayHideController {
                 sourceRecord?.active == true && sourceRecord?.asleep == false
             let canRepairLayout = !removal.state.resolved &&
                 (MirrorSessionTopology.canRestoreFinalLayout(
-                    baseline: session.baseline, removals: session.removals,
+                    baseline: view.baseline, removals: view.removals,
                     targetUUID: removal.targetUUID, current: current
                 ) || MirrorSessionTopology.canRepairTargetLayout(
-                    baseline: session.baseline, removals: session.removals,
-                    targetUUID: removal.targetUUID, current: current
+                    baseline: view.baseline, removals: view.removals,
+                    targetUUID: removal.targetUUID, current: current, turnedOff: session.turnedOff
                 )) && targetRecord?.online == true && targetRecord?.asleep == false &&
                 sourceRecord?.online == true && sourceRecord?.active == true && sourceRecord?.asleep == false
             let canShow = restorationFailure == nil && modeFailure == nil &&
@@ -534,9 +554,45 @@ public struct DisplayHideController {
                 topologyVerified: relationVerified
             )
         }
+        let disconnects = session.disconnects ?? []
+        let allTurnedOff = disconnects.map { disconnect -> DisplayHideTurnOffSummary in
+            let record = recordsByUUID[disconnect.targetUUID]
+            let refusal: String?
+            if disconnect.state.resolved {
+                refusal = nil
+            } else if disconnect.state == .turningOff {
+                refusal = "Turn off didn’t finish. Refresh."
+            } else if currentByUUID[disconnect.targetUUID] == nil {
+                if disconnect.state != .off {
+                    refusal = disconnect.failure ?? DisplayTurnOff.didNotReturn
+                } else if mirror.turnOffBackend == nil {
+                    refusal = DisplayTurnOff.unavailable
+                } else if current.displays.contains(where: { $0.id == disconnect.targetID }) {
+                    refusal = "Another display now has this display’s ID. \(DisplayTurnOff.didNotReturn)"
+                } else {
+                    refusal = sessionVerified ? nil : journal.failure ?? "The layout changed since Turn off; review recovery."
+                }
+            } else if record?.online != true || record?.asleep != false {
+                refusal = "The display is asleep or unavailable. Wake it before Show."
+            } else {
+                refusal = restorationFailure ?? modeFailure ??
+                    (sessionVerified ? nil : journal.failure ?? "The layout changed since Turn off; review recovery.")
+            }
+            return DisplayHideTurnOffSummary(
+                id: disconnect.id.uuidString, target: identity(disconnect.target), state: disconnect.state.rawValue,
+                isUnresolved: !disconnect.state.resolved, canShow: !disconnect.state.resolved && refusal == nil,
+                showRefusal: refusal, failure: disconnect.failure
+            )
+        }
+        let turnedOff = allTurnedOff.filter(\.isUnresolved)
         var observations: [DisplayHideObservation] = records.compactMap { record in
             guard let uuid = record.uuid?.lowercased() else { return nil }
             let saved = currentByUUID[uuid]
+            if let off = turnedOff.first(where: { $0.target.uuid == uuid }) {
+                return DisplayHideObservation(identity: saved.map(identity) ?? identity(record),
+                                              state: off.canShow ? .hiddenByDisplayPanel : .recoveryNeeded, source: nil,
+                                              detail: off.showRefusal ?? off.failure, isJournalTarget: true)
+            }
             let targetRemoval = removals.first { $0.isUnresolved && $0.target.uuid == uuid }
             let displayIdentity = saved.map(identity) ?? identity(record)
             let source = targetRemoval?.source
@@ -567,13 +623,21 @@ public struct DisplayHideController {
                 isJournalTarget: true
             ))
         }
+        for off in turnedOff where !observations.contains(where: { $0.identity.uuid == off.target.uuid }) {
+            observations.append(DisplayHideObservation(
+                identity: off.target, state: off.canShow ? .hiddenByDisplayPanel : .recoveryNeeded, source: nil,
+                detail: off.showRefusal ?? "Turned off by DisplayPanel.", isJournalTarget: true
+            ))
+        }
         let unresolved = removals.filter(\.isUnresolved)
         let primary = unresolved.first
         let summary = DisplayHideJournalSummary(
             id: journal.id.uuidString, state: journal.state.rawValue,
-            target: primary?.target, source: primary?.source, isMirrorJournal: true,
-            isUnresolved: !journal.state.resolved, canShow: removals.contains(where: \.canShow),
-            showRefusal: unresolved.first(where: { !$0.canShow })?.showRefusal,
+            target: primary?.target ?? turnedOff.first?.target, source: primary?.source, isMirrorJournal: true,
+            isUnresolved: !journal.state.resolved,
+            canShow: removals.contains(where: \.canShow) || turnedOff.contains(where: \.canShow),
+            showRefusal: unresolved.first(where: { !$0.canShow })?.showRefusal ??
+                turnedOff.first(where: { !$0.canShow })?.showRefusal,
             failure: journal.failure,
             mirrorTopologyVerified: sessionVerified,
             baselineIdentity: journal.wakeBaselineIdentity(),
@@ -581,9 +645,11 @@ public struct DisplayHideController {
             journalIdentity: journal.wakeResumeIdentity(),
             removals: removals
         )
-        return DisplayHideStatus(journalPath: store.url.path,
-                                 observations: observations.sorted { $0.identity.uuid < $1.identity.uuid },
-                                 journal: summary, inspectionFailure: nil, removals: removals)
+        var status = DisplayHideStatus(journalPath: store.url.path,
+                                       observations: observations.sorted { $0.identity.uuid < $1.identity.uuid },
+                                       journal: summary, inspectionFailure: nil, removals: removals)
+        status.turnedOff = allTurnedOff
+        return status
     }
 
     private func statusForUnsupportedJournal(_ journal: RecoveryJournal, records: [DisplayRecord],

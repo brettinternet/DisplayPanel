@@ -10,8 +10,9 @@ same thing.
 | --- | --- | --- |
 | **Black out** (default) | A black window covers the display; its desktop stays put | Default, or `dp app hide --display UUID --style black-out` |
 | **Remove from desktop** | The display [mirrors](display-mirroring.md) another, so windows move off it; optionally switches the monitor's input | Experimental features, then **Displays → Hide → Style** |
+| **Turn off** | The Mac stops sending a signal, so the monitor goes to standby until Show | Experimental features, then **Displays → Hide → Style** |
 
-Neither style turns the monitor off or cuts its signal.
+Only Turn off cuts the Mac's signal.
 
 ### Black out
 
@@ -63,11 +64,10 @@ occupancy details.
 ## Experimental features
 
 Turn on **General → Experimental features** and accept the prompt once. This
-adds **Remove from desktop** to each display's **Hide → Style**, with optional
-input switching.
+adds **Remove from desktop** and **Turn off** to each display's **Hide → Style**.
 
-Turning it off makes new Hides black out instead. Displays already removed stay
-removed, and Show and recovery keep working.
+Turning it off makes new Hides black out instead. Displays already removed or
+turned off stay that way, and Show and recovery keep working.
 
 ### Remove from desktop
 
@@ -102,10 +102,37 @@ Show: restore layout → verify → switch input back (optional)
 - With **Don't switch**, Hide and Show send no DDC commands. Use the monitor's
   input button if needed.
 
+### Turn off
+
+For a monitor with no other input to switch to. Hide turns the display off with
+the private [display disable](display-disable.md#turn-off) setter; macOS forgets
+it until Show turns it back on.
+
+```text
+Hide: save layout → turn off (one write)
+Show: turn on by saved ID (one write) → verify identity → restore mode, position and main display
+```
+
+- Works on the main display; macOS moves the menu bar, Dock and windows.
+  Built-in, mirrored, removed and mirror-source displays are refused, and
+  another usable physical display must stay on.
+- One display at a time. It can share a Hide session with removed displays,
+  and their Shows keep working while it's off.
+- No input switching or DDC.
+- Wake, relaunch and rules never turn a display off again. If macOS turns it
+  back on (for example after sleep), it stays **Hidden** and Show puts its
+  layout back without another private write.
+- Quitting asks to show it first. If you quit anyway, it stays off until you
+  relaunch DisplayPanel and Show it, or log out.
+- If Show can't bring it back, the display needs recovery: select the Mac's
+  input with the monitor's buttons or replug its cable. Show never retries.
+- Not an Action step. `dp app hide` uses it when it's the display's style;
+  `--style black-out` still forces a blackout.
+
 ### Full disconnect
 
 **Full disconnect · Experimental** is a separate, manual action that drops the
-Mac's signal using a private API. It is not a Hide style. It needs fresh
+Mac's signal using the same private API. It is not a Hide style. It needs fresh
 consent each time and reconnects automatically after 15 seconds. See
 [private display disable](display-disable.md#app-controls).
 
@@ -182,7 +209,7 @@ a black window only: no DDC dimming, and **Sleep** becomes Restore.
 | Tile state | Meaning |
 | --- | --- |
 | On | Normal; Hide available |
-| Hidden | Blacked out or removed; Show available |
+| Hidden | Blacked out, removed or turned off; Show available |
 | Hiding… / Showing… / Busy | In progress; no cancel or queue |
 | Blacked out | An automation cover; **Restore** ends it |
 | Asleep / Unavailable | Wake or reconnect the display |

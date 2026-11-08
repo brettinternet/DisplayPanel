@@ -520,4 +520,5 @@ enum DisplayHideStyle: Equatable {
     case configured
     case blackOut
     case removeFromDesktop
+    case turnOff
 }

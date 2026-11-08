@@ -41,15 +41,82 @@ struct PublicMirrorRemoval: Codable, Equatable, Identifiable {
     }
 }
 
+enum SessionDisconnectState: String, Codable {
+    // Intent saved before the private write; grants nothing.
+    case turningOff
+    // Completion may have run. Show may reconnect the saved ID once while it's absent.
+    case off
+    // The one reconnect may have run; never repeated.
+    case reconnecting
+    case restored, cancelled, needsAttention
+    var resolved: Bool { self == .restored || self == .cancelled }
+}
+
+/// A display turned off for this login session with the private setter.
+/// `target` is a private-metadata capture (connector, identity evidence) of
+/// the saved display; its ID is never renumbered while the display is offline.
+struct SessionDisconnect: Codable, Equatable, Identifiable {
+    let id: UUID
+    var target: RecoveryDisplay
+    var state: SessionDisconnectState
+    var failure: String?
+
+    init(target: RecoveryDisplay, state: SessionDisconnectState = .turningOff) {
+        id = UUID()
+        self.target = target
+        self.state = state
+    }
+
+    var targetUUID: String { target.uuid }
+    var targetID: UInt32 { target.id }
+}
+
 struct PublicMirrorSession: Codable, Equatable {
     let version: Int
     var baseline: RecoverySnapshot
     var removals: [PublicMirrorRemoval]
+    // Absent until a display is turned off, keeping older journals unchanged.
+    var disconnects: [SessionDisconnect]?
 
-    init(baseline: RecoverySnapshot, removals: [PublicMirrorRemoval]) {
+    init(baseline: RecoverySnapshot, removals: [PublicMirrorRemoval], disconnects: [SessionDisconnect]? = nil) {
         version = 1
         self.baseline = baseline
         self.removals = removals
+        self.disconnects = disconnects
+    }
+
+    var unresolvedDisconnects: [SessionDisconnect] { (disconnects ?? []).filter { !$0.state.resolved } }
+    var turnedOff: Set<String> { Set(unresolvedDisconnects.map(\.targetUUID)) }
+
+    /// Turned-off displays absent from `current`. They keep their saved ID.
+    func offline(in current: RecoverySnapshot) -> Set<String> {
+        turnedOff.subtracting(current.displays.map(\.uuid))
+    }
+
+    /// The session as mirror checks see it: displays turned off and absent
+    /// from `current` are left out of every saved snapshot.
+    func visible(in current: RecoverySnapshot) -> PublicMirrorSession {
+        let offline = offline(in: current)
+        guard !offline.isEmpty else { return self }
+        var view = self
+        view.baseline = baseline.excluding(offline)
+        for index in view.removals.indices {
+            view.removals[index].beforeOperation = removals[index].beforeOperation.excluding(offline)
+            view.removals[index].restoreFrom = removals[index].restoreFrom?.excluding(offline)
+        }
+        return view
+    }
+
+    /// Writes back removal progress made on a `visible(in:)` view. Saved
+    /// snapshots keep the displays the view left out.
+    mutating func adoptRemovals(from view: PublicMirrorSession) {
+        removals = view.removals.enumerated().map { index, seen in
+            guard removals.indices.contains(index), removals[index].id == seen.id else { return seen }
+            var merged = seen
+            merged.beforeOperation = removals[index].beforeOperation
+            if seen.restoreFrom != nil { merged.restoreFrom = removals[index].restoreFrom ?? seen.restoreFrom }
+            return merged
+        }
     }
 }
 
@@ -118,17 +185,41 @@ struct RecoveryJournal: Codable {
             throw RecoveryError.unsafe("invalid snapshot identity or display set")
         }
         if version == 3 || publicMirrorSession != nil {
+            let disconnects = publicMirrorSession?.disconnects ?? []
             guard version == 3, let publicMirrorSession,
                   publicMirrorSession.version == 1,
                   publicMirrorSession.baseline == snapshot,
-                  !publicMirrorSession.removals.isEmpty,
-                  publicMirrorSession.removals.count <= 128,
+                  !publicMirrorSession.removals.isEmpty || !disconnects.isEmpty,
+                  publicMirrorSession.removals.count <= 128, disconnects.count <= 128,
                   disabledByUsID == nil, disableAttempted == nil, disableStaged == nil,
                   disableCommitStarted == nil, disableCompleted == nil, privateLease != true,
                   !verifyOnly, deadline == nil, reenableAttempted == nil,
-                  Set(publicMirrorSession.removals.map(\.id)).count == publicMirrorSession.removals.count else {
+                  Set(publicMirrorSession.removals.map(\.id)).count == publicMirrorSession.removals.count,
+                  Set(disconnects.map(\.id)).count == disconnects.count,
+                  publicMirrorSession.unresolvedDisconnects.count <= 1 else {
                 throw RecoveryError.unsafe("invalid public mirror session")
             }
+            for disconnect in disconnects {
+                guard let saved = displays.first(where: { $0.uuid == disconnect.targetUUID }),
+                      saved.id == disconnect.targetID, saved.vendor == disconnect.target.vendor,
+                      saved.model == disconnect.target.model, saved.serial == disconnect.target.serial,
+                      !saved.builtin, !disconnect.target.builtin, saved.active, saved.mirrorUUID == nil,
+                      disconnect.target.connector?.isEmpty == false,
+                      disconnect.target.identityEvidence?.transport?.isEmpty == false else {
+                    throw RecoveryError.unsafe("invalid turned-off display identity")
+                }
+            }
+            // Snapshots taken while a display was turned off lack only that display.
+            let disconnectTargets = Set(disconnects.map(\.targetUUID))
+            func validateSaved(_ saved: RecoverySnapshot) throws {
+                let missing = Set(displays.map(\.uuid)).subtracting(saved.displays.map(\.uuid))
+                guard missing.isSubset(of: disconnectTargets),
+                      saved.displays.count + missing.count == displays.count else {
+                    throw RecoveryError.unsafe("invalid public mirror removal identity")
+                }
+                try snapshot.excluding(missing).validateRestoration(to: saved)
+            }
+            let turnedOff = publicMirrorSession.turnedOff
             var activeTargets = Set<String>()
             for removal in publicMirrorSession.removals {
                 guard UUID(uuidString: removal.targetUUID) != nil,
@@ -140,13 +231,13 @@ struct RecoveryJournal: Codable {
                       let source = displays.first(where: { $0.uuid == removal.sourceUUID && $0.id == removal.sourceID }),
                       !target.builtin, target.active, source.active, target.mirrorUUID == nil,
                       source.mirrorUUID == nil,
-                      removal.beforeOperation.displays.count == displays.count,
-                      Set(removal.beforeOperation.displays.map(\.uuid)) == Set(displays.map(\.uuid)) else {
+                      removal.state.resolved ||
+                        (!turnedOff.contains(removal.targetUUID) && !turnedOff.contains(removal.sourceUUID)) else {
                     throw RecoveryError.unsafe("invalid public mirror removal identity")
                 }
-                try snapshot.validateRestoration(to: removal.beforeOperation)
+                try validateSaved(removal.beforeOperation)
                 if let restoreFrom = removal.restoreFrom {
-                    try snapshot.validateRestoration(to: restoreFrom)
+                    try validateSaved(restoreFrom)
                     try RecoveryJournal(snapshot: restoreFrom).validate()
                 }
                 // A moved mirror's source was checked by the Hide that moved it.
@@ -228,10 +319,18 @@ private struct StablePublicMirrorRemovalIdentity: Codable {
     let restoreFromIdentity: String?
 }
 
+private struct StableSessionDisconnectIdentity: Codable {
+    let id: UUID
+    let targetUUID: String
+    let state: String
+    let failure: String?
+}
+
 private struct StablePublicMirrorSessionIdentity: Codable {
     let version: Int
     let baselineIdentity: String?
     let removals: [StablePublicMirrorRemovalIdentity]
+    let disconnects: [StableSessionDisconnectIdentity]?
 }
 
 private struct StableMirrorJournalIdentity: Codable {
@@ -261,6 +360,10 @@ extension RecoveryJournal {
                         state: removal.state.rawValue, failure: removal.failure,
                         restoreFromIdentity: removal.restoreFrom?.stableTopologyIdentity(ignoringRenumbering: true)
                     )
+                },
+                disconnects: session.disconnects?.map {
+                    StableSessionDisconnectIdentity(id: $0.id, targetUUID: $0.targetUUID,
+                                                    state: $0.state.rawValue, failure: $0.failure)
                 }
             )
             return stableRecoveryDigest(stable)

@@ -2,8 +2,9 @@
 
 ## Unreleased
 
+- Add a **Turn off** Hide style (experimental) for monitors with no other input: the Mac stops sending a signal until Show turns the display back on and restores its layout. Works on the main display and alongside removed displays; one display at a time.
 - Clear a hidden display's failed Hide or Show error once it's back on the desktop, including when another display's Show restored it.
-- Choose each display's Hide style (Black out or Remove from desktop) from a Style menu in Settings → Displays → Hide.
+- Choose each display's Hide style from a Style menu in Settings → Displays → Hide.
 - Full disconnect recognizes the macOS 27.2 (26B123) setter; it reported the setter unavailable after the update.
 
 ## 0.9.9

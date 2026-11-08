@@ -16,7 +16,7 @@ public enum DisplayRecovery {
             return
         }
         if action == .keepShown || action == .hideAgain {
-            let mirror = MirrorController()
+            let mirror = MirrorController.production
             let controller = DisplayHideController(store: store, mirror: mirror,
                                                    operationLock: { RecoveryStore.operationLock() })
             guard let recovery = try controller.inspect(preservingMirrorIntent: true).sessionRecovery else {
@@ -47,7 +47,7 @@ public enum DisplayRecovery {
         if action != .capture {
             let saved = try store.load()
             if saved.publicMirrorSession != nil {
-                let controller = MirrorController()
+                let controller = MirrorController.production
                 let recovered: RecoveryJournal
                 if action == .verify {
                     recovered = try controller.verifyRemoval(store: store, selector: displaySelector)

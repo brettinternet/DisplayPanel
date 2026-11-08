@@ -139,7 +139,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !keepingJournal, model.handoffStatus?.hasUnresolvedJournal == true || model.protectionQuiescenceFailure != nil {
             let status = model.handoffStatus
             let target = status?.hasUnresolvedJournal == true ? status?.target : nil
-            let removalCount = status?.removals.filter(\.isUnresolved).count ?? (target == nil ? 0 : 1)
+            let removalCount = (status?.removals.filter(\.isUnresolved).count ?? 0) +
+                (status?.turnedOff.filter(\.isUnresolved).count ?? 0)
             let canShow = model.canShowHiddenDisplay
             let alert = NSAlert()
             alert.alertStyle = .warning
@@ -736,8 +737,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             terminateFromRunLoop()
             return
         }
-        let unresolved = status.removals.filter(\.isUnresolved)
-        let target = unresolved.first?.target.uuid ?? status.target?.uuid
+        let target = status.removals.first(where: \.isUnresolved)?.target.uuid ??
+            status.turnedOff.first(where: \.isUnresolved)?.target.uuid ?? status.target?.uuid
         guard let target, model.canShowHiddenDisplay else {
             showSettings(tab: .displays, displayUUID: target)
             return

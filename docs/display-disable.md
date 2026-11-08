@@ -70,6 +70,33 @@ Main and built-in displays are refused. **Reconnect…** stays available after
 relaunch, with the display absent, and with Experimental features off.
 Scripts, rules, startup and wake never disconnect a display.
 
+## Turn off
+
+The **Turn off** [Hide style](display-hide-ux.md#turn-off) uses the same
+setter, but the display stays off until Show instead of a deadline. It shares
+the public Hide journal, so it can coexist with displays removed by mirroring.
+
+- Main displays are allowed; another usable physical display must stay on.
+  Built-in, mirrored, hidden and mirror-source displays are refused, as are the
+  driver, architecture, setter and awake checks below. One display at a time.
+- The journal entry (`publicMirrorSession.disconnects`) is written before the
+  setter runs:
+
+  ```text
+  turningOff ─ commit ─→ off ─ Show ─→ reconnecting ─ back ─→ restored
+       └─ nothing written ─→ cancelled    └─ not back ─→ needsAttention
+  ```
+
+- Show reconnects only the saved ID after the same exact identity checks,
+  waits up to 10 seconds for the display to return, then restores its mode,
+  position and main role (the whole saved layout when it's the last hidden
+  display). It never retries.
+- No helper or deadline. Wake, relaunch, quit and rules never turn a display
+  off again. A display macOS reconnects itself is accepted; Show restores its
+  layout without a private write.
+- Logout or reboot ends it. Previous-session recovery offers only **Keep
+  displays shown** when nothing else was removed.
+
 ## Safety checks
 
 Every check reruns before each step. Any change cancels the operation.
@@ -131,7 +158,7 @@ restored.
 Tests use fake writers and never call the private setter:
 
 ```sh
-swift test --disable-sandbox --filter 'Recovery'
+swift test --disable-sandbox --filter 'Recovery|DisplayTurnOffTests'
 swift test --disable-sandbox --filter RecoveryProductionProviderTests   # read-only checks on this Mac
 ```
 
