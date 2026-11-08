@@ -2245,8 +2245,8 @@ final class DisplayHideAppTests: XCTestCase {
     /// Waking one hidden monitor can make macOS unmirror its sibling, so the first
     /// Show restores both; the sibling's Show step must still return its input.
     func testShowActionReturnsInputOfDisplayAnEarlierStepRestored() async throws {
-        for monitorInput: UInt8 in [0x11, 0x12] {
-            let defaults = try makeDefaults("\(monitorInput)")
+        for (showAll, monitorInput): (Bool, UInt8) in [(false, 0x11), (false, 0x12), (true, 0x11)] {
+            let defaults = try makeDefaults("\(showAll)\(monitorInput)")
             let targets = [displays[1], displays[2]]
             var preferences = DisplayHidePreferences()
             preferences[targets[1].uuid!] = DisplayHideConfiguration(
@@ -2281,6 +2281,16 @@ final class DisplayHideAppTests: XCTestCase {
             })
             try model.saveDisplayAction(action)
             try await waitUntil { !model.protectionQuiescencePending }
+            if showAll {
+                var results: [String: DisplayOperationResult] = [:]
+                model.showAllDisplays { results[$0] = $1 }
+                try await waitUntil { results.count == 2 }
+                XCTAssertEqual(shows, [targets[0].uuid!], "the first Show restored both displays")
+                XCTAssertEqual(writes, [0x0F])
+                XCTAssertEqual(results[targets[1].uuid!]?.succeeded, true)
+                XCTAssertEqual(results[targets[1].uuid!]?.inputOutcome?.state, .verified)
+                continue
+            }
             var result: AppControlResponse?
             model.runDisplayAction(id: action.id) { result = $0 }
             try await waitUntil { result != nil }

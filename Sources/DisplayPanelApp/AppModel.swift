@@ -5327,9 +5327,17 @@ final class AppModel: ObservableObject {
         func showNext(_ index: Int) {
             guard index < targets.count else { return }
             let uuid = targets[index]
-            show(targetUUID: uuid) { result in
+            let next: (DisplayOperationResult) -> Void = { result in
                 completion(uuid, result)
                 if result.succeeded { showNext(index + 1) }
+            }
+            // An earlier Show's relink can make macOS unmirror this display; that
+            // Show then restored it too but returned only its own monitor's input.
+            if index > 0, !hideOperation.isBusy, runningDisplayAction == nil, !isBlackoutHidden(uuid),
+               !isRemovedDisplay(uuid), restoredDisplayInput(uuid) != nil {
+                returnRestoredDisplayInput(targetUUID: uuid, completion: next)
+            } else {
+                show(targetUUID: uuid, completion: next)
             }
         }
         showNext(0)
@@ -7080,7 +7088,7 @@ final class AppModel: ObservableObject {
         return (away, input, display)
     }
 
-    /// Returns a display that an earlier Action step already restored to the Mac:
+    /// Returns a display that an earlier Show (Action step or Show All) already restored to the Mac:
     /// one DDC write, only after a read finds the monitor on the input Hide switched to.
     private func returnRestoredDisplayInput(targetUUID: String, completion: @escaping (DisplayOperationResult) -> Void) {
         let notHidden = DisplayHideError.blocked("This display isn’t hidden by DisplayPanel.")

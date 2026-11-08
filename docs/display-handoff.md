@@ -55,8 +55,8 @@ unsettled topology stop restoration without discarding the journal. The app's
 Show Actions use the same guarded path even while recovery needs attention.
 Waking one monitor can make macOS unmirror a hidden sibling; the final Show
 then restores both but returns only its own input. A later Show step in the
-same Action for that sibling sends one return-input write, only after a read
-finds the monitor on its Hide input.
+same Action, or **Show All Displays**, sends that sibling one return-input
+write, only after a read finds the monitor on its Hide input.
 
 ## Returning from an empty input
 
