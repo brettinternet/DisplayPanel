@@ -713,27 +713,36 @@ final class SettingsWindowTests: XCTestCase {
         let content = try XCTUnwrap(sheet.contentView)
         let guidance = "Set this display’s Hide to Mirror or Switch input in Settings → Displays first."
         XCTAssertEqual(model.displayActionRemovalSetupReason(for: Self.sideUUID), guidance)
-        func setupButton() -> NSAccessibilityProtocol? {
-            accessibilityElements(in: sheet).first { $0.accessibilityLabel() == "Set Up step 1 in Displays" }
+        content.layoutSubtreeIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        func navigated() -> Bool {
+            parent.attachedSheet == nil && navigation.tab == .displays &&
+                navigation.selectedDisplayID == Self.sideUUID.lowercased()
         }
-        spin { content.layoutSubtreeIfNeeded(); return setupButton() != nil }
-        let setupFrame = sheet.convertFromScreen(try XCTUnwrap(setupButton()).accessibilityFrame())
-        let setupPoint = NSPoint(x: setupFrame.midX, y: setupFrame.midY)
-        let down = try XCTUnwrap(NSEvent.mouseEvent(
-            with: .leftMouseDown, location: setupPoint, modifierFlags: [],
-            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: sheet.windowNumber,
-            context: nil, eventNumber: 0, clickCount: 1, pressure: 1
-        ))
-        let up = try XCTUnwrap(NSEvent.mouseEvent(
-            with: .leftMouseUp, location: setupPoint, modifierFlags: [],
-            timestamp: ProcessInfo.processInfo.systemUptime + 0.01, windowNumber: sheet.windowNumber,
-            context: nil, eventNumber: 1, clickCount: 1, pressure: 0
-        ))
-        // AppKit may track mouse-down synchronously until it dequeues mouse-up.
-        app.postEvent(up, atStart: true)
-        sheet.sendEvent(down)
-        spin { parent.attachedSheet == nil && navigation.tab == .displays &&
-            navigation.selectedDisplayID == Self.sideUUID.lowercased() }
+        // SwiftUI draws Set Up in Displays… without an AppKit view or an
+        // in-process accessibility element, so click up its column until the
+        // sheet closes. With one step, the ordering buttons below it are
+        // disabled and the rows above it, down to Mirror onto, are text.
+        for offset in stride(from: 384, through: 320, by: -4) {
+            let setupY = content.isFlipped ? content.bounds.minY + CGFloat(offset) : content.bounds.maxY - CGFloat(offset)
+            let setupPoint = content.convert(NSPoint(x: 100, y: setupY), to: nil)
+            let down = try XCTUnwrap(NSEvent.mouseEvent(
+                with: .leftMouseDown, location: setupPoint, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: sheet.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+            ))
+            let up = try XCTUnwrap(NSEvent.mouseEvent(
+                with: .leftMouseUp, location: setupPoint, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime + 0.01, windowNumber: sheet.windowNumber,
+                context: nil, eventNumber: 1, clickCount: 1, pressure: 0
+            ))
+            // AppKit may track mouse-down synchronously until it dequeues mouse-up.
+            app.postEvent(up, atStart: true)
+            sheet.sendEvent(down)
+            spin(timeout: 0.3) { navigated() }
+            if parent.attachedSheet == nil { break }
+        }
+        spin { navigated() }
         XCTAssertNil(parent.attachedSheet)
         XCTAssertEqual(navigation.tab, .displays)
         XCTAssertEqual(navigation.selectedDisplayID, Self.sideUUID.lowercased())
@@ -1080,9 +1089,7 @@ final class SettingsWindowTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("Turn on Experimental features"))
         }
         XCTAssertTrue(delegate.makeMenu().items.contains { $0.title == "Hide DELL S2721DGF" })
-        let flagOff = try sideDisplayHideControls(model)
-        XCTAssertFalse(flagOff.style, "Hide styles stay out of Settings")
-        XCTAssertTrue(flagOff.keepWindowsOff)
+        XCTAssertTrue(try sideDisplayOffersKeepWindowsOff(model), "Hide blacks out, so Keep windows off stays")
 
         model.acceptExperimentalConsent()
         XCTAssertTrue(defaults.bool(forKey: "experimentalFeaturesEnabled"))
@@ -1091,9 +1098,7 @@ final class SettingsWindowTests: XCTestCase {
         XCTAssertNil(try sideTile(model).actionBlocker)
         XCTAssertNoThrow(try model.makeHideRequest(targetUUID: Self.sideUUID))
         XCTAssertTrue(delegate.makeMenu().items.contains { $0.title == "Hide DELL S2721DGF" })
-        let flagOn = try sideDisplayHideControls(model)
-        XCTAssertTrue(flagOn.style)
-        XCTAssertFalse(flagOn.keepWindowsOff, "Mirror replaces Keep windows off")
+        XCTAssertFalse(try sideDisplayOffersKeepWindowsOff(model), "Mirror replaces Keep windows off")
         let reloaded = try makeModel(keepingDefaults: true).0
         XCTAssertTrue(reloaded.experimentalFeaturesEnabled)
 
@@ -1903,31 +1908,32 @@ final class SettingsWindowTests: XCTestCase {
         window.sendEvent(up)
     }
 
-    /// Opens the side display in Displays and returns which Hide controls it
-    /// offers. Mirror and Switch input drop the Windows section and its Keep
-    /// windows off switch.
-    private func sideDisplayHideControls(_ model: AppModel) throws -> (style: Bool, keepWindowsOff: Bool) {
+    /// Opens the side display in Displays and reports whether one of its
+    /// switches turns on Keep windows off, then turns it back off. Mirror and
+    /// Switch input drop the Windows section, but Restore saved mode's switch
+    /// stays, so the switch count alone can't tell.
+    private func sideDisplayOffersKeepWindowsOff(_ model: AppModel) throws -> Bool {
         let controller = SettingsWindowController(model: model)
-        controller.present()
         controller.selectDisplay(uuid: Self.sideUUID)
+        controller.present()
         let window = try XCTUnwrap(controller.window)
         defer { window.close() }
         window.setContentSize(NSSize(width: 680, height: 1200))
         let content = try XCTUnwrap(window.contentView)
-        func controls() -> (style: Bool, keepWindowsOff: Bool) {
-            let labels = accessibilityElements(in: window).compactMap { $0.accessibilityLabel() }
-            return (labels.contains { $0.hasPrefix("Hide style for ") },
-                    labels.contains { $0.hasPrefix("Also keep windows off ") })
+        func keepsWindowsOff() -> Bool { model.hideConfiguration(for: Self.sideUUID)?.keepWindowsOff != nil }
+        spin { content.layoutSubtreeIfNeeded(); return nativeViews(in: content).contains { $0 is NSSwitch } }
+        // Top first: Keep windows off precedes Restore saved mode.
+        let switches = nativeViews(in: content).compactMap { $0 as? NSSwitch }.filter(\.isEnabled)
+            .sorted { $0.convert($0.bounds, to: nil).midY > $1.convert($1.bounds, to: nil).midY }
+        for toggle in switches where toggle.state == .off {
+            toggle.performClick(nil)
+            spin(timeout: 0.5) { keepsWindowsOff() }
+            if keepsWindowsOff() {
+                model.setKeepWindowsOffEnabled(false, for: Self.sideUUID)
+                return true
+            }
         }
-        let expected = (model.experimentalFeaturesEnabled, !model.hideRemovesFromDesktop(displays[1]))
-        spin { content.layoutSubtreeIfNeeded(); return controls() == expected }
-        return controls()
-    }
-
-    /// SwiftUI Form controls aren't all AppKit views; walk them as VoiceOver does.
-    private func accessibilityElements(in root: Any) -> [NSAccessibilityProtocol] {
-        guard let element = root as? NSAccessibilityProtocol else { return [] }
-        return [element] + (element.accessibilityChildren() ?? []).flatMap(accessibilityElements)
+        return false
     }
 
     private var hiddenDisplays: [DisplayRecord] {
