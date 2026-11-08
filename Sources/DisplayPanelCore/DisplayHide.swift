@@ -296,6 +296,20 @@ public struct DisplayHideController {
                                        input: returnInput, store: store)
     }
 
+    /// Show together: returns every display this journal removed, each
+    /// monitor's input in turn, then restores the layout in one write.
+    @discardableResult
+    public func showAll(expectedJournalID: String, returnInputs: [String: UInt8]) throws -> [String: DisplayInputOutcome] {
+        guard let expectedID = UUID(uuidString: expectedJournalID) else {
+            throw DisplayHandoffOperationFailure(
+                action: "show", inputOutcome: .notRequested,
+                message: "invalid journal identity; refresh recovery status and confirm again"
+            )
+        }
+        let inputs = Dictionary(returnInputs.map { ($0.key.lowercased(), $0.value) }, uniquingKeysWith: { first, _ in first })
+        return try handoff.guardedBackAll(expectedJournalID: expectedID, inputs: inputs, store: store)
+    }
+
     public func checkInputAvailability(target: DisplayHideIdentity) throws -> DDCInputReading {
         let operation = operationLock()
         try operation.lock()

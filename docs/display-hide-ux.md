@@ -96,6 +96,9 @@ also keeps the display off the desktop. Choosing **Mirror** forgets the input.
   until its targets are shown.
 - Show returns one display and leaves the others removed. macOS may place it
   slightly off; the last Show restores the exact layout and main display.
+- **Show All Displays**, and consecutive Show steps of an Action, show every
+  display one session hides together: each input returns and settles in turn,
+  then the layout is restored once.
 - Hiding the main display lets macOS decide where the menu bar, Dock and
   windows go.
 - Show restores layout and display modes, not HDR, color profiles, windows or

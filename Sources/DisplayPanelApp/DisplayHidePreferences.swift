@@ -272,6 +272,7 @@ enum DisplayHideOperation: Equatable {
     case idle
     case hiding(String)
     case showing(String)
+    case showingTogether([String])
     /// A refresh-rate change, which every Hide, Show and Action guard waits for.
     case changingMode(String)
 
@@ -284,6 +285,7 @@ enum DisplayHideOperation: Equatable {
         switch self {
         case .idle: return nil
         case .hiding(let uuid), .showing(let uuid), .changingMode(let uuid): return uuid
+        case .showingTogether(let uuids): return uuids.first
         }
     }
 }

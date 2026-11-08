@@ -294,11 +294,17 @@ enum MirrorSessionTopology {
     /// other display must already be separate; never replay a sibling mirror.
     static func canRestoreFinalLayout(baseline: RecoverySnapshot, removals: [PublicMirrorRemoval],
                                       targetUUID: String, current: RecoverySnapshot) -> Bool {
-        guard let selected = activeRemovals(removals).first(where: { $0.targetUUID == targetUUID }),
-              (try? baseline.validateRestoration(to: current)) != nil,
+        canRestoreFinalLayout(baseline: baseline, showing: activeRemovals(removals).filter { $0.targetUUID == targetUUID },
+                              current: current)
+    }
+
+    /// Each shown removal may still mirror its own source (Show together).
+    static func canRestoreFinalLayout(baseline: RecoverySnapshot, showing: [PublicMirrorRemoval],
+                                      current: RecoverySnapshot) -> Bool {
+        guard !showing.isEmpty, (try? baseline.validateRestoration(to: current)) != nil,
               current.displays.filter(\.main).count == 1 else { return false }
         return current.displays.allSatisfy { display in
-            if display.uuid == selected.targetUUID, let source = display.mirrorUUID {
+            if let selected = showing.first(where: { $0.targetUUID == display.uuid }), let source = display.mirrorUUID {
                 return source.caseInsensitiveCompare(selected.sourceUUID) == .orderedSame && !display.active
             }
             return display.mirrorUUID == nil &&
@@ -876,6 +882,95 @@ struct MirrorController {
         }
     }
 
+    /// Show together: every removal in the session returns at once. An input
+    /// return relinks the monitor's mirror-set siblings too, so each monitor's
+    /// input returns in turn and settles before the next, then one write
+    /// restores the whole baseline. Any failure before that write leaves the
+    /// session mirrored, so Show can be retried.
+    func unmirrorAll(store: RecoveryStore, expectedID: UUID,
+                     returnInputBeforeRestore: ((RecoveryDisplay) throws -> DisplayInputOutcome.State)? = nil,
+                     relinkInput: ((RecoveryDisplay) throws -> Bool)? = nil) throws -> RecoveryJournal {
+        do {
+            let operation = operationLock()
+            try operation.lock()
+            defer { operation.unlock() }
+            try store.lock()
+            defer { store.unlock() }
+            var journal = try store.load()
+            guard journal.id == expectedID else {
+                throw RecoveryError.unsafe("journal changed since confirmation; inspect recovery status and confirm again")
+            }
+            guard journal.publicMirrorSession != nil else {
+                throw RecoveryError.unsafe("Show together needs a display removal session; inspect recovery status")
+            }
+            if journal.state.resolved { return journal }
+            var current = try engine.capture()
+            try adoptRenumbering(&journal, current: current, store: store)
+            reconcileSession(&journal, current: current, store: store)
+            if journal.state.resolved { return journal }
+            func restorable() throws -> (PublicMirrorSession, [PublicMirrorRemoval]) {
+                guard let session = journal.publicMirrorSession else {
+                    throw RecoveryError.unsafe("public-mirror session disappeared; keep the journal")
+                }
+                let active = MirrorSessionTopology.activeRemovals(session.removals)
+                guard session.turnedOff.isEmpty,
+                      MirrorSessionTopology.canRestoreFinalLayout(baseline: session.baseline, showing: active,
+                                                                  current: current) else {
+                    throw RecoveryError.unsafe("hidden displays aren’t all mirrored as Hide left them; show each display. No layout was changed")
+                }
+                return (session, active)
+            }
+            var (session, active) = try restorable()
+            var returnedTargets: Set<String> = []
+            for removalID in active.map(\.id) {
+                guard let removal = session.removals.first(where: { $0.id == removalID }),
+                      let target = session.baseline.displays.first(where: { $0.uuid == removal.targetUUID }),
+                      let source = session.baseline.displays.first(where: { $0.uuid == removal.sourceUUID }) else {
+                    throw RecoveryError.unsafe("captured target or source identity is missing")
+                }
+                current = try prepareShow(journal, baseline: session.baseline, target: target, source: source,
+                                          returnedTargets: returnedTargets, store: store,
+                                          returnInputBeforeRestore: returnInputBeforeRestore, relinkInput: relinkInput)
+                returnedTargets.insert(removal.targetUUID)
+                try adoptRenumbering(&journal, current: current, store: store)
+                (session, active) = try restorable()
+            }
+
+            for index in session.removals.indices where !session.removals[index].state.resolved {
+                session.removals[index].state = .restoring
+                session.removals[index].failure = nil
+                session.removals[index].restoreFrom = current
+            }
+            journal.publicMirrorSession = session
+            journal.state = .restoring
+            journal.trigger = "unmirror-together"
+            try store.save(journal)
+            do {
+                if (try? session.baseline.verify(current)) == nil {
+                    try engine.apply(session.baseline)
+                }
+                try engine.converge { try session.baseline.verify(engine.capture()) }
+                for index in session.removals.indices where session.removals[index].state == .restoring {
+                    session.removals[index].state = .restored
+                    session.removals[index].restoreFrom = nil
+                }
+                journal.publicMirrorSession = session
+                journal.state = .restored
+                journal.failure = nil
+                try store.save(journal)
+                return journal
+            } catch {
+                for removal in active {
+                    markRemovalNeedsAttention(&journal, removalID: removal.id, reason: String(describing: error))
+                }
+                try? store.save(journal)
+                throw RecoveryError.unsafe(RecoveryError.reason(of: error))
+            }
+        } catch {
+            throw fallback(error, store: store)
+        }
+    }
+
     private func unmirrorSession(_ journal: inout RecoveryJournal, selector: String?, expectedID: UUID?,
                                  noOpWhenAlreadyResolved: Bool, store: RecoveryStore,
                                  returnInputBeforeRestore: ((RecoveryDisplay) throws -> DisplayInputOutcome.State)?,
@@ -1047,10 +1142,12 @@ struct MirrorController {
     /// remain held across the input attempt, at most one re-selection
     /// (`relinkInput` returns whether it wrote) and all read-only observations.
     private func prepareShow(_ journal: RecoveryJournal, baseline: RecoverySnapshot,
-                             target: RecoveryDisplay, source: RecoveryDisplay, store: RecoveryStore,
+                             target: RecoveryDisplay, source: RecoveryDisplay, returnedTargets: Set<String> = [],
+                             store: RecoveryStore,
                              returnInputBeforeRestore: ((RecoveryDisplay) throws -> DisplayInputOutcome.State)?,
                              relinkInput: ((RecoveryDisplay) throws -> Bool)?) throws -> RecoverySnapshot {
-        let removals = journal.publicMirrorSession?.removals ?? []
+        // A follower whose input Show together already returned needs its saved modes too.
+        let removals = (journal.publicMirrorSession?.removals ?? []).filter { !returnedTargets.contains($0.targetUUID) }
         // The input return can make macOS renumber displays; the caller
         // adopts that into the journal once the topology settles.
         func readyModes(_ observed: RecoverySnapshot) throws -> RecoverySnapshot {
@@ -1077,6 +1174,10 @@ struct MirrorController {
             throw RecoveryError.unsafe("journal changed before input return; inspect recovery status")
         }
         let returned = try returnInputBeforeRestore(target)
+        if returned == .notRequested {
+            try preflightModes(modes)
+            return current
+        }
         let switched = returned.mayHaveSwitched
 
         // Persisted per-attempt outcome changes, e.g. "0:ready#1a2b3c4d | 9:<error reason>".

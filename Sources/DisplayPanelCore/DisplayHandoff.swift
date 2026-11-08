@@ -59,13 +59,17 @@ public struct DisplayInputOutcome: Codable, Equatable, Sendable {
 public struct DisplayHandoffOperationFailure: Error, LocalizedError {
     public let action: String
     public let inputOutcome: DisplayInputOutcome
+    /// Show together: each target's outcome, keyed by lowercase UUID.
+    public let inputOutcomes: [String: DisplayInputOutcome]
     public let message: String
 
     public var errorDescription: String? { message }
 
-    init(action: String, inputOutcome: DisplayInputOutcome, message: String) {
+    init(action: String, inputOutcome: DisplayInputOutcome, inputOutcomes: [String: DisplayInputOutcome] = [:],
+         message: String) {
         self.action = action
         self.inputOutcome = inputOutcome
+        self.inputOutcomes = inputOutcomes
         self.message = message
     }
 }
@@ -527,6 +531,42 @@ struct HandoffController {
         } catch {
             let inputDetail = inputOutcome.detail.map { " Input return: \($0)" } ?? ""
             throw DisplayHandoffOperationFailure(action: "show", inputOutcome: inputOutcome,
+                                                 message: error.localizedDescription + inputDetail)
+        }
+    }
+
+    /// Show together. `inputs` maps each target's lowercase UUID to its Mac input;
+    /// a target without one keeps its monitor's input.
+    func guardedBackAll(expectedJournalID: UUID, inputs: [String: UInt8],
+                        store: RecoveryStore) throws -> [String: DisplayInputOutcome] {
+        var outcomes = inputs.mapValues {
+            DisplayInputOutcome(state: .notAttempted, requestedInput: $0,
+                                detail: "Input selection was not attempted because Show did not pass journal and display validation.")
+        }
+        var previousInputs: [String: UInt8] = [:]
+        do {
+            _ = try mirror.unmirrorAll(store: store, expectedID: expectedJournalID, returnInputBeforeRestore: { target in
+                let key = target.uuid.lowercased()
+                guard let input = inputs[key] else { return .notRequested }
+                let outcome = selectInput(input, target: target, returning: true, willSelect: { previous, _ in
+                    previousInputs[key] = previous
+                })
+                outcomes[key] = outcome
+                return outcome.state
+            }, relinkInput: { target in
+                let key = target.uuid.lowercased()
+                guard let state = outcomes[key]?.state, [.verified, .unverified].contains(state),
+                      let input = inputs[key], let previous = previousInputs[key],
+                      let back = reselect(input, through: previous, target: target) else { return false }
+                outcomes[key] = back
+                guard back.state != .failed else { throw RecoveryError.unsafe(back.detail ?? "DDC selection failed") }
+                return true
+            })
+            return outcomes
+        } catch {
+            let inputDetail = outcomes.values.compactMap(\.detail).filter { !$0.hasPrefix("Input selection was not attempted") }
+                .map { " Input return: \($0)" }.joined()
+            throw DisplayHandoffOperationFailure(action: "show", inputOutcome: .notRequested, inputOutcomes: outcomes,
                                                  message: error.localizedDescription + inputDetail)
         }
     }

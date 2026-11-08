@@ -111,7 +111,9 @@ relink starts only after the write. A relink can cascade through every display
 in the same mirror set, and writing during it preceded a kernel panic, so one
 quiet sample is not enough. The app also waits until displays have been
 unchanged for 2 seconds (up to 15) before Hide, Show, mode writes and each
-Action step. A verified or unconfirmed return that never relinks is
+Action step. Showing every display of one session together settles after each
+input return and restores the layout once (see
+[display handoff](display-handoff.md)). A verified or unconfirmed return that never relinks is
 re-selected once through the monitor's previous input (4 seconds there), then
 settles again: a monitor whose link the Mac retrained while it showed another
 input can otherwise stay without a picture and never hotplug. This input-return path accepts online mirror followers that

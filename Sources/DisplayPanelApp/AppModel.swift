@@ -134,7 +134,7 @@ final class AppModel: ObservableObject {
         didSet {
             displayReconfigurationEvents.operationChanged(busy: hideOperation.isBusy)
             switch hideOperation {
-            case .hiding, .showing:
+            case .hiding, .showing, .showingTogether:
                 if inputReturnShowCompletion == nil { cancelInputReturnSettlement() }
                 cancelArrangementSettlement()
             case .idle, .changingMode:
@@ -265,6 +265,8 @@ final class AppModel: ObservableObject {
     private let hideDisplay: (DisplayHideIdentity, DisplayHideIdentity, UInt8?) throws -> DisplayInputOutcome
     private let sleepResumeHideDisplay: (DisplayHideIdentity, DisplayHideIdentity, DisplayHideWakeExpectation) throws -> DisplayInputOutcome
     private let showDisplay: (String, UInt8?) throws -> DisplayInputOutcome
+    /// Show together; nil keeps the sequential Shows (a caller that fakes Show alone).
+    private let showDisplays: ((String, [String: UInt8]) throws -> [String: DisplayInputOutcome])?
     private let turnOffDisplay: (DisplayHideIdentity) throws -> Void
     private let recoverDisplaySession: (DisplaySessionRecovery, Bool) throws -> Void
     private var sessionRecoveryInProgress = false
@@ -334,13 +336,8 @@ final class AppModel: ObservableObject {
             try DisplayHideController().hide(target: target, source: source, awayInput: nil,
                                              wakeExpectation: expectation)
         },
-        showDisplay: @escaping (String, UInt8?) throws -> DisplayInputOutcome = { key, input in
-            let pieces = key.split(separator: "|", maxSplits: 1).map(String.init)
-            if pieces.count == 2 {
-                return try DisplayHideController().show(expectedJournalID: pieces[0], targetUUID: pieces[1], returnInput: input)
-            }
-            return try DisplayHideController().show(expectedJournalID: key, returnInput: input)
-        },
+        showDisplay: ((String, UInt8?) throws -> DisplayInputOutcome)? = nil,
+        showDisplays: ((String, [String: UInt8]) throws -> [String: DisplayInputOutcome])? = nil,
         turnOffDisplay: @escaping (DisplayHideIdentity) throws -> Void = {
             try DisplayHideController().turnOff(target: $0)
         },
@@ -431,7 +428,16 @@ final class AppModel: ObservableObject {
         }
         self.hideDisplay = hideDisplay
         self.sleepResumeHideDisplay = sleepResumeHideDisplay
-        self.showDisplay = showDisplay
+        self.showDisplay = showDisplay ?? { key, input in
+            let pieces = key.split(separator: "|", maxSplits: 1).map(String.init)
+            if pieces.count == 2 {
+                return try DisplayHideController().show(expectedJournalID: pieces[0], targetUUID: pieces[1], returnInput: input)
+            }
+            return try DisplayHideController().show(expectedJournalID: key, returnInput: input)
+        }
+        self.showDisplays = showDisplays ?? (showDisplay != nil ? nil : {
+            try DisplayHideController().showAll(expectedJournalID: $0, returnInputs: $1)
+        })
         self.turnOffDisplay = turnOffDisplay
         self.recoverDisplaySession = recoverDisplaySession
         self.checkDDCInput = checkDDCInput
@@ -3255,6 +3261,8 @@ final class AppModel: ObservableObject {
             return .hiding
         case .showing(let target) where uuid?.caseInsensitiveCompare(target) == .orderedSame:
             return .showing
+        case .showingTogether(let targets) where targets.contains(where: { uuid?.caseInsensitiveCompare($0) == .orderedSame }):
+            return .showing
         default:
             break
         }
@@ -4810,7 +4818,7 @@ final class AppModel: ObservableObject {
                 return
             }
 
-            let complete: (DisplayOperationResult) -> Void = { result in
+            func record(_ offset: Int, _ result: DisplayOperationResult) -> AppControlOutcome {
                 let resultOutcome: AppControlOutcome
                 if result.succeeded {
                     resultOutcome = result.inputOutcome?.isPartial == true ? .partial : .done
@@ -4827,10 +4835,14 @@ final class AppModel: ObservableObject {
                     action.steps.count > 1 ? Self.boundedActionStepText($0) : Self.bounded($0)
                 }
                 stepResults.append(AppControlActionStepResult(
-                    index: offset + 1, targetUUID: uuid, effect: step.effect.rawValue,
+                    index: offset + 1, targetUUID: action.steps[offset].target?.uuid ?? "",
+                    effect: action.steps[offset].effect.rawValue,
                     outcome: resultOutcome, desktopSummary: Self.bounded(desktop),
                     inputOutcome: result.inputOutcome?.state, inputDetail: input
                 ))
+                return resultOutcome
+            }
+            func proceed(after offset: Int, _ resultOutcome: AppControlOutcome) {
                 // A partial step changed the desktop as asked; only its monitor input
                 // needs checking, so later independent steps still run.
                 if resultOutcome == .done || resultOutcome == .noOp || resultOutcome == .partial {
@@ -4851,6 +4863,7 @@ final class AppModel: ObservableObject {
                     finishRun()
                 }
             }
+            let complete: (DisplayOperationResult) -> Void = { result in proceed(after: offset, record(offset, result)) }
             switch step.effect {
             case .restoreArrangement:
                 break // Handled above, without a per-display target.
@@ -4868,8 +4881,25 @@ final class AppModel: ObservableObject {
                           manualActionStepIndex: offset, actionLeaseID: id,
                           expectedTarget: expectedTarget, completion: complete)
             case .show:
+                // Consecutive Shows of one session's mirrored displays run together.
+                let group = Array((offset..<action.steps.count).prefix { index in
+                    let next = action.steps[index]
+                    guard next.effect == .show, removalShowSteps.contains(index), skippedSteps[index] == nil,
+                          !noOpSteps.contains(index), let target = next.target?.uuid, self.isRemovedDisplay(target),
+                          let frozen = frozenTargets[index] else { return false }
+                    return index == offset || self.displayActionStepRunBlocker(
+                        action: action, step: next, index: index, actionLeaseID: id, expectedTarget: frozen
+                    ) == nil
+                })
+                let together = group.compactMap { action.steps[$0].target?.uuid }
                 if returnsRestoredInput {
                     self.returnRestoredDisplayInput(targetUUID: uuid, completion: complete)
+                } else if group.count > 1, self.canShowTogether(together) {
+                    self.showTogether(together, actionLeaseID: id) { results in
+                        let outcomes = zip(group, results).map { record($0, $1) }
+                        proceed(after: group[group.count - 1],
+                                outcomes.first { ![.done, .partial].contains($0) } ?? (outcomes.contains(.partial) ? .partial : .done))
+                    }
                 } else {
                     self.show(targetUUID: uuid, actionLeaseID: id, completion: complete)
                 }
@@ -5324,6 +5354,20 @@ final class AppModel: ObservableObject {
     /// Stop at the first failure so recovery never silently escalates.
     func showAllDisplays(completion: @escaping (String, DisplayOperationResult) -> Void) {
         let targets = hiddenDisplayTiles.compactMap(\.uuid)
+        let together = targets.filter(isRemovedDisplay)
+        guard !hideOperation.isBusy, runningDisplayAction == nil, canShowTogether(together) else {
+            showEach(targets, completion: completion)
+            return
+        }
+        showTogether(together) { [self] results in
+            zip(together, results).forEach(completion)
+            if results.allSatisfy(\.succeeded) {
+                showEach(targets.filter { !together.contains($0) }, completion: completion)
+            }
+        }
+    }
+
+    private func showEach(_ targets: [String], completion: @escaping (String, DisplayOperationResult) -> Void) {
         func showNext(_ index: Int) {
             guard index < targets.count else { return }
             let uuid = targets[index]
@@ -5341,6 +5385,59 @@ final class AppModel: ObservableObject {
             }
         }
         showNext(0)
+    }
+
+    /// Displays one journal removed by mirroring share a hardware mirror set: one
+    /// monitor's input return relinks the others. Showing them together returns
+    /// each input in turn, settled, then writes the layout once.
+    func canShowTogether(_ targets: [String]) -> Bool {
+        let keys = Set(targets.map { $0.lowercased() })
+        guard showDisplays != nil, keys.count >= 2, keys.count == targets.count, handoffInspectionFailure == nil,
+              let status = handoffStatus, status.journalID != nil,
+              !status.turnedOff.contains(where: \.isUnresolved), !canWaitForInputReturnShow(targets) else { return false }
+        let removals = status.removals.filter(\.isUnresolved)
+        return Set(removals.map { $0.target.uuid.lowercased() }) == keys &&
+            removals.allSatisfy { $0.canShow && !isBlackoutHidden($0.target.uuid) }
+    }
+
+    /// Results follow `targets`. A refusal or failure applies to all of them:
+    /// Core restores every display or none.
+    func showTogether(_ targets: [String], actionLeaseID: UUID? = nil,
+                      completion: @escaping ([DisplayOperationResult]) -> Void) {
+        func refuseAll(_ error: Error) {
+            var results: [DisplayOperationResult] = []
+            for uuid in targets { refuse(.show, targetUUID: uuid, error: error) { results.append($0) } }
+            completion(results)
+        }
+        let requests: [DisplayShowRequest]
+        do {
+            if let showWait = showWait(actionLeaseID: actionLeaseID) { throw showWait }
+            cancelPendingSleepHideResume()
+            if actionLeaseID == nil { refreshHandoffStatus() }
+            guard canShowTogether(targets) else {
+                throw DisplayHideError.blocked("The displays changed before Show began. Try again.")
+            }
+            requests = try targets.map {
+                try makeShowRequest(targetUUID: $0, actionLeaseID: actionLeaseID, refreshStatus: false)
+            }
+        } catch {
+            refuseAll(error)
+            return
+        }
+        for uuid in targets { displayResults[uuid.lowercased()] = nil }
+        // The journal's UUIDs, which completion matches exactly.
+        hideOperation = .showingTogether(requests.map(\.targetUUID))
+        onStatusChange?()
+        let finish: (Bool, String?) -> Void = { [weak self] succeeded, message in
+            Task { @MainActor in
+                await self?.finishShowTogetherAfterProtectionQuiescence(
+                    requests, actionLeaseID: actionLeaseID, cleanupSucceeded: succeeded,
+                    cleanupFailure: message, completion: completion
+                )
+            }
+        }
+        if actionLeaseID != nil { finish(true, nil) }
+        else { stopManagedProtection(completion: finish) }
     }
 
     /// Shows a hidden display right away. Refuses when the journal belongs to
@@ -7074,6 +7171,101 @@ final class AppModel: ObservableObject {
             finish(.show, targetUUID: targetUUID, succeeded: false,
                    message: "Couldn’t show. \(error.localizedDescription)",
                    input: outcome, inputWarning: request.returnInputWarning, completion: completion)
+        }
+    }
+
+    private func finishShowTogetherAfterProtectionQuiescence(
+        _ requests: [DisplayShowRequest],
+        actionLeaseID: UUID?,
+        cleanupSucceeded: Bool,
+        cleanupFailure: String?,
+        completion: @escaping ([DisplayOperationResult]) -> Void
+    ) async {
+        let targets = requests.map(\.targetUUID)
+        guard hideOperation == .showingTogether(targets) else { return }
+        func finishAll(succeeded: Bool, message: String, outcomes: [String: DisplayInputOutcome],
+                       automationStopUnconfirmed: Bool = false) {
+            var results: [DisplayOperationResult] = []
+            for request in requests {
+                let input = outcomes[request.targetUUID.lowercased()] ?? DisplayInputOutcome(
+                    state: request.returnInput == nil ? .notRequested : .notAttempted,
+                    requestedInput: request.returnInput
+                )
+                finish(.show, targetUUID: request.targetUUID, succeeded: succeeded, message: message,
+                       input: input, inputWarning: request.returnInputWarning,
+                       automationStopUnconfirmed: automationStopUnconfirmed) { results.append($0) }
+            }
+            completion(results)
+        }
+        func notStarted(_ reason: String, automationStopUnconfirmed: Bool = false) {
+            hideOperation = .idle
+            reconcileProtection()
+            finishAll(succeeded: false, message: "Couldn’t show. \(reason)", outcomes: [:],
+                      automationStopUnconfirmed: automationStopUnconfirmed)
+        }
+        guard cleanupSucceeded else {
+            let failure = cleanupFailure ?? Self.automationCleanupUnverified
+            protectionQuiescenceFailure = failure
+            notStarted("Automation didn’t confirm it stopped. \(failure)", automationStopUnconfirmed: true)
+            return
+        }
+        protectionQuiescenceFailure = nil
+        do {
+            try await waitForQuietDisplays()
+        } catch {
+            notStarted(error.localizedDescription)
+            return
+        }
+        guard !displayLifecycleTransitioning else {
+            notStarted(DisplayHideError.sleeping.localizedDescription)
+            return
+        }
+        refreshHandoffStatus()
+        guard let showDisplays, canShowTogether(targets),
+              let journalID = handoffStatus?.journalID, requests.allSatisfy({
+                  $0.status.journalID == journalID &&
+                      $0.status.removal(for: $0.targetUUID)?.id == handoffStatus?.removal(for: $0.targetUUID)?.id
+              }) else {
+            notStarted("The displays changed before Show began. Try again.")
+            return
+        }
+        let inputs = Dictionary(requests.compactMap { request in request.returnInput.map { (request.targetUUID, $0) } },
+                                uniquingKeysWith: { first, _ in first })
+        var outcomes: [String: DisplayInputOutcome] = [:]
+        do {
+            do {
+                actionTopologyWriteInProgress = actionLeaseID != nil
+                defer { actionTopologyWriteInProgress = false }
+                outcomes = try await performDisplayWrite { try showDisplays(journalID, inputs) }
+            }
+            displays = displayProvider()
+            refreshHandoffStatus()
+            guard let currentStatus = handoffStatus, handoffInspectionFailure == nil else {
+                throw DisplayHideError.recoveryRequired(
+                    handoffInspectionFailure ?? "DisplayPanel couldn’t confirm these displays are back. Check their recovery details."
+                )
+            }
+            let allRestored = targets.allSatisfy { uuid in
+                currentStatus.removal(for: uuid) == nil && (!currentStatus.hasUnresolvedJournal ||
+                    currentStatus.removals.contains {
+                        $0.target.uuid.caseInsensitiveCompare(uuid) == .orderedSame && !$0.isUnresolved && $0.state == "restored"
+                    })
+            }
+            guard allRestored, currentStatus.journalID == journalID || !currentStatus.hasUnresolvedJournal else {
+                throw DisplayHideError.recoveryRequired(
+                    currentStatus.reason ?? "DisplayPanel couldn’t confirm these displays are back. Check their recovery details."
+                )
+            }
+            hideOperation = .idle
+            rearmProtectionAfterDisplayRecovery()
+            protectAfterFinalShow()
+            finishAll(succeeded: true, message: "Shown.", outcomes: outcomes)
+        } catch {
+            refreshHandoffStatus()
+            hideOperation = .idle
+            reconcileProtection()
+            let failed = (error as? DisplayHandoffOperationFailure)?.inputOutcomes ?? outcomes
+            finishAll(succeeded: false, message: "Couldn’t show. \(error.localizedDescription)", outcomes: failed)
         }
     }
 

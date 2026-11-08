@@ -1524,6 +1524,79 @@ final class DisplayMirroringTests: XCTestCase {
         }
     }
 
+    // Two monitors mirrored onto one share a hardware mirror set: one input return
+    // relinks both and can make macOS unmirror the sibling. Show together returns
+    // each input only after the previous relink settles, then writes the layout once.
+    func testShowTogetherSettlesEachInputBeforeOneLayoutWrite() throws {
+        for settles in [true, false] {
+            let store = RecoveryStore(url: directory.appendingPathComponent("together-\(settles).json"))
+            let baseline = try sessionSnapshot([:])
+            var current = baseline
+            var active: [Int: Int] = [:]
+            var stagedTarget: UInt32 = 0
+            var capturesAfterSwitch: Int?
+            var unpluggedSamples = 0
+            var lastSelected = ""
+            var events: [String] = []
+            var sut = HandoffController(mirror: controller(baseline), report: { _ in })
+            sut.reselectPause = {}
+            sut.mirror.records = { self.records(current) }
+            sut.mirror.engine.capture = {
+                guard let count = capturesAfterSwitch else { return current }
+                capturesAfterSwitch = count + 1
+                if unpluggedSamples > 0 { unpluggedSamples -= 1; return try self.withoutDisplay(current, uuid: lastSelected) }
+                return current
+            }
+            sut.mirror.engine.apply = { events.append("layout after \(capturesAfterSwitch ?? 0)"); current = $0 }
+            sut.mirror.transaction = MirrorTransaction(
+                begin: { OpaquePointer(bitPattern: 1)! }, stage: { _, target, _ in stagedTarget = target },
+                complete: { _, _ in
+                    active[Int(stagedTarget) - 6] = 1
+                    current = try self.sessionSnapshot(active)
+                }, cancel: { _ in })
+            try sut.away(selector: "8", source: "7", input: nil, store: store)
+            try sut.away(selector: "9", source: "7", input: nil, store: store)
+            let id = try store.load().id
+            sut.open = { uuid, allowInactive in
+                let target = try DDC.resolveDisplay(selector: uuid, records: self.records(current), allowInactive: allowInactive)
+                return (target, DDCChannel(getVCP: { _ in (17, 0) }, setVCP: { _, _ in XCTFail("fake selector only") }))
+            }
+            sut.select = { requested, _, displayID, uuid, originalInput in
+                events.append("input \(displayID) after \(capturesAfterSwitch ?? 0)")
+                capturesAfterSwitch = 0
+                lastSelected = uuid
+                if displayID == 8 {
+                    unpluggedSamples = 3
+                    current = try self.sessionSnapshot([2: 1]) // macOS unmirrored the sibling
+                } else {
+                    unpluggedSamples = settles ? 3 : .max
+                }
+                return DDCInputSelection(displayID: displayID, uuid: uuid, original: originalInput, requested: requested,
+                    observed: requested, outcome: .verified, detail: nil)
+            }
+            let inputs = [snapshotUUID(2): UInt8(15), snapshotUUID(3): UInt8(16)]
+            guard settles else {
+                XCTAssertThrowsError(try sut.guardedBackAll(expectedJournalID: id, inputs: inputs, store: store)) { error in
+                    let failure = error as? DisplayHandoffOperationFailure
+                    XCTAssertEqual(failure?.inputOutcomes[self.snapshotUUID(2)]?.state, .verified)
+                    XCTAssertEqual(failure?.inputOutcomes[self.snapshotUUID(3)]?.state, .verified)
+                }
+                XCTAssertEqual(events.count, 2)
+                XCTAssertFalse(events.contains { $0.hasPrefix("layout") }, "no layout write during an unsettled relink")
+                XCTAssertEqual(try store.load().state, .mirrored, "retry Show from the recorded session")
+                continue
+            }
+            let outcomes = try sut.guardedBackAll(expectedJournalID: id, inputs: inputs, store: store)
+            XCTAssertEqual(outcomes.mapValues(\.state), [snapshotUUID(2): .verified, snapshotUUID(3): .verified])
+            XCTAssertEqual(events, ["input 8 after 0", "input 9 after 20", "layout after 19"],
+                           "each input waits three quiet seconds after its relink; one layout write follows")
+            XCTAssertNoThrow(try baseline.verify(current))
+            let saved = try store.load()
+            XCTAssertEqual(saved.state, .restored)
+            XCTAssertEqual(saved.publicMirrorSession?.removals.map(\.state), [.restored, .restored])
+        }
+    }
+
     // Regression (2026-11-07): the input return relinked both monitors and
     // macOS swapped their numeric IDs mid-settle. Show must adopt macOS's
     // UUID-to-ID mapping and finish, but never across changed hardware identity.

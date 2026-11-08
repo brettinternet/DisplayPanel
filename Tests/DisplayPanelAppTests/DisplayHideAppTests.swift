@@ -2306,6 +2306,71 @@ final class DisplayHideAppTests: XCTestCase {
         }
     }
 
+    /// Regression (2026-11-07): Showing a shared mirror set one display at a time
+    /// relinked the sibling mid-restore; a DCP fault restarted the Mac.
+    func testShowAllAndShowActionShowOneSessionsMirroredDisplaysTogether() async throws {
+        for (showAll, fails) in [(true, false), (false, false), (false, true)] {
+            let defaults = try makeDefaults("\(showAll)\(fails)")
+            // CoreGraphics reports uppercase UUIDs; the journal stores them lowercase.
+            let displays = [self.displays[0]] + [(2, "Target"), (3, "Second target")].map {
+                Self.display(index: $0.0, id: UInt32($0.0 * 101), uuid: "ABCDEF00-0000-0000-0000-00000000000\($0.0)",
+                             name: $0.1, main: false)
+            }
+            let targets = [displays[1], displays[2]]
+            var preferences = DisplayHidePreferences()
+            for (target, input) in zip(targets, [UInt8(0x0F), 0x10]) {
+                preferences[target.uuid!] = DisplayHideConfiguration(
+                    target: DisplayIdentitySnapshot(target), enabled: true,
+                    source: DisplayIdentitySnapshot(displays[0]), awayInput: 0x11, returnInput: input
+                )
+            }
+            defaults.set(try JSONEncoder().encode(preferences), forKey: "displayHidePreferences")
+            func removals(resolved: Bool) -> [DisplayHandoffRemoval] {
+                targets.enumerated().map {
+                    let target = DisplayHandoffIdentity(DisplayHideIdentity(
+                        uuid: $0.element.uuid!.lowercased(), displayID: $0.element.id, name: $0.element.name,
+                        vendor: $0.element.vendor, model: $0.element.model, serial: $0.element.serial
+                    ))
+                    return sleepRemoval(id: "entry-\($0.offset)", target: target, source: handoffIdentity(displays[0]),
+                                        resolved: resolved)
+                }
+            }
+            var current = removals(resolved: false)
+            var calls: [[String: UInt8]] = []
+            let model = makeModel(
+                defaults: defaults, displays: displays,
+                status: { self.multiHandoffStatus(current, observations: [], journalID: "journal") },
+                showDisplay: { _, _ in XCTFail("a shared mirror set never shows one display alone"); return .notRequested },
+                showDisplays: { journalID, inputs in
+                    XCTAssertEqual(journalID, "journal")
+                    calls.append(inputs)
+                    if fails { throw RecoveryError.unsafe("layout didn’t verify") }
+                    current = removals(resolved: true)
+                    return inputs.mapValues { DisplayInputOutcome(state: .verified, requestedInput: $0) }
+                }
+            )
+            let action = DisplayAction(name: "Show both", steps: targets.map {
+                DisplayActionStep(target: DisplayIdentitySnapshot($0), effect: .show)
+            })
+            try model.saveDisplayAction(action)
+            try await waitUntil { !model.protectionQuiescencePending }
+            if showAll {
+                var results: [String: DisplayOperationResult] = [:]
+                model.showAllDisplays { results[$0] = $1 }
+                try await waitUntil { results.count == 2 }
+                XCTAssertEqual(results.values.map(\.inputOutcome?.state), [.verified, .verified])
+            } else {
+                var result: AppControlResponse?
+                model.runDisplayAction(id: action.id) { result = $0 }
+                try await waitUntil { result != nil }
+                XCTAssertEqual(result?.steps?.map(\.outcome), fails ? [.failed, .failed] : [.done, .done],
+                               result?.summary ?? "")
+            }
+            XCTAssertEqual(calls, [[targets[0].uuid!.lowercased(): 0x0F, targets[1].uuid!.lowercased(): 0x10]],
+                           "one call returns both inputs")
+        }
+    }
+
     func testPendingShowActionRefusesChangedStateAndNeverRetriesAWrite() async throws {
         for scenario in ["timeout", "identity", "journal", "sleep", "unlock", "shutdown", "writer"] {
             let defaults = try makeDefaults("\(scenario)")
@@ -4543,6 +4608,7 @@ final class DisplayHideAppTests: XCTestCase {
         hideDisplay: @escaping (DisplayHideIdentity, DisplayHideIdentity, UInt8?) throws -> DisplayInputOutcome = { _, _, _ in .notRequested },
         sleepResumeHideDisplay: ((DisplayHideIdentity, DisplayHideIdentity, DisplayHideWakeExpectation) throws -> DisplayInputOutcome)? = nil,
         showDisplay: @escaping (String, UInt8?) throws -> DisplayInputOutcome = { _, _ in .notRequested },
+        showDisplays: ((String, [String: UInt8]) throws -> [String: DisplayInputOutcome])? = nil,
         turnOffDisplay: @escaping (DisplayHideIdentity) throws -> Void = { _ in
             XCTFail("unexpected Turn off"); throw RecoveryError.unsafe("no private writes in tests")
         },
@@ -4570,6 +4636,7 @@ final class DisplayHideAppTests: XCTestCase {
                 try hideDisplay(target, source, nil)
             },
             showDisplay: showDisplay,
+            showDisplays: showDisplays,
             turnOffDisplay: turnOffDisplay,
             recoverDisplaySession: recoverDisplaySession,
             checkDDCInput: checkDDCInput,

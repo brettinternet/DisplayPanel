@@ -58,6 +58,13 @@ then restores both but returns only its own input. A later Show step in the
 same Action, or **Show All Displays**, sends that sibling one return-input
 write, only after a read finds the monitor on its Hide input.
 
+Displays one session mirrored share a mirror set: one input return relinks the
+others. When **Show All Displays**, or consecutive Show steps of an Action, show
+every display that session hides, they show together. Each monitor's input
+returns in turn and settles before the next; the journaled layout is then
+restored and verified in one write. A failed input return or settle writes no
+layout and leaves every display hidden, so Show can be retried.
+
 ## Returning from an empty input
 
 A monitor showing an input with no signal may go black or into standby and
