@@ -506,14 +506,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case _ where tile.status == .needsRecovery, .show? where tile.actionBlocker != nil:
                 display = item(tile.name, action: #selector(reviewDisplayRecovery(_:)))
             case .hide?:
-                display = item("Hide \(tile.name)", action: #selector(hideDisplayFromMenu(_:)))
+                display = item("\(model.hideTitle(tile)) \(tile.name)", action: #selector(hideDisplayFromMenu(_:)))
             case .show?:
                 display = item("Show \(tile.name)", action: #selector(showDisplayFromMenu(_:)))
             case nil:
                 display = disabledItem(tile.name)
             }
             display.representedObject = tile.uuid
-            display.toolTip = tile.actionBlocker
+            display.toolTip = tile.actionBlocker ??
+                (tile.action == .hide ? tile.display.flatMap(model.hideFallbackReason(for:)) : nil)
             if tile.action == .hide {
                 display.isEnabled = tile.actionBlocker == nil
             }

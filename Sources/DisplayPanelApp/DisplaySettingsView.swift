@@ -201,7 +201,7 @@ struct DisplaySettingsView: View {
             ProgressView()
                 .controlSize(.small)
         } else if let action = tile.action, let uuid = tile.uuid {
-            let title = action == .hide ? "Hide" : tile.status == .needsRecovery ? "Restore" : "Show"
+            let title = action == .hide ? model.hideTitle(tile) : tile.status == .needsRecovery ? "Restore" : "Show"
             Button(title) {
                 if action == .hide {
                     model.hide(targetUUID: uuid)

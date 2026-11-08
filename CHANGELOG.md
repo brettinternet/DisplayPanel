@@ -3,7 +3,7 @@
 ## Unreleased
 
 - Hidden displays stay Hidden while they wake from sleep instead of briefly showing Needs recovery. Recovery appears only if they still don't check out once displays settle.
-- Hide blacks out a display instead of refusing when its Turn off, Mirror or Switch input style can't run alongside displays already hidden, such as Turn off while another display is mirrored. Settings keeps the chosen style and uses it again once those displays show.
+- Hide blacks out a display instead of refusing when its Turn off, Mirror or Switch input style can't run alongside displays already hidden, such as Turn off while another display is mirrored. Settings keeps the chosen style and uses it again once those displays show; until then the menu and Settings say Black Out instead of Hide.
 
 ## 0.9.10
 

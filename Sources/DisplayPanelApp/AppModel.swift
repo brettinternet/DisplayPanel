@@ -2685,6 +2685,11 @@ final class AppModel: ObservableObject {
         hideFallbackReason(for: display) == nil ? chosenHideStyle(of: display) : .blackOut
     }
 
+    /// What the Hide button says: Black Out while Hide falls back to it.
+    func hideTitle(_ tile: DisplayTile) -> String {
+        tile.display.flatMap(hideFallbackReason(for:)) == nil ? "Hide" : "Black Out"
+    }
+
     /// The style chosen in Settings: Black out unless Experimental features
     /// are on and the display can leave the desktop.
     private func chosenHideStyle(of display: DisplayRecord) -> DisplayHideStyle {

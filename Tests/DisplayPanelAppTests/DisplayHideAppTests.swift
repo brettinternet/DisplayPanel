@@ -680,6 +680,7 @@ final class DisplayHideAppTests: XCTestCase {
         let tile = try XCTUnwrap(model.displayTiles.first { $0.id == Self.targetKey })
         XCTAssertEqual(tile.action, .hide)
         XCTAssertNil(tile.actionBlocker)
+        XCTAssertEqual(model.hideTitle(tile), "Black Out", "Hide names the fallback before it runs")
 
         let hidden = try await hideAndWait(model)
         XCTAssertTrue(hidden.succeeded, hidden.message)
