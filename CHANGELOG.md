@@ -1,7 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.9.11
 
+- Fix a Mac restart when showing displays hidden onto the same display one at a time: Hide, Show, mode writes and each Action step wait for displays to settle first.
+- Show the displays one session hid together from **Show All Displays**, consecutive Show steps of an Action, Show and Quit, and `dp back` with several `--display` options: each input returns and settles in turn, then the layout is restored once. Show on one of them asks **Show Together** or **Show Only** that display.
+- Stop warning that a monitor didn't switch back when it was only slow to answer: Show and `dp back` read the input again once displays settle.
+- Show All returns the input of a display an earlier Show already restored.
+- Later Show steps in an Action accept displays an earlier Show renumbered.
+- Accept Displays setup edits in Mirror Actions.
+- Open Accessibility settings when its permission is stale.
+- Hide the empty result row after a successful Hide or Show.
 - Hidden displays stay Hidden while they wake from sleep instead of briefly showing Needs recovery. Recovery appears only if they still don't check out once displays settle.
 - Hide blacks out a display instead of refusing when its Turn off, Mirror or Switch input style can't run alongside displays already hidden, such as Turn off while another display is mirrored. Settings keeps the chosen style and uses it again once those displays show; until then the menu and Settings say Black Out instead of Hide.
 
