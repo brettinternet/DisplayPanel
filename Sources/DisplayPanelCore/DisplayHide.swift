@@ -570,7 +570,9 @@ public struct DisplayHideController {
                 } else if current.displays.contains(where: { $0.id == disconnect.targetID }) {
                     refusal = "Another display now has this display’s ID. \(DisplayTurnOff.didNotReturn)"
                 } else {
-                    refusal = sessionVerified ? nil : journal.failure ?? "The layout changed since Turn off; review recovery."
+                    // Reconnecting comes before any layout repair, so a changed
+                    // layout never blocks it; Show still checks identity.
+                    refusal = nil
                 }
             } else if record?.online != true || record?.asleep != false {
                 refusal = "The display is asleep or unavailable. Wake it before Show."

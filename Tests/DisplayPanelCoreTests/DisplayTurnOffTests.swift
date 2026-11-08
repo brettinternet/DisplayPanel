@@ -36,7 +36,7 @@ final class DisplayTurnOffTests: XCTestCase {
         var environment: (inout RecoveryEligibilityEnvironment) -> Void = { _ in }
         var transactionAvailable = true
         /// macOS applies its saved layout for the remaining displays on turn-off.
-        var mainAfterTurnOff: Int?
+        var onTurnOff: (World) -> Void = { _ in }
 
         func id(_ index: Int) -> UInt32 { UInt32(index + 6) }
         func uuid(_ index: Int) -> String { String(format: "00000000-0000-0000-0000-%012d", index) }
@@ -125,7 +125,7 @@ final class DisplayTurnOffTests: XCTestCase {
                         self.writes.append("\(enabled ? "on" : "off") \(id)")
                         if !enabled {
                             self.off.insert(self.index(id))
-                            if let main = self.mainAfterTurnOff { self.mainOverride = main }
+                            self.onTurnOff(self)
                         } else if self.returns {
                             self.off.remove(self.index(id))
                             // macOS returns a display beside the others, not as main.
@@ -315,7 +315,7 @@ final class DisplayTurnOffTests: XCTestCase {
     func testTurnOffGivesMainBackWhenMacOSMovesIt() throws {
         let baseline = try world.snapshot()
         let sut = world.controller(directory: directory)
-        world.mainAfterTurnOff = 3
+        world.onTurnOff = { $0.mainOverride = 3 }
         _ = try sut.turnOff(world.identity(2), store: store)
         XCTAssertEqual(world.writes, ["off 8", "origins"])
         XCTAssertEqual(try disconnect(2).state, .off)
@@ -327,6 +327,23 @@ final class DisplayTurnOffTests: XCTestCase {
         XCTAssertEqual(world.writes, ["off 8", "origins", "on 8"])
         XCTAssertEqual(try world.snapshot(), baseline)
         XCTAssertEqual(try store.load().state, .restored)
+    }
+
+    /// Regression (26B123 trial): macOS dropped a Hide mirror when another
+    /// display turned off, and the app refused the Show that reconnects it.
+    func testShowReconnectsAfterMacOSDropsAHideMirror() throws {
+        let sut = world.controller(directory: directory)
+        _ = try sut.mirror(selector: world.uuid(3), source: world.uuid(2), store: store)
+        world.onTurnOff = { $0.mirrors = [:] }
+        XCTAssertThrowsError(try sut.turnOff(world.identity(1), store: store))
+        XCTAssertEqual(try disconnect(1).state, .off)
+
+        let hide = DisplayHideController(store: store, mirror: sut,
+                                         operationLock: { RecoveryStore(url: self.directory.appendingPathComponent("operation")) })
+        XCTAssertEqual(try hide.inspect().turnedOff.first?.canShow, true)
+        _ = try? sut.unmirror(store: store, selector: world.uuid(1))
+        XCTAssertEqual(world.writes, ["off 7", "on 7"])
+        XCTAssertEqual(world.off, [])
     }
 
     func testRelaunchAndSystemReconnectNeverTurnOffAgain() throws {
