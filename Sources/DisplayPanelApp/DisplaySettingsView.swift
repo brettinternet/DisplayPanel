@@ -96,7 +96,7 @@ struct DisplaySettingsView: View {
                 primaryAction(tile)
             }
             let result = model.displayResults[tile.id]
-            if let result, !result.dismissed {
+            if let result, !result.dismissed, !result.succeeded || result.inputMessage != nil {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
                         if !result.succeeded {
