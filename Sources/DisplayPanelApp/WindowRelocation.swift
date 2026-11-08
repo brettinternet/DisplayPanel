@@ -378,7 +378,14 @@ final class SystemWindowMovePermission: WindowMovePermissionProviding {
         return defaults.bool(forKey: previouslyGrantedKey) ? .stale : .missing
     }
 
+    /// The system prompt does nothing while an entry already exists, and a stale
+    /// entry still shows as allowed, so that case opens the list instead.
     func requestFromExplicitUserInteraction() {
+        if state() == .stale,
+           let url = URL(string: "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+            return
+        }
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
     }

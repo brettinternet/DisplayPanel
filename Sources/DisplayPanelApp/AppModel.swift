@@ -1757,7 +1757,7 @@ final class AppModel: ObservableObject {
         case .identityAmbiguous: return "The display’s identity is ambiguous, so DisplayPanel won’t guess."
         case .recoveryRequired: return "Display recovery needs attention. Review it in Displays."
         case .permissionMissing: return "Accessibility permission is required. Choose Allow Accessibility."
-        case .permissionStale: return "Accessibility permission is stale. Allow DisplayPanel again in System Settings → Privacy & Security → Device Control and Data Access."
+        case .permissionStale: return "Accessibility permission is stale. Choose Allow Accessibility, remove DisplayPanel with −, then add it again with +."
         case .topologyChanged: return "Displays changed during the move. Run the Action again."
         case .fullscreen: return "Full-screen windows are skipped."
         case .minimized: return "Minimized windows are skipped."
