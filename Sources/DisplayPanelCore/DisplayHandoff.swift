@@ -458,6 +458,7 @@ struct HandoffController {
     }
     var report: (String) -> Void = { print($0) }
     var reselectPause: () -> Void = { Thread.sleep(forTimeInterval: 4) }
+    var confirmPause: () -> Void = { Thread.sleep(forTimeInterval: 0.5) }
 
     func guardedAway(target: DisplayHideIdentity, source: DisplayHideIdentity, input: UInt8?,
                      wakeExpectation: DisplayHideWakeExpectation? = nil,
@@ -496,10 +497,10 @@ struct HandoffController {
                                 detail: "Input selection was not attempted because Show did not pass journal and display validation.")
         } ?? .notRequested
         do {
-            var inputAttempted = false
+            var returnTarget: RecoveryDisplay?
             var previousInput: UInt8?
             let returnInput: ((RecoveryDisplay) throws -> DisplayInputOutcome.State)? = input == nil ? nil : { target in
-                inputAttempted = true
+                returnTarget = target
                 inputOutcome = selectInput(input, target: target, returning: true, willSelect: { previous, _ in
                     previousInput = previous
                 })
@@ -520,7 +521,9 @@ struct HandoffController {
                 returnInputBeforeRestore: returnInput,
                 relinkInput: relinkInput
             )
-            if let input, !inputAttempted {
+            if let returnTarget {
+                inputOutcome = confirmReturn(inputOutcome, target: returnTarget)
+            } else if let input {
                 inputOutcome = DisplayInputOutcome(
                     state: .notAttempted,
                     requestedInput: input,
@@ -544,10 +547,12 @@ struct HandoffController {
                                 detail: "Input selection was not attempted because Show did not pass journal and display validation.")
         }
         var previousInputs: [String: UInt8] = [:]
+        var returnTargets: [String: RecoveryDisplay] = [:]
         do {
             _ = try mirror.unmirrorAll(store: store, expectedID: expectedJournalID, returnInputBeforeRestore: { target in
                 let key = target.uuid.lowercased()
                 guard let input = inputs[key] else { return .notRequested }
+                returnTargets[key] = target
                 let outcome = selectInput(input, target: target, returning: true, willSelect: { previous, _ in
                     previousInputs[key] = previous
                 })
@@ -562,6 +567,9 @@ struct HandoffController {
                 guard back.state != .failed else { throw RecoveryError.unsafe(back.detail ?? "DDC selection failed") }
                 return true
             })
+            for (key, target) in returnTargets {
+                if let outcome = outcomes[key] { outcomes[key] = confirmReturn(outcome, target: target) }
+            }
             return outcomes
         } catch {
             let inputDetail = outcomes.values.compactMap(\.detail).filter { !$0.hasPrefix("Input selection was not attempted") }
@@ -642,6 +650,27 @@ struct HandoffController {
         guard selectInput(previous, target: target, returning: true).state.mayHaveSwitched else { return nil }
         reselectPause()
         return selectInput(input, target: target, returning: true)
+    }
+
+    /// A monitor can stop answering DDC for seconds after an input switch
+    /// (S2721DGF), so the return's readback times out. Once Show has settled
+    /// and restored, read (never write) to confirm it. A renumbered display
+    /// is matched by UUID and EDID identity.
+    func confirmReturn(_ outcome: DisplayInputOutcome, target: RecoveryDisplay) -> DisplayInputOutcome {
+        guard outcome.state == .unverified, let input = outcome.requestedInput else { return outcome }
+        for attempt in 0..<3 {
+            if attempt > 0 { confirmPause() }
+            guard let records = try? mirror.records() else { continue }
+            let matches = records.filter { $0.uuid?.caseInsensitiveCompare(target.uuid) == .orderedSame }
+            guard matches.count == 1, let record = matches.first, record.vendor == target.vendor,
+                  record.model == target.model, record.serial == target.serial else { return outcome }
+            guard let session = try? open(target.uuid, true), session.display.id == record.id,
+                  let observed = try? DDCInput.current(session.channel) else { continue }
+            guard observed == input else { return outcome }
+            return DisplayInputOutcome(state: .verified, requestedInput: input, observedInput: observed,
+                                       recoveryCommand: outcome.recoveryCommand)
+        }
+        return outcome
     }
 
     func selectInput(_ input: UInt8?, target: RecoveryDisplay, returning: Bool = false,

@@ -41,6 +41,9 @@ At most two writes of the same input (one re-send when readback still shows the
 previous input), no automatic rollback. A verified or unconfirmed Show/back return
 that never relinks is re-selected once through the observed previous input. The switch-back command is
 printed, not saved, so keep the output or use the monitor's input button.
+Some monitors stop answering DDC for seconds after a switch. The app's Show reads
+an unconfirmed return again (no write) once the layout is restored; a read of the
+Mac input confirms it.
 
 Input return can reconnect a display or reinstate mirroring. Show/back waits for
 identity-checked topology with all saved modes available before restoring; see

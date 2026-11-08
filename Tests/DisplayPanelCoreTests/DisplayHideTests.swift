@@ -514,7 +514,7 @@ final class DisplayHideTests: XCTestCase {
                     XCTAssertEqual(inputs, 0, "do not switch an unrelated or unverified monitor")
                 } else { XCTAssertEqual(inputs, 1) }
             }
-            XCTAssertLessThanOrEqual(pauses, 74, "mode/identity settlement is bounded to 15 s; writers are not retried")
+            XCTAssertLessThanOrEqual(pauses, 99, "mode/identity settlement is bounded to 20 s; writers are not retried")
         }
     }
 

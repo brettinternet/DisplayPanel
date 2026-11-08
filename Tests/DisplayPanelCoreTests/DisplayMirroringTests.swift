@@ -1495,21 +1495,24 @@ final class DisplayMirroringTests: XCTestCase {
                 complete: { _, _ in current = mirrored }, cancel: { _ in })
             try sut.away(selector: "8", source: "7", input: nil, store: store)
             let id = try store.load().id
+            var monitorInput: UInt16 = 17
             sut.open = { uuid, allowInactive in
                 let target = try DDC.resolveDisplay(selector: uuid, records: self.records(current), allowInactive: allowInactive)
-                return (target, DDCChannel(getVCP: { _ in (17, 0) }, setVCP: { _, _ in XCTFail("fake selector only") }))
+                return (target, DDCChannel(getVCP: { _ in (monitorInput, 0) }, setVCP: { _, _ in XCTFail("fake selector only") }))
             }
             sut.select = { requested, _, displayID, uuid, originalInput in
                 if selected.count == 1 { capturesBeforeReselect = capturesAfterSwitch }
                 selected.append(requested)
+                monitorInput = UInt16(requested)
                 capturesAfterSwitch = 0
                 if relinks || selected.count == 3 { unpluggedSamples = 3 }
-                let outcome = selected.count == 1 ? returned : .verified
+                // Like S2721DGF, an unconfirmed monitor answers DDC only once Show settles.
+                let outcome = returned
                 return DDCInputSelection(displayID: displayID, uuid: uuid, original: originalInput, requested: requested,
                     observed: outcome == .verified ? requested : nil, outcome: outcome, detail: nil)
             }
             let outcome = try sut.guardedBack(expectedJournalID: id, input: 15, store: store)
-            XCTAssertEqual(outcome.state, .verified)
+            XCTAssertEqual(outcome.state, .verified, "a read once Show settles confirms the return")
             let waited = try XCTUnwrap(capturesBeforeRestore)
             XCTAssertGreaterThanOrEqual(waited, 3 + 16, "restore only after three quiet seconds following the relink")
             XCTAssertLessThan(waited, 26, "relink evidence should end the wait before the quiet floor")
