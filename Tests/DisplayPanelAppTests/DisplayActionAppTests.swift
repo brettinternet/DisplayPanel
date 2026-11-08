@@ -851,6 +851,45 @@ final class DisplayActionAppTests: XCTestCase {
         XCTAssertFalse(model.isBlackoutHidden(sourceUUID))
     }
 
+    /// On 2026-11-08 a later step was refused mid-relink, and writes into that relink preceded a kernel panic.
+    func testLaterStepWaitsForAnEarlierShowsRelinkToSettle() async throws {
+        let defaults = try makeDefaults()
+        let inventory = DisplayRecordsBox(displays)
+        let box = StatusBox(hiddenStatus())
+        let source = try XCTUnwrap(displays.first { $0.uuid == sourceUUID })
+        var events: DisplayReconfigurationEvents?
+        let model = AppModel(
+            defaults: defaults, displayProvider: { inventory.value }, idleSecondsProvider: { nil },
+            isDisplayMirrored: { _ in false }, inspectHandoff: { box.value },
+            showDisplay: { _, input in
+                box.value = self.noneStatus()
+                // Showing one monitor can drop another while it relinks.
+                inventory.value.removeAll { $0.uuid == self.sourceUUID }
+                events?.receive(display: source.id, flags: .removeFlag)
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                    inventory.value.append(source)
+                    events?.receive(display: source.id, flags: .addFlag)
+                }
+                return DisplayInputOutcome(state: .verified, requestedInput: input, observedInput: input)
+            },
+            coverDisplays: { _ in [] },
+            quiesceProtection: { $0(true, nil) },
+            displayWakeSettleDelay: 0.1
+        )
+        events = model.displayReconfigurationEvents
+        await settleQuiescence(model)
+        let action = DisplayAction(name: "Show then black out", steps: [
+            DisplayActionStep(target: DisplayIdentitySnapshot(try XCTUnwrap(displays.first { $0.uuid == targetUUID })), effect: .show),
+            DisplayActionStep(target: DisplayIdentitySnapshot(source), effect: .blackOut)
+        ])
+        try model.saveDisplayAction(action)
+
+        let result = await run(model, id: action.id)
+        XCTAssertEqual(result.steps?.map(\.outcome), [.done, .done], result.error ?? "missing Action error")
+        XCTAssertTrue(model.isBlackoutHidden(sourceUUID))
+    }
+
     func testActionLeaseBlocksCompetingEntryPointsAndKeepsRequestsStaleAfterFinish() async throws {
         let defaults = try makeDefaults()
         var delayedQuiescence: ((Bool, String?) -> Void)?

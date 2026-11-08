@@ -4334,6 +4334,7 @@ final class AppModel: ObservableObject {
                 ),
                 steps: stepResults
             )
+            displayHideLogger.notice("action=\(id.uuidString, privacy: .public) outcome=\(outcome.rawValue, privacy: .public) step=\(requestedStep + 1) summary=\(message, privacy: .public)")
             if runningDisplayAction?.id != id {
                 displayActionResults[id] = response
                 lastDisplayActionResultID = action?.id
@@ -4610,6 +4611,7 @@ final class AppModel: ObservableObject {
             }) {
                 self.protectAfterFinalShow()
             }
+            displayHideLogger.notice("action=\(id.uuidString, privacy: .public) outcome=\(aggregate.rawValue, privacy: .public) summary=\(summary, privacy: .public)")
             self.displayActionResults[id] = response
             self.lastDisplayActionResultID = id
             self.onStatusChange?()
@@ -4633,25 +4635,42 @@ final class AppModel: ObservableObject {
             }
         }
 
-        func runStep(_ offset: Int) {
+        func interrupt(_ offset: Int, _ message: String) {
+            stepResults.append(AppControlActionStepResult(index: offset + 1,
+                targetUUID: action.steps[offset].target?.uuid ?? "",
+                effect: action.steps[offset].effect.rawValue, outcome: .refused,
+                desktopSummary: "Step \(offset + 1): \(message)",
+                windowMove: action.steps[offset].effect == .moveWindows
+                    ? AppControlWindowMoveResult(refusalReason: .cancelled) : nil))
+            stoppingOutcome = .refused
+            stoppingAtIndex = offset + 1
+            appendNotRun(from: offset + 1)
+            finishRun()
+        }
+
+        func runStep(_ offset: Int, settled: Bool = false) {
             guard offset < action.steps.count else { finishRun(); return }
             guard self.runningDisplayAction?.id == id else { return }
             self.runningDisplayAction = AppControlRunningAction(
                 id: id, name: action.name, currentStep: offset + 1, totalSteps: action.steps.count
             )
             self.onStatusChange?()
+            // An earlier step's relinks can briefly remove or renumber this
+            // step's monitor, so check it only once displays stop changing.
+            if !settled, self.displayQuietRemaining > 0 {
+                Task { @MainActor in
+                    do {
+                        try await self.waitForQuietDisplays()
+                        runStep(offset, settled: true)
+                    } catch {
+                        guard self.runningDisplayAction?.id == id else { return }
+                        interrupt(offset, error.localizedDescription)
+                    }
+                }
+                return
+            }
             if self.runningActionInterrupted || self.displayLifecycleTransitioning {
-                let uuid = action.steps[offset].target?.uuid ?? ""
-                let message = "Step \(offset + 1): Displays are sleeping or changing; the run was interrupted."
-                stepResults.append(AppControlActionStepResult(index: offset + 1, targetUUID: uuid,
-                    effect: action.steps[offset].effect.rawValue, outcome: .refused,
-                    desktopSummary: message,
-                    windowMove: action.steps[offset].effect == .moveWindows
-                        ? AppControlWindowMoveResult(refusalReason: .cancelled) : nil))
-                stoppingOutcome = .refused
-                stoppingAtIndex = offset + 1
-                appendNotRun(from: offset + 1)
-                finishRun()
+                interrupt(offset, "Displays are sleeping or changing; the run was interrupted.")
                 return
             }
 
@@ -6774,16 +6793,27 @@ final class AppModel: ObservableObject {
     /// preceded a kernel panic. Each Hide, Show, Turn off and mode write starts
     /// only after macOS reports no display change for two settle intervals, and
     /// gives up after 15 seconds of continuous change. Callers run this after
-    /// claiming `hideOperation` and before validating their request.
+    /// claiming `hideOperation` and before validating their request; Action
+    /// steps run it before their checks.
     private func waitForQuietDisplays() async throws {
-        let quietPeriod = 2 * displayWakeSettleDelay
-        let deadline = ProcessInfo.processInfo.systemUptime + 15
-        while case let wait = quietPeriod - displayReconfigurationEvents.secondsSinceLastChange(), wait > 0 {
-            guard ProcessInfo.processInfo.systemUptime + wait <= deadline else {
+        let started = ProcessInfo.processInfo.systemUptime
+        var waited = false
+        while case let wait = displayQuietRemaining, wait > 0 {
+            guard ProcessInfo.processInfo.systemUptime + wait <= started + 15 else {
+                displayHideLogger.error("quiet-wait refused; displays changed for 15s")
                 throw DisplayHideError.blocked("Displays are still changing. Try again once they settle.")
             }
+            waited = true
             try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
         }
+        if waited {
+            displayHideLogger.notice("quiet-wait waited=\(ProcessInfo.processInfo.systemUptime - started, format: .fixed(precision: 1))s")
+        }
+    }
+
+    /// Seconds until displays count as quiet; zero or less once they are.
+    private var displayQuietRemaining: TimeInterval {
+        2 * displayWakeSettleDelay - displayReconfigurationEvents.secondsSinceLastChange()
     }
 
     /// Holds `event` until the running Hide or Show write finishes. Returns false when none is running.
