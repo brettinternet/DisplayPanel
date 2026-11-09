@@ -2,6 +2,12 @@ import Foundation
 
 /// Layout for human CLI output; `--json` stays the machine interface.
 public enum CLIText {
+    static func jsonData<T: Encodable>(_ value: T) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return try encoder.encode(value)
+    }
+
     /// Left-aligned columns two spaces apart, without trailing spaces.
     public static func table(_ rows: [[String]], indent: String = "") -> String {
         var widths: [Int] = []

@@ -134,8 +134,7 @@ public enum Probe {
 
     public static func printReport(_ report: ProbeReport, json: Bool) throws {
         if json {
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            FileHandle.standardOutput.write(try encoder.encode(report)); print()
+            FileHandle.standardOutput.write(try CLIText.jsonData(report)); print()
         } else {
             print("macOS \(report.os.replacingOccurrences(of: "Version ", with: "")) · \(report.architecture)\n")
             print(DisplayInventory.text(report.displays) + "\n")
