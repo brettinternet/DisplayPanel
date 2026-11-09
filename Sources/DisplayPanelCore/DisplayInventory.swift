@@ -78,8 +78,7 @@ public enum DisplayInventory {
 
     public static func printRecords(_ records: [DisplayRecord], json: Bool) throws {
         if json {
-            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            FileHandle.standardOutput.write(try encoder.encode(records))
+            FileHandle.standardOutput.write(try CLIText.jsonData(records))
             print()
         } else {
             print(text(records))
